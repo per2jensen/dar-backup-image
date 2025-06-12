@@ -1,4 +1,4 @@
-# 📦 dar-backup
+# 📦 dar-backup image for container backups and more
 
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
 
@@ -6,17 +6,12 @@ This is early, the `dar-backup` images are not tested well, do not trust it too 
 
 This image includes:
 
-    dar
-
-    par2
-
-    python3
-
-    dar-backup Python tooling
-
-    Clean, minimal Ubuntu 24.04 base (~170 MB)
-
-    CIS-aligned permissions and user-drop via gosu
+- dar
+- par2
+- python3
+- [dar-backup](https://github.com/per2jensen/dar-backup) (my `dar` Python based wrapper)
+- Clean, minimal Ubuntu 24.04 base (~170 MB)
+- CIS-aligned permissions and user-drop via gosu
 
 ## 🔧 Image Tags
 
@@ -32,6 +27,15 @@ This image includes:
 | `/backup`    | Destination archive path                         |
 | `/restore`   | Optional restore target                          |
 | `/backup.d`  | Contains backup definition files (`.dar` format) |
+
+## 📦 Container Availability on GHCR
+
+The dar-backup Docker image is now published on the GitHub Container Registry (GHCR). You can pull the latest pre-release version tagged 0.5.0-alpha using:
+
+
+docker pull ghcr.io/per2jensen/dar-backup:0.5.0-alpha
+
+This image is based on Ubuntu 24.04 and includes the dar-backup CLI tool along with required dependencies like dar, par2, and gosu. It's ready for use in CI pipelines or local backup workflows. See the usage examples below for getting started quickly with test data and backup definitions.
 
 ## 🚀 Usage Example
 

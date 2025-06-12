@@ -6,9 +6,10 @@
 
 FROM dar-backup-base:24.04
 
+ARG VERSION=0.0.0
 LABEL org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
       org.opencontainers.image.description="Container for DAR-based backups using dar-backup" \
-      org.opencontainers.image.version="0.5.0-alpha"
+      org.opencontainers.image.version="${VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
