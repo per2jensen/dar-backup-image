@@ -1,0 +1,51 @@
+# Ignore version control
+.git
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Editor/IDE files
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+*.log
+*.sublime-project
+*.sublime-workspace
+.vscode/
+.idea/
+
+# OS-generated
+.DS_Store
+Thumbs.db
+
+# Archives or temporary test files
+*.tar
+*.tar.gz
+*.zip
+*.img
+*.iso
+
+# Docker stuff
+Dockerfile-*~
+docker-compose.yml~
+
+# Build/test output
+test-output/
+build/
+dist/
+.eggs/
+*.egg-info/
+.eggs/
+*.egg
+.env
+
+# CI artifacts (if any)
+coverage.xml
+*.coverage
+.cache/
+
