@@ -52,7 +52,7 @@ export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=/tmp/test-backups
 export RESTORE_DIR=/tmp/test-restore
 export BACKUP_D_DIR=/tmp/test-backup.d
-export IMAGE=dar-backup:0.5.0-alpha
+export IMAGE=ghcr.io/per2jensen/dar-backup:0.5.0-alpha
 
 docker run --rm \
   -e RUN_AS_UID=1000 \
