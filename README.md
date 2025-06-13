@@ -9,15 +9,24 @@ This image includes:
 - dar
 - par2
 - python3
+- gosu
 - [dar-backup](https://github.com/per2jensen/dar-backup) (my `dar` Python based wrapper)
 - Clean, minimal Ubuntu 24.04 base (~170 MB)
 - CIS-aligned permissions and user-drop via gosu
 
 ## 🔧 Image Tags
 
-| Tag           | Base OS      | dar Version | Notes              |
-| ---------     | ------------ | ----------- | ------------------ |
-| `0.5.0-alpha` | Ubuntu 24.04 | 2.7.13      | Latest w/ bugfixes |
+This command is run against the image to verify the dar-backup version:
+
+```bash
+IMAGE=dar-backup:0.5.1-alpha
+docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v
+```
+
+| Tag           | Base OS      | dar-backup       |dar Version | Notes      |
+| ---------     | ------------ | ---------------- |------------|------------|
+| `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.7.2 | 2.7.13     |            |
+| `0.5.1-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |            |
 
 ## 🧰 Volumes / Runtime Configuration
 
@@ -31,7 +40,6 @@ This image includes:
 ## 📦 Container Availability on GHCR
 
 The dar-backup Docker image is now published on the GitHub Container Registry (GHCR). You can pull the latest pre-release version tagged 0.5.0-alpha using:
-
 
 docker pull ghcr.io/per2jensen/dar-backup:0.5.0-alpha
 
@@ -62,4 +70,54 @@ docker run --rm \
   -v "$BACKUP_D_DIR":/backup.d \
   "$IMAGE" \
   -F --log-stdout --config /etc/dar-backup/dar-backup.conf
+```
+
+## Inspect program versions in an image
+
+### Local images or Docker ones
+
+```bash
+IMAGE=dar-backup:0.5.1-alpha
+
+# dar-backup version
+docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v|grep -P "dar-backup +\d+.\d+.\d+"
+
+# `dar` version
+docker run --rm --entrypoint dar "$IMAGE" --version 2>/dev/null|grep "dar version"
+
+# `par2` version
+docker run --rm --entrypoint par2 "$IMAGE" --version
+```
+
+### Github Container Registry images
+
+The only change to the above is the IMAGE specification.
+
+```bash
+IMAGE=ghcr.io/per2jensen/dar-backup:0.5.1-alpha
+
+# dar-backup version
+docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v|grep -P "dar-backup +\d+.\d+.\d+"
+
+# `dar` version
+docker run --rm --entrypoint dar "$IMAGE" --version 2>/dev/null|grep "dar version"
+
+# `par2` version
+docker run --rm --entrypoint par2 "$IMAGE" --version
+```
+
+Or get everythin in one go in a more verbose way.
+
+```bash
+IMAGE=ghcr.io/per2jensen/dar-backup:0.5.1-alpha
+docker run --rm --entrypoint "" "$IMAGE" bash -c "dar-backup -v; dar --version; par2 --version"
+```
+
+### Check LABELS on a Github Container Registry image
+
+This example uses `jq` (on Ubuntu, install this way "sudo apt install jq"))
+
+```bash
+IMAGE=ghcr.io/per2jensen/dar-backup:0.5.1-alpha
+docker inspect "$IMAGE" --format '{{json .Config.Labels}}' | jq
 ```
