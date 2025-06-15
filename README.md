@@ -1,8 +1,8 @@
 # 📦 dar-backup image for container backups and more
 
-[CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/test.yml/badge.svg)
-[![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)]
-[![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)]
+![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/test.yml/badge.svg)
+[![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/v2/doc/badges/badge_clones.json)](https://github.com/per2jensen/dar-backup-image/blob/main/v2/doc/weekly_clones.png)
+[![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/v2/doc/badges/milestone_badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/v2/doc/weekly_clones.png)
 
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
 
