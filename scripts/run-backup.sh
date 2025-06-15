@@ -5,7 +5,15 @@ set -euo pipefail
 
 # === Config ===
 IMAGE="dar-backup:dev"
-BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test"
+
+# Allow override of working directory for testing (e.g. from Makefile)
+WORKDIR="${WORKDIR:-}"
+if [[ -z "$WORKDIR" ]]; then
+  # Use the directory of the script itself as fallback
+  WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+BASE_DIR="$WORKDIR"
 
 export RUN_AS_UID=$(id -u)
 export DAR_BACKUP_DIR="$BASE_DIR/backups"

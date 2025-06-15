@@ -1,25 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-#  Usage examples:
-#  ---------------
-#
-#  When developing, you can build a development image with:
-#  make dev-clean dev
-#
-#  When releasing
-#  export DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1; make final; make login, make push
-#
+# Usage examples:
+# ---------------
+# make dev-clean dev
+# make DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1 final
+# make DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1 release
+
 # ================================
 # Configuration
 # ================================
 
-DAR_BACKUP_IMAGE_VERSION ?= 0.5.1-alpha
 BASE_IMAGE_NAME = dar-backup-base
 FINAL_IMAGE_NAME = dar-backup
-BASE_TAG = $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION)
-FINAL_TAG = $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION)
 GHCR_REPO = ghcr.io/per2jensen/dar-backup
-GHCR_TAG = $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION)
 BASE_LATEST_TAG = $(BASE_IMAGE_NAME):24.04
 
 DOCKER ?= docker
@@ -28,54 +21,82 @@ DOCKER ?= docker
 # Targets
 # ================================
 
-.PHONY: all base final clean push tag login
+.PHONY: all base final release clean push tag login dev dev-clean labels help \
+	check_version ghcr-tags ghcr-list-ids ghcr-delete-id test
 
-all: base final
 
-base:
-	@echo "Building base image: $(BASE_TAG) ..."
-	$(DOCKER) build --pull -f Dockerfile-base-image --build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) -t $(BASE_TAG) .
-	$(DOCKER) tag $(BASE_TAG) $(BASE_LATEST_TAG)
+check_version:
+	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
+		echo "❌ ERROR: You must set DAR_BACKUP_IMAGE_VERSION explicitly."; \
+		echo "   Example: make DAR_BACKUP_IMAGE_VERSION=1.0.0 final"; \
+		exit 1; \
+	fi
 
-final: base
+
+base: check_version
+	@echo "Building base image..."
+	$(DOCKER) build --pull -f Dockerfile-base-image \
+		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
+		-t $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) .
+	$(DOCKER) tag $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) $(BASE_LATEST_TAG)
+
+final: check_version base
+	$(eval FINAL_TAG := $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION))
+	$(eval GHCR_TAG := $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION))
 	@echo "Building final image: $(FINAL_TAG) and $(GHCR_TAG) ..."
-	$(DOCKER) build -f Dockerfile-dar-backup --build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
+	$(DOCKER) build -f Dockerfile-dar-backup \
+		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
 		-t $(FINAL_TAG) \
 		-t $(GHCR_TAG) .
 
-
-# ================================
-# Release (build + login + push)
-# ================================
-
-.PHONY: release
-
-release: final login push
-	@echo "✅ Release complete for: $(GHCR_TAG)"
+release: check_version final login push
+	@echo "✅ Release complete for: ghcr.io/per2jensen/dar-backup:$(DAR_BACKUP_IMAGE_VERSION)"
 
 
+
+test:
+	@echo "Running dar-backup FULL + DIFF + INCR test in a temp directory..."
+	@TMPDIR=$$(mktemp -d /tmp/dar-backup-test-XXXXXX) && \
+	TEST_SCRIPT=$${TEST_SCRIPT:-scripts/run-backup.sh} && \
+	SCRIPT_NAME=$$(basename $$TEST_SCRIPT) && \
+	cp $$TEST_SCRIPT $$TMPDIR/$$SCRIPT_NAME && \
+	chmod +x $$TMPDIR/$$SCRIPT_NAME && \
+	cd $$TMPDIR && \
+	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t FULL  || { echo "❌ FULL backup failed"; exit 1; }  && \
+	echo "first_diff_file" > $$TMPDIR/data/diff.txt && \
+	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t DIFF  || { echo "❌ DIFF backup failed"; exit 1; }  && \
+	echo "incr_file" > $$TMPDIR/data/incr.txt && \
+	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t INCR  || { echo "❌ INCR backup failed"; exit 1; } && \
+	echo "✅ FULL + DIFF + INCR test completed in $$TMPDIR"
+
+
+# test:
+# 	@echo "Running dar-backup test in a temp directory..."
+# 	@TEST_SCRIPT=scripts/run-backup.sh; \
+# 	TMPDIR=$$(mktemp -d /tmp/dar-backup-test-XXXXXX); \
+# 	cp $$TEST_SCRIPT $$TMPDIR/ && \
+# 	cd $$TMPDIR && \
+# 	chmod +x run-backup.sh && \
+# 	./run-backup.sh -t FULL && \
+# 	echo "✅ Test completed in $$TMPDIR"
 
 
 clean:
-	-$(DOCKER) rmi -f $(BASE_TAG) || true
+	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) || true
 	-$(DOCKER) rmi -f $(BASE_LATEST_TAG) || true
-	-$(DOCKER) rmi -f $(FINAL_TAG) || true
-	-$(DOCKER) rmi -f $(GHCR_TAG) || true
+	-$(DOCKER) rmi -f $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION) || true
+	-$(DOCKER) rmi -f $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION) || true
+
+push: check_version
+	@echo "Push ghcr.io/per2jensen/dar-backup:$(DAR_BACKUP_IMAGE_VERSION) to GHCR..."
+	$(DOCKER) push ghcr.io/per2jensen/dar-backup:$(DAR_BACKUP_IMAGE_VERSION)
 
 
-
-push:
-# Not uploading to Docker Hub yet
-#	$(DOCKER) push $(FINAL_TAG)
-	@echo "Push $(GHCR_TAG) to GitHub Container Registry (GHCR.io)..."
-	$(DOCKER) push $(GHCR_TAG)
 
 
 # ================================
-# Dev build (overwrite dar-backup:dev)
+# Dev build
 # ================================
-
-.PHONY: dev
 
 dev:
 	@echo "Building development image: dar-backup:dev ..."
@@ -83,20 +104,20 @@ dev:
 		--build-arg VERSION=dev \
 		-t dar-backup:dev .
 
-
 dev-clean:
 	@echo "Removing dev image..."
 	-$(DOCKER) rmi -f dar-backup:dev || true
 
-
 # ================================
-# Labels (pretty-print)
+# Labels
 # ================================
 
 labels:
-	@echo "Labels for $(FINAL_TAG):"
-	@docker inspect $(FINAL_TAG) --format '{{json .Config.Labels}}' | jq
-
+	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
+		echo "❌ ERROR: DAR_BACKUP_IMAGE_VERSION is not set."; \
+	else \
+		docker inspect $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION) --format '{{json .Config.Labels}}' | jq; \
+	fi
 
 # ================================
 # GHCR Login
@@ -111,7 +132,6 @@ login:
 	fi
 	echo "$$CR_PAT" | $(DOCKER) login ghcr.io -u per2jensen --password-stdin
 
-
 # ================================
 # GHCR Tags Listing
 # ================================
@@ -119,21 +139,15 @@ login:
 ghcr-tags:
 	@if [ -z "$$CR_PAT" ]; then \
 		echo "❌ ERROR: Please export your GitHub token as CR_PAT"; \
-		echo "   export CR_PAT=your_token"; \
 		exit 1; \
 	fi
 	curl -s -H "Authorization: Bearer $$CR_PAT" \
 	     -H "Accept: application/vnd.github+json" \
 	     "https://api.github.com/users/per2jensen/packages/container/dar-backup/versions" | jq
 
-
-# ================================
-# List GHCR version IDs and tags
-# ================================
 ghcr-list-ids:
 	@if [ -z "$$CR_PAT" ]; then \
 		echo "❌ ERROR: Please export your GitHub token as CR_PAT"; \
-		echo "   export CR_PAT=your_token"; \
 		exit 1; \
 	fi
 	curl -s -H "Authorization: Bearer $$CR_PAT" \
@@ -141,10 +155,6 @@ ghcr-list-ids:
 	     "https://api.github.com/users/per2jensen/packages/container/dar-backup/versions" | \
 	     jq -r '.[] | "ID: \(.id)  Tags: \(.metadata.container.tags)"'
 
-
-# ================================
-# Delete GHCR version by ID
-# ================================
 ghcr-delete-id:
 	@if [ -z "$$ID" ]; then \
 		echo "❌ ERROR: Please provide ID. Usage: make ghcr-delete-id ID=12345678"; \
@@ -158,18 +168,19 @@ ghcr-delete-id:
 	     -H "Accept: application/vnd.github+json" \
 	     "https://api.github.com/users/per2jensen/packages/container/dar-backup/versions/$$ID"
 
-
-
 # ================================
-# Convenience
+# Tag preview
 # ================================
 
 tag:
-	@echo "Base Image (versioned):  $(BASE_TAG)"
-	@echo "Base Image (latest):     $(BASE_LATEST_TAG)"
-	@echo "Final Image:             $(FINAL_TAG)"
-	@echo "GHCR Image:              $(GHCR_TAG)"
-
+	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
+		echo "❌ DAR_BACKUP_IMAGE_VERSION is not set"; \
+	else \
+		echo "Base Image (versioned):  $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION)"; \
+		echo "Base Image (latest):     $(BASE_LATEST_TAG)"; \
+		echo "Final Image:             $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION)"; \
+		echo "GHCR Image:              $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION)"; \
+	fi
 
 # ================================
 # Help
