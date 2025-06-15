@@ -1,11 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 #  Usage examples:
 #  ---------------
 #
-#  make final
-#   or
-#  export DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1; make final
-#   or
-#  make DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1 final
+#  When developing, you can build a development image with:
+#  make dev-clean dev
+#
+#  When releasing
+#  export DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1; make final; make login, make push
 #
 # ================================
 # Configuration
@@ -32,14 +34,27 @@ all: base final
 
 base:
 	@echo "Building base image: $(BASE_TAG) ..."
-	$(DOCKER) build -f Dockerfile-base-image --build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) -t $(BASE_TAG) .
+	$(DOCKER) build --pull -f Dockerfile-base-image --build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) -t $(BASE_TAG) .
 	$(DOCKER) tag $(BASE_TAG) $(BASE_LATEST_TAG)
 
-final:
+final: base
 	@echo "Building final image: $(FINAL_TAG) and $(GHCR_TAG) ..."
 	$(DOCKER) build -f Dockerfile-dar-backup --build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
 		-t $(FINAL_TAG) \
 		-t $(GHCR_TAG) .
+
+
+# ================================
+# Release (build + login + push)
+# ================================
+
+.PHONY: release
+
+release: final login push
+	@echo "✅ Release complete for: $(GHCR_TAG)"
+
+
+
 
 clean:
 	-$(DOCKER) rmi -f $(BASE_TAG) || true
@@ -47,11 +62,31 @@ clean:
 	-$(DOCKER) rmi -f $(FINAL_TAG) || true
 	-$(DOCKER) rmi -f $(GHCR_TAG) || true
 
+
+
 push:
 # Not uploading to Docker Hub yet
 #	$(DOCKER) push $(FINAL_TAG)
 	@echo "Push $(GHCR_TAG) to GitHub Container Registry (GHCR.io)..."
 	$(DOCKER) push $(GHCR_TAG)
+
+
+# ================================
+# Dev build (overwrite dar-backup:dev)
+# ================================
+
+.PHONY: dev
+
+dev:
+	@echo "Building development image: dar-backup:dev ..."
+	$(DOCKER) build -f Dockerfile-dar-backup \
+		--build-arg VERSION=dev \
+		-t dar-backup:dev .
+
+
+dev-clean:
+	@echo "Removing dev image..."
+	-$(DOCKER) rmi -f dar-backup:dev || true
 
 
 # ================================

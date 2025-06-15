@@ -38,6 +38,8 @@ docker-compose.yml~
 test-output/
 build/
 dist/
+scripts/test/*
+test/
 .eggs/
 *.egg-info/
 .eggs/

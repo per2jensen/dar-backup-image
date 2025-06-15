@@ -1,7 +1,7 @@
-# dar-backup  
-#  
-#  How to build:
-#  sudo docker build -f Dockerfile-dar-backup -t dar-backup:0.5.0- .
+# dar-backup
+#
+# Build with:
+#   sudo docker build -f Dockerfile-dar-backup -t dar-backup:0.5.0- .
 #
 
 FROM dar-backup-base:24.04
@@ -13,21 +13,24 @@ LABEL org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install your PyPI package globally
-RUN pip3 install dar-backup  --break-system-packages
+# Install the dar-backup PyPI package
+RUN pip3 install dar-backup --break-system-packages
 
-# # Copy config and default backup definitions (optional)
+# Copy the default configuration
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf
 
-# # Default data paths (can be overridden at runtime)
-ENV DAR_BACKUP_CONFIG=/etc/dar-backup/dar-backup.conf
-ENV DAR_BACKUP_DIR=/backups
-ENV BACKUP_D_DIR=/backup.d
+# Default environment variables (can be overridden at runtime)
+ENV DAR_BACKUP_CONFIG=/etc/dar-backup/dar-backup.conf \
+    DAR_BACKUP_DIR=/backups \
+    DAR_BACKUP_D_DIR=/backup.d \
+    DAR_BACKUP_RESTORE_DIR=/restore \
+    DAR_BACKUP_DATA_DIR=/data
 
 # Copy the entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# # Entrypoint
+# Entrypoint and default arguments
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["--full-backup", "--verbose", "--log-stdout", "--config", "/etc/dar-backup/dar-backup.conf"]
+CMD ["--verbose", "--log-stdout"]
+

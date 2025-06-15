@@ -1,4 +1,6 @@
 #! /bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 set -euo pipefail
 
 # Configuration
@@ -54,7 +56,7 @@ echo
 
 
 # Run the container
-sudo docker run --rm \
+docker run --rm \
   -e RUN_AS_UID=1000 \
   -v "$DATA_DIR":/data \
   -v "$BACKUP_DIR":/backup \

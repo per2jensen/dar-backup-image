@@ -14,6 +14,33 @@ This image includes:
 - Clean, minimal Ubuntu 24.04 base (~170 MB)
 - CIS-aligned permissions and user-drop via gosu
 
+## License
+
+This repo is licensed under the GPL 3.0 License
+
+If you are not familiar with the license take a look at the included LICENSE file in the repository.
+
+## How to test
+
+```bash
+# make new development image
+make dev
+
+rm -fr scripts/test/
+
+scripts/run-backup.sh -t FULL
+
+# === Sample data ===
+echo "Sample file DIFF" > "$DAR_BACKUP_DATA_DIR/hello-DIFF.txt"
+
+scripts/run-backup.sh -t DIFF
+
+# === Sample data ===
+echo "Sample file INCR" > "$DAR_BACKUP_DATA_DIR/hello-INCR.txt"
+
+scripts/run-backup.sh -t INCR
+```
+
 ## 🔧 Image Tags
 
 This command is run against the image to verify the dar-backup version:
