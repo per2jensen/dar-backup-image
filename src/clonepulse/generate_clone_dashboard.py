@@ -117,6 +117,11 @@ def main():
     # Safe to build DataFrame
     df = pd.DataFrame(validated_rows)
 
+    if df.shape[0] < 7:
+        print(f"⚠️ Not enough daily data to generate a weekly chart (only {df.shape[0]} days). At least 7 days required.")
+        return
+
+ 
 
     # --- Create DataFrame ---
     df = pd.DataFrame(clones_data["daily"])
@@ -137,6 +142,11 @@ def main():
 
     # --- Aggregate weekly ---
     weekly_data = df.groupby('week_start')[['count', 'uniques']].sum().reset_index()
+
+   # Later, after weekly_data is created
+    if weekly_data.empty:
+        print("⚠️ Weekly data is empty after aggregation. Nothing to plot.")
+        return
 
 
     # Remove the current (possibly incomplete) week
