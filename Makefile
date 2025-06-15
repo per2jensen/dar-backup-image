@@ -21,7 +21,7 @@ DOCKER ?= docker
 # Targets
 # ================================
 
-.PHONY: all base final release clean push tag login dev dev-clean labels help \
+.PHONY: all all-dev base final release clean push tag login dev dev-clean labels help \
 	check_version ghcr-tags ghcr-list-ids ghcr-delete-id test
 
 
@@ -69,18 +69,6 @@ test:
 	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t INCR  || { echo "❌ INCR backup failed"; exit 1; } && \
 	echo "✅ FULL + DIFF + INCR test completed in $$TMPDIR"
 
-
-# test:
-# 	@echo "Running dar-backup test in a temp directory..."
-# 	@TEST_SCRIPT=scripts/run-backup.sh; \
-# 	TMPDIR=$$(mktemp -d /tmp/dar-backup-test-XXXXXX); \
-# 	cp $$TEST_SCRIPT $$TMPDIR/ && \
-# 	cd $$TMPDIR && \
-# 	chmod +x run-backup.sh && \
-# 	./run-backup.sh -t FULL && \
-# 	echo "✅ Test completed in $$TMPDIR"
-
-
 clean:
 	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) || true
 	-$(DOCKER) rmi -f $(BASE_LATEST_TAG) || true
@@ -98,6 +86,9 @@ push: check_version
 # Dev build
 # ================================
 
+all-dev:
+	@$(MAKE) DAR_BACKUP_IMAGE_VERSION=dev base
+	@$(MAKE) dev
 dev:
 	@echo "Building development image: dar-backup:dev ..."
 	$(DOCKER) build -f Dockerfile-dar-backup \
