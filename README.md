@@ -24,21 +24,10 @@ If you are not familiar with the license take a look at the included LICENSE fil
 
 ```bash
 # make new development image
-make dev
+make all-dev
 
-rm -fr scripts/test/
-
-scripts/run-backup.sh -t FULL
-
-# === Sample data ===
-echo "Sample file DIFF" > "$DAR_BACKUP_DATA_DIR/hello-DIFF.txt"
-
-scripts/run-backup.sh -t DIFF
-
-# === Sample data ===
-echo "Sample file INCR" > "$DAR_BACKUP_DATA_DIR/hello-INCR.txt"
-
-scripts/run-backup.sh -t INCR
+# run FULL, DIFF and INCR backups
+make test
 ```
 
 ## 🔧 Image Tags
