@@ -22,7 +22,8 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build base ubuntu 24.04 image, and then the dev image
-        run: make all-dev
-
+        run: |
+          make DAR_BACKUP_IMAGE_VERSION=dev base
+          make DAR_BACKUP_IMAGE_VERSION=dev dev
       - name: Run integration tests
         run: make test
