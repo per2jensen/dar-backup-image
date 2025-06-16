@@ -1,8 +1,8 @@
 # 📦 dar-backup image for container backups and more
 
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/test.yml/badge.svg)
-[![# clones](https://img.shields.io/endpoint?url=https://github.com/per2jensen/dar-backup-image/blob/main/badges/badge_clones.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
-[![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/blob/main/badges/milestone_badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
+[![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
+[![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
 
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
 
@@ -36,17 +36,19 @@ make test
 
 ## 🔧 Image Tags
 
-This command is run against the image to verify the dar-backup version:
+These images have been put on [DockerHub](https://hub.docker.com/r/per2jensen/dar-backup/tags)
+
+| Tag           | Base OS      | dar-backup       |dar Version | URL        |
+| ---------     | ------------ | ---------------- |------------|------------|
+| `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |            |
+
+This command can be run against an image to verify the dar-backup version:
 
 ```bash
-IMAGE=dar-backup:0.5.1-alpha
+#example
+IMAGE=dar-backup:0.5.0-alpha
 docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v
 ```
-
-| Tag           | Base OS      | dar-backup       |dar Version | Notes      |
-| ---------     | ------------ | ---------------- |------------|------------|
-| `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.7.2 | 2.7.13     |            |
-| `0.5.1-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |            |
 
 ## 🧰 Volumes / Runtime Configuration
 
@@ -80,7 +82,7 @@ export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=/tmp/test-backups
 export RESTORE_DIR=/tmp/test-restore
 export BACKUP_D_DIR=/tmp/test-backup.d
-export IMAGE=ghcr.io/per2jensen/dar-backup:0.5.0-alpha
+export IMAGE=per2jensen/dar-backup:0.5.0-alpha
 
 docker run --rm \
   -e RUN_AS_UID=1000 \
@@ -97,7 +99,7 @@ docker run --rm \
 ### Local images or Docker ones
 
 ```bash
-IMAGE=dar-backup:0.5.1-alpha
+IMAGE=per2jensen/dar-backup:0.5.0-alpha
 
 # dar-backup version
 docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v|grep -P "dar-backup +\d+.\d+.\d+"
@@ -109,27 +111,10 @@ docker run --rm --entrypoint dar "$IMAGE" --version 2>/dev/null|grep "dar versio
 docker run --rm --entrypoint par2 "$IMAGE" --version
 ```
 
-### Github Container Registry images
-
-The only change to the above is the IMAGE specification.
+Or get everything in one go in a more verbose way.
 
 ```bash
-IMAGE=ghcr.io/per2jensen/dar-backup:0.5.1-alpha
-
-# dar-backup version
-docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v|grep -P "dar-backup +\d+.\d+.\d+"
-
-# `dar` version
-docker run --rm --entrypoint dar "$IMAGE" --version 2>/dev/null|grep "dar version"
-
-# `par2` version
-docker run --rm --entrypoint par2 "$IMAGE" --version
-```
-
-Or get everythin in one go in a more verbose way.
-
-```bash
-IMAGE=ghcr.io/per2jensen/dar-backup:0.5.1-alpha
+IMAGE=per2jensen/dar-backup:0.5.0-alpha
 docker run --rm --entrypoint "" "$IMAGE" bash -c "dar-backup -v; dar --version; par2 --version"
 ```
 
@@ -138,6 +123,6 @@ docker run --rm --entrypoint "" "$IMAGE" bash -c "dar-backup -v; dar --version; 
 This example uses `jq` (on Ubuntu, install this way "sudo apt install jq"))
 
 ```bash
-IMAGE=ghcr.io/per2jensen/dar-backup:0.5.1-alpha
+IMAGE=per2jensen/dar-backup:0.5.0-alpha
 docker inspect "$IMAGE" --format '{{json .Config.Labels}}' | jq
 ```

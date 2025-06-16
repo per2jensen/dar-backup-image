@@ -11,8 +11,8 @@
 # ================================
 
 BASE_IMAGE_NAME = dar-backup-base
-FINAL_IMAGE_NAME = dar-backup
-GHCR_REPO = ghcr.io/per2jensen/dar-backup
+FINAL_IMAGE_NAME = dar-backup-image
+DOCKERHUB_REPO = per2jensen/dar-backup
 BASE_LATEST_TAG = $(BASE_IMAGE_NAME):24.04
 
 DOCKER ?= docker
@@ -38,21 +38,22 @@ base: check_version
 	$(DOCKER) build --pull -f Dockerfile-base-image \
 		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
 		-t $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) .
-	$(DOCKER) tag $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) $(BASE_LATEST_TAG)
+		$(DOCKER) tag $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) $(BASE_LATEST_TAG)
+
+
+release: check_version final login push
+	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION)"
+
 
 final: check_version base
 	$(eval FINAL_TAG := $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION))
-	$(eval GHCR_TAG := $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION))
-	@echo "Building final image: $(FINAL_TAG) and $(GHCR_TAG) ..."
+	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION))
+	@echo "Building final image: $(FINAL_TAG) and $(DOCKERHUB_TAG) ..."
 	$(DOCKER) build -f Dockerfile-dar-backup \
 		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
+		--label org.opencontainers.image.source=https://github.com/per2jensen/dar-backup \
 		-t $(FINAL_TAG) \
-		-t $(GHCR_TAG) .
-
-release: check_version final login push
-	@echo "✅ Release complete for: ghcr.io/per2jensen/dar-backup:$(DAR_BACKUP_IMAGE_VERSION)"
-
-
+		-t $(DOCKERHUB_TAG) .
 
 test:
 	@echo "Running dar-backup FULL + DIFF + INCR test in a temp directory..."
@@ -76,10 +77,8 @@ clean:
 	-$(DOCKER) rmi -f $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION) || true
 
 push: check_version
-	@echo "Push ghcr.io/per2jensen/dar-backup:$(DAR_BACKUP_IMAGE_VERSION) to GHCR..."
-	$(DOCKER) push ghcr.io/per2jensen/dar-backup:$(DAR_BACKUP_IMAGE_VERSION)
-
-
+	@echo "Push $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION) to Docker Hub..."
+	$(DOCKER) push $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION)
 
 
 # ================================
@@ -90,14 +89,14 @@ all-dev:
 	@$(MAKE) DAR_BACKUP_IMAGE_VERSION=dev base
 	@$(MAKE) dev
 dev:
-	@echo "Building development image: dar-backup:dev ..."
+	@echo "Building development image: dar-backup-image:dev ..."
 	$(DOCKER) build -f Dockerfile-dar-backup \
 		--build-arg VERSION=dev \
-		-t dar-backup:dev .
+		-t dar-backup-image:dev .
 
 dev-clean:
 	@echo "Removing dev image..."
-	-$(DOCKER) rmi -f dar-backup:dev || true
+	-$(DOCKER) rmi -f dar-backup-image:dev || true
 
 # ================================
 # Labels
@@ -111,53 +110,18 @@ labels:
 	fi
 
 # ================================
-# GHCR Login
+# Docker Login
 # ================================
 
 login:
-	@echo "Logging in to GitHub Container Registry (GHCR.io)..."
-	@if [ -z "$$CR_PAT" ]; then \
-		echo "❌ ERROR: Please export your personal access token as CR_PAT in your shell:"; \
-		echo "   export CR_PAT=your_token"; \
+	@echo "🔐 Logging in to Docker Hub (2FA enabled)..."
+	@if [ -z "$$DOCKER_USER" ] || [ -z "$$DOCKER_TOKEN" ]; then \
+		echo "❌ ERROR: You must export DOCKER_USER and DOCKER_TOKEN."; \
+		echo "   Example: export DOCKER_USER=per2jensen && export DOCKER_TOKEN=your_token"; \
 		exit 1; \
 	fi
-	echo "$$CR_PAT" | $(DOCKER) login ghcr.io -u per2jensen --password-stdin
+	echo "$$DOCKER_TOKEN" | $(DOCKER) login -u "$$DOCKER_USER" --password-stdin
 
-# ================================
-# GHCR Tags Listing
-# ================================
-
-ghcr-tags:
-	@if [ -z "$$CR_PAT" ]; then \
-		echo "❌ ERROR: Please export your GitHub token as CR_PAT"; \
-		exit 1; \
-	fi
-	curl -s -H "Authorization: Bearer $$CR_PAT" \
-	     -H "Accept: application/vnd.github+json" \
-	     "https://api.github.com/users/per2jensen/packages/container/dar-backup/versions" | jq
-
-ghcr-list-ids:
-	@if [ -z "$$CR_PAT" ]; then \
-		echo "❌ ERROR: Please export your GitHub token as CR_PAT"; \
-		exit 1; \
-	fi
-	curl -s -H "Authorization: Bearer $$CR_PAT" \
-	     -H "Accept: application/vnd.github+json" \
-	     "https://api.github.com/users/per2jensen/packages/container/dar-backup/versions" | \
-	     jq -r '.[] | "ID: \(.id)  Tags: \(.metadata.container.tags)"'
-
-ghcr-delete-id:
-	@if [ -z "$$ID" ]; then \
-		echo "❌ ERROR: Please provide ID. Usage: make ghcr-delete-id ID=12345678"; \
-		exit 1; \
-	fi
-	@if [ -z "$$CR_PAT" ]; then \
-		echo "❌ ERROR: Please export your GitHub token as CR_PAT"; \
-		exit 1; \
-	fi
-	curl -s -X DELETE -H "Authorization: Bearer $$CR_PAT" \
-	     -H "Accept: application/vnd.github+json" \
-	     "https://api.github.com/users/per2jensen/packages/container/dar-backup/versions/$$ID"
 
 # ================================
 # Tag preview
@@ -169,8 +133,8 @@ tag:
 	else \
 		echo "Base Image (versioned):  $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION)"; \
 		echo "Base Image (latest):     $(BASE_LATEST_TAG)"; \
-		echo "Final Image:             $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION)"; \
-		echo "GHCR Image:              $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION)"; \
+		echo "Final Image (local):     $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION)"; \
+		echo "Docker Hub Image:        $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION)"; \
 	fi
 
 # ================================
