@@ -11,7 +11,7 @@
 # ================================
 
 BASE_IMAGE_NAME = dar-backup-base
-FINAL_IMAGE_NAME = dar-backup-image
+FINAL_IMAGE_NAME = dar-backup
 DOCKERHUB_REPO = per2jensen/dar-backup
 BASE_LATEST_TAG = $(BASE_IMAGE_NAME):24.04
 
@@ -89,14 +89,14 @@ all-dev:
 	@$(MAKE) DAR_BACKUP_IMAGE_VERSION=dev base
 	@$(MAKE) dev
 dev:
-	@echo "Building development image: dar-backup-image:dev ..."
+	@echo "Building development image: dar-backup:dev ..."
 	$(DOCKER) build -f Dockerfile-dar-backup \
 		--build-arg VERSION=dev \
-		-t dar-backup-image:dev .
+		-t dar-backup:dev .
 
 dev-clean:
 	@echo "Removing dev image..."
-	-$(DOCKER) rmi -f dar-backup-image:dev || true
+	-$(DOCKER) rmi -f dar-backup:dev || true
 
 # ================================
 # Labels
