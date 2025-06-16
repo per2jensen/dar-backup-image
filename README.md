@@ -38,9 +38,9 @@ make test
 
 These images have been put on [DockerHub](https://hub.docker.com/r/per2jensen/dar-backup/tags)
 
-| Tag           | Base OS      | dar-backup       |dar Version | URL        |
-| ---------     | ------------ | ---------------- |------------|------------|
-| `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |            |
+| Tag           | Base OS      | dar-backup       |dar Version |
+| ---------     | ------------ | ---------------- |------------|
+| `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |
 
 This command can be run against an image to verify the dar-backup version:
 
@@ -52,20 +52,16 @@ docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v
 
 ## 🧰 Volumes / Runtime Configuration
 
+The default dar-backup.conf baked into the image assumes the directories mentioned below.
+
+The locations should be mounted with actual directories on your machine for backups.
+
 | Volume Mount | Purpose                                          |
 | ------------ | ------------------------------------------------ |
 | `/data`      | Source directory for backup                      |
-| `/backup`    | Destination archive path                         |
+| `/backup`    | `dar` archives and .par2 files are put here      |
 | `/restore`   | Optional restore target                          |
-| `/backup.d`  | Contains backup definition files (`.dar` format) |
-
-## 📦 Container Availability on GHCR
-
-The dar-backup Docker image is now published on the GitHub Container Registry (GHCR). You can pull the latest pre-release version tagged 0.5.0-alpha using:
-
-docker pull ghcr.io/per2jensen/dar-backup:0.5.0-alpha
-
-This image is based on Ubuntu 24.04 and includes the dar-backup CLI tool along with required dependencies like dar, par2, and gosu. It's ready for use in CI pipelines or local backup workflows. See the usage examples below for getting started quickly with test data and backup definitions.
+| `/backup.d`  | Contains backup definition files                 |
 
 ## 🚀 Usage Example
 
@@ -96,7 +92,7 @@ docker run --rm \
 
 ## Inspect program versions in an image
 
-### Local images or Docker ones
+### Local images or Docker Hub ones
 
 ```bash
 IMAGE=per2jensen/dar-backup:0.5.0-alpha

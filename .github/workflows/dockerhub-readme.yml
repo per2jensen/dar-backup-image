@@ -1,0 +1,23 @@
+name: Sync README to DockerHub
+
+on:
+  push:
+    branches: [main]
+    paths: ["README.md"]
+
+jobs:
+  sync-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Sync Docker Hub README
+        uses: peter-evans/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USER_NAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: per2jensen/dar-backup
+          short-description: >
+            Automated backup using DAR and par2 for redundancy.
+          readme-filepath: ./README.md
