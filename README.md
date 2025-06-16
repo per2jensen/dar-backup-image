@@ -4,6 +4,19 @@
 [![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
 [![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
 
+## Links to Gihub repositories
+
+`Dar-backup` is a Python wrapper around the very excellent [dar](https://github.com/Edrusb/DAR) backup program. `Dar-backup` is known to work on Ubuntu, it probably works on a multitude of Linux'es.
+
+`Dar-backup-image` is `dar-backup` baked into a Docker image.
+
+| Topic              | Link to Github   |
+| -------------------| ---------------- |
+| `dar-backup`       | [dar-backup on Github](https://github.com/per2jensen/dar-backup) |
+| `dar-backup-image` | [dar-backup-image](https://github.com/per2jensen/dar-backup-image)|
+
+## Description
+
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
 
 This is early, the `dar-backup` images are not tested well, do not trust it too much. It will mature over time :-)
