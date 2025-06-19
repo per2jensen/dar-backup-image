@@ -7,6 +7,8 @@
 FROM dar-backup-base:24.04
 
 ARG VERSION=0.0.0
+ARG DAR_BACKUP_VERSION=latest
+
 LABEL org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
       org.opencontainers.image.description="Container for DAR-based backups using dar-backup" \
       org.opencontainers.image.version="${VERSION}"
@@ -14,7 +16,7 @@ LABEL org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install the dar-backup PyPI package
-RUN pip3 install dar-backup --break-system-packages
+RUN pip3 install "dar-backup==${DAR_BACKUP_VERSION}" --break-system-packages
 
 # Copy the default configuration
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf
