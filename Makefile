@@ -51,7 +51,7 @@ final: check_version base
 	@echo "Building final image: $(FINAL_TAG) and $(DOCKERHUB_TAG) ..."
 	$(DOCKER) build -f Dockerfile-dar-backup \
 		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
-		--label org.opencontainers.image.source=https://github.com/per2jensen/dar-backup \
+		--label org.opencontainers.image.source=https://hub.docker.com/r/per2jensen/dar-backup \
 		-t $(FINAL_TAG) \
 		-t $(DOCKERHUB_TAG) .
 
@@ -74,7 +74,6 @@ clean:
 	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):24.04-$(DAR_BACKUP_IMAGE_VERSION) || true
 	-$(DOCKER) rmi -f $(BASE_LATEST_TAG) || true
 	-$(DOCKER) rmi -f $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION) || true
-	-$(DOCKER) rmi -f $(GHCR_REPO):$(DAR_BACKUP_IMAGE_VERSION) || true
 
 push: check_version
 	@echo "Push $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION) to Docker Hub..."
