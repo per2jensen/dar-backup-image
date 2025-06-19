@@ -9,8 +9,8 @@ git add . && git commit -m "Prepare release v0.5.1"
 make test
 
 3. Build and inspect the image locally
-make DAR_BACKUP_IMAGE_VERSION=0.5.1 final
-make DAR_BACKUP_IMAGE_VERSION=0.5.1 show-labels  # Optional sanity check
+make DAR_BACKUP_IMAGE_VERSION=0.5.1  DAR_BACKUP_VERSION=0.8.0  final
+make DAR_BACKUP_IMAGE_VERSION=0.5.1  DAR_BACKUP_VERSION=0.8.0  show-labels  # Optional sanity check
 
 4. Tag the release in Git
 git tag -a v0.5.1 -m "Release dar-backup image v0.5.1"
@@ -27,7 +27,9 @@ export DOCKER_TOKEN=your_actual_token
 make DAR_BACKUP_IMAGE_VERSION=0.5.1 push
 
 8. Log image details
-make DAR_BACKUP_IMAGE_VERSION=0.5.1 DAR_BACKUP_VERSION=0.8.0 log-pushed-build-json
+make DAR_BACKUP_IMAGE_VERSION=0.5.1 DAR_BACKUP_VERSION=0.8.0  COMMIT_LOG=yes log-pushed-build-json
 
 9. Optionally print the tag layout
 make DAR_BACKUP_IMAGE_VERSION=0.5.1 tag
+
+10. Commit the logfile

@@ -27,7 +27,6 @@ BUILD_LOG_FILE ?= build-history.json
 BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 
 
-
 # ================================
 # Targets
 # ================================
@@ -109,6 +108,7 @@ log-pushed-build-json: check_version
 	fi
 
 	$(eval DIGEST_ONLY := $(shell echo "$(DIGEST)" | cut -d'@' -f2))
+	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
 
 	@jq --arg tag "$(DAR_BACKUP_IMAGE_VERSION)" \
 	    --arg version "$(DAR_BACKUP_VERSION)" \
@@ -118,8 +118,28 @@ log-pushed-build-json: check_version
 	    --arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(DAR_BACKUP_IMAGE_VERSION)" \
 	    --arg digest "$(DIGEST_ONLY)" \
 	    --arg image_id "$(IMAGE_ID)" \
-	    '. += [{"tag": $$tag, "dar_backup_version": $$version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
+	    --argjson build_number $(BUILD_NUMBER) \
+	    '. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
 	    $(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH)
+
+	@if [ "$(COMMIT_LOG)" = "yes" ]; then \
+		$(MAKE) commit-log; \
+	fi
+
+
+
+commit-log:
+	@if [ ! -f $(BUILD_LOG_PATH) ]; then \
+		echo "❌ Refusing to commit: $(BUILD_LOG_PATH) does not exist."; \
+		exit 1; \
+	fi
+	@git add -f $(BUILD_LOG_PATH)  # Force re-adding if previously deleted
+	@CHANGES=$$(git status --porcelain $(BUILD_LOG_PATH)); \
+	if [ -n "$$CHANGES" ]; then \
+		git commit -m "📦 Add build log entry for v$(DAR_BACKUP_IMAGE_VERSION) (dar-backup v$(DAR_BACKUP_VERSION))"; \
+	else \
+		echo "ℹ️  No changes to $(BUILD_LOG_PATH) to commit."; \
+	fi
 
 
 
