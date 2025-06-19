@@ -13,7 +13,7 @@
 # Default values
 DOCKER ?= docker
 UBUNTU_VERSION ?= 24.04
-DAR_BACKUP_VERSION ?= latest
+DAR_BACKUP_VERSION ?=
 
 
 BASE_IMAGE_NAME = dar-backup-base
@@ -57,7 +57,7 @@ release: check_version final log-build-json  login push
 
 
 final: check_version validate base
-	@if [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
+	@if [ -z "$(DAR_BACKUP_VERSION)" ] || [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
 		echo "❌ ERROR: DAR_BACKUP_VERSION must not be 'latest' for final builds."; \
 		echo "   Set a specific version (e.g., DAR_BACKUP_VERSION=0.8.0)"; \
 		exit 1; \
