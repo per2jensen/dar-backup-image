@@ -15,6 +15,10 @@ FINAL_IMAGE_NAME = dar-backup
 DOCKERHUB_REPO = per2jensen/dar-backup
 BASE_LATEST_TAG = $(BASE_IMAGE_NAME):24.04
 
+# these LABELS are used in the final image
+BASE_IMAGE_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
 DOCKER ?= docker
 
 # ================================
@@ -52,6 +56,8 @@ final: check_version base
 	$(DOCKER) build -f Dockerfile-dar-backup \
 		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
 		--label org.opencontainers.image.source=https://hub.docker.com/r/per2jensen/dar-backup \
+		--label org.opencontainers.image.created="$(DAR_BACKUP_DATE)" \
+		--label org.opencontainers.image.base.created="$(BASE_IMAGE_DATE)" \
 		-t $(FINAL_TAG) \
 		-t $(DOCKERHUB_TAG) .
 

@@ -15,6 +15,16 @@
 | `dar-backup`       | [dar-backup on Github](https://github.com/per2jensen/dar-backup) |
 | `dar-backup-image` | [dar-backup-image](https://github.com/per2jensen/dar-backup-image)|
 
+## Docker Hub image repo
+
+You can see publicly available `dar-backup` docker images on [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
+
+Those fond of curl can do this:
+
+```bash
+curl -s https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags | jq '.results[].name'
+```
+
 ## Description
 
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
@@ -40,10 +50,10 @@ If you are not familiar with the license take a look at the included LICENSE fil
 ## How to test
 
 ```bash
-# make new development image
+# make new base and development image
 make all-dev
 
-# run FULL, DIFF and INCR backups
+# run FULL, DIFF and INCR backups in a temp directory
 make test
 ```
 
@@ -54,14 +64,6 @@ These images have been put on [DockerHub](https://hub.docker.com/r/per2jensen/da
 | Tag           | Base OS      | dar-backup       |dar Version |
 | ---------     | ------------ | ---------------- |------------|
 | `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |
-
-This command can be run against an image to verify the dar-backup version:
-
-```bash
-#example
-IMAGE=dar-backup:0.5.0-alpha
-docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v
-```
 
 ## 🧰 Volumes / Runtime Configuration
 
@@ -103,35 +105,53 @@ docker run --rm \
   -F --log-stdout --config /etc/dar-backup/dar-backup.conf
 ```
 
-## Inspect program versions in an image
+## 🔍 Discover Image Metadata
 
-### Local images or Docker Hub ones
+Learn what's inside the `dar-backup` image: program versions, build metadata, and available versions.
+
+---
+
+### 🧪 1. Check Tool Versions
+
+Run the image with different entrypoints to check the bundled versions of `dar-backup`, `dar`, and `par2`:
 
 ```bash
-IMAGE=per2jensen/dar-backup:0.5.0-alpha
+IMAGE=per2jensen/dar-backup:0.5.1
 
 # dar-backup version
-docker run --rm -it --entrypoint "dar-backup" "$IMAGE" -v|grep -P "dar-backup +\d+.\d+.\d+"
+docker run --rm --entrypoint "dar-backup" "$IMAGE" -v
 
-# `dar` version
-docker run --rm --entrypoint dar "$IMAGE" --version 2>/dev/null|grep "dar version"
+# dar version
+docker run --rm --entrypoint dar "$IMAGE" --version
 
-# `par2` version
+# par2 version
 docker run --rm --entrypoint par2 "$IMAGE" --version
+
+# Or get them all in one go:
+docker run --rm --entrypoint "" "$IMAGE" \
+  bash -c "dar-backup -v; dar --version; par2 --version"
 ```
 
-Or get everything in one go in a more verbose way.
+### 🏷️ 2. Inspect Image Labels
 
 ```bash
-IMAGE=per2jensen/dar-backup:0.5.0-alpha
-docker run --rm --entrypoint "" "$IMAGE" bash -c "dar-backup -v; dar --version; par2 --version"
+docker pull per2jensen/dar-backup:0.5.1
+docker inspect per2jensen/dar-backup:0.5.1 | jq '.[0].Config.Labels'
+
+{
+  "org.opencontainers.image.base.created": "2025-06-19T13:38:32Z",
+  "org.opencontainers.image.created": "2025-06-19T13:38:32Z",
+  "org.opencontainers.image.description": "Container for DAR-based backups using dar-backup",
+  "org.opencontainers.image.ref.name": "ubuntu",
+  "org.opencontainers.image.source": "https://hub.docker.com/r/per2jensen/dar-backup",
+  "org.opencontainers.image.version": "0.5.1"
+}
 ```
 
-### Check LABELS on an image
-
-This example uses `jq` (on Ubuntu, install this way "sudo apt install jq"))
+### 📦 3. List Available Image Tags
 
 ```bash
-IMAGE=per2jensen/dar-backup:0.5.0-alpha
-docker inspect "$IMAGE" --format '{{json .Config.Labels}}' | jq
+# Show first 100 available tags
+curl -s 'https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags?page_size=100' \
+  | jq -r '.results[].name' | sort -V
 ```
