@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/test.yml/badge.svg)
 [![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
-[![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)
+[![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/weekly_clones.png)  <sub>🎯 Stats powered by [ClonePulse](https://github.com/per2jensen/clonepulse)</sub>
 
 ## Links to Gihub repositories
 
@@ -127,7 +127,7 @@ IMAGE=per2jensen/dar-backup:0.5.0-alpha
 docker run --rm --entrypoint "" "$IMAGE" bash -c "dar-backup -v; dar --version; par2 --version"
 ```
 
-### Check LABELS on a Github Container Registry image
+### Check LABELS on an image
 
 This example uses `jq` (on Ubuntu, install this way "sudo apt install jq"))
 
