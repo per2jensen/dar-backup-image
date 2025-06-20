@@ -59,11 +59,13 @@ make test
 
 ## 🔧 Image Tags
 
-These images have been put on [DockerHub](https://hub.docker.com/r/per2jensen/dar-backup/tags)
+Some  images are put on [DockerHub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 
-| Tag           | Base OS      | dar-backup       |dar Version |
-| ---------     | ------------ | ---------------- |------------|
-| `0.5.0-alpha` | Ubuntu 24.04 | dar-backup 0.8.0 | 2.7.13     |
+The [Release procedure](https://github.com/per2jensen/dar-backup-image/blob/main/doc/Release.md) results in two things:
+
+- An image pushed to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
+- Metadata about the image put in [build-history.md](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
+
 
 ## 🧰 Volumes / Runtime Configuration
 
