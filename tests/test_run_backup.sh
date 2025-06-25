@@ -13,9 +13,16 @@ STATEFUL_BASE="/tmp/dar-backup-test-state"
 mkdir -p "$STATEFUL_BASE"
 
 # Colors
-RED=$(tput setaf 1)
-GREEN=$(tput setaf 2)
-RESET=$(tput sgr0)
+if [ -t 1 ] && command -v tput &>/dev/null && tput colors &>/dev/null; then
+  RED=$(tput setaf 1)
+  GREEN=$(tput setaf 2)
+  RESET=$(tput sgr0)
+else
+  RED=""
+  GREEN=""
+  RESET=""
+fi
+
 
 # === Helpers ===
 
