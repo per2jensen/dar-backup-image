@@ -10,6 +10,8 @@
 # Configuration
 # ================================
 
+SHELL := /bin/bash
+
 # Default values
 DOCKER ?= docker
 UBUNTU_VERSION ?= 24.04
@@ -157,6 +159,12 @@ test:
 	echo "incr_file" > $$TMPDIR/data/incr.txt && \
 	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t INCR  || { echo "❌ INCR backup failed"; exit 1; } && \
 	echo "✅ FULL + DIFF + INCR test completed in $$TMPDIR"
+
+
+# Run integration tests
+test-integration: all-dev
+	bash tests/test_run_backup.sh
+
 
 clean:
 	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION) || true

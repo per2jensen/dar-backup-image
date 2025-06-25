@@ -7,6 +7,10 @@ set -euo pipefail
 SCRIPT="scripts/run-backup.sh"
 IMAGE="dar-backup:dev"
 TEST_TMP="/tmp/dar-backup-test"
+TEST_FILE_NAME="test.txt"
+
+STATEFUL_BASE="/tmp/dar-backup-test-state"
+mkdir -p "$STATEFUL_BASE"
 
 # Colors
 RED=$(tput setaf 1)
@@ -19,9 +23,35 @@ pass() { echo -e "${GREEN}✔ $1${RESET}"; }
 fail() { echo -e "${RED}✘ $1${RESET}"; exit 1; }
 
 clean_dirs() {
-  rm -rf "$TEST_TMP"
+  if [[ "${CLEAN_ALL:-1}" -eq 1 ]]; then
+    rm -rf "$TEST_TMP"
+  fi
   mkdir -p "$TEST_TMP"
 }
+
+test_case_stateful_full() {
+  export WORKDIR="$STATEFUL_BASE"
+  CLEAN_ALL=0
+  rm -f "$WORKDIR"/backups/*.dar*
+  echo "FULL:  Updated at $(date)" >> "$DAR_BACKUP_DATA_DIR/$TEST_FILE_NAME"
+  run_test_case "Initial FULL backup for stateful tests" -t FULL
+}
+
+test_case_diff() {
+  export WORKDIR="$STATEFUL_BASE"
+  CLEAN_ALL=0
+#  rm -f "$WORKDIR/backups/"*.dar*
+  echo "DIFF: updated at $(date)" >> "$DAR_BACKUP_DATA_DIR/$TEST_FILE_NAME"
+  run_test_case "DIFF backup (requires FULL first)" -t DIFF
+}
+
+test_case_incr() {
+  export WORKDIR="$STATEFUL_BASE"
+  CLEAN_ALL=0
+  echo "INCR: updated at $(date)" >> "$DAR_BACKUP_DATA_DIR/$TEST_FILE_NAME"
+  run_test_case "INCR backup (requires DIFF first)" -t INCR
+}
+
 
 run_test_case() {
   local name="$1"
@@ -30,12 +60,11 @@ run_test_case() {
 
   echo "Running test: $name"
 
-  # Prepare fresh WORKDIR
-  local WORKDIR="$TEST_TMP/workdir"
+  : "${WORKDIR:=$TEST_TMP/workdir}"
+  export WORKDIR
+
   mkdir -p "$WORKDIR"
 
-  # Override directories (can be replaced per test)
-  export WORKDIR="$WORKDIR"
   export RUN_AS_UID="${RUN_AS_UID_OVERRIDE:-1000}"
   export IMAGE="${IMAGE_OVERRIDE:-$IMAGE}"
   export DAR_BACKUP_DIR="${DAR_BACKUP_DIR_OVERRIDE:-$WORKDIR/backups}"
@@ -45,7 +74,6 @@ run_test_case() {
 
   mkdir -p "$DAR_BACKUP_DATA_DIR"
   echo "Hello world" > "$DAR_BACKUP_DATA_DIR/test.txt"
-
   set +e
   "$SCRIPT" "$@"
   local exit_code=$?
@@ -108,6 +136,7 @@ test_case_5() {
   rm -rf "$DAR_BACKUP_DIR_OVERRIDE" 
   EXPECT_FAIL=0
   run_test_case "Custom backup dir set" -t FULL
+  unset DAR_BACKUP_DIR_OVERRIDE
 }
 
 
@@ -117,3 +146,13 @@ test_case_2
 test_case_3
 test_case_4
 test_case_5
+test_case_stateful_full
+echo "🔍 Archive(s) produced:"
+find "$DAR_BACKUP_DIR" -name "*.dar" -type f -exec basename {} \;
+test_case_diff
+echo "🔍 Archive(s) produced:"
+find "$DAR_BACKUP_DIR" -name "*.dar" -type f -exec basename {} \;
+test_case_incr
+echo "🔍 Archive(s) produced:"
+find "$DAR_BACKUP_DIR" -name "*.dar" -type f -exec basename {} \;
+CLEAN_ALL=1
