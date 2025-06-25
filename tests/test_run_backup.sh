@@ -155,11 +155,20 @@ test_case_4
 test_case_5
 test_case_stateful_full
 echo "🔍 Archive(s) produced:"
+if [[ -n "${DAR_BACKUP_DIR:-}" && -d "$DAR_BACKUP_DIR" ]]; then
+  chmod -R +rX "$DAR_BACKUP_DIR" 2>/dev/null || true
+fi
 find "$DAR_BACKUP_DIR" -name "*.dar" -type f -exec basename {} \;
 test_case_diff
 echo "🔍 Archive(s) produced:"
+if [[ -n "${DAR_BACKUP_DIR:-}" && -d "$DAR_BACKUP_DIR" ]]; then
+  chmod -R +rX "$DAR_BACKUP_DIR" 2>/dev/null || true
+fi
 find "$DAR_BACKUP_DIR" -name "*.dar" -type f -exec basename {} \;
 test_case_incr
 echo "🔍 Archive(s) produced:"
+if [[ -n "${DAR_BACKUP_DIR:-}" && -d "$DAR_BACKUP_DIR" ]]; then
+  chmod -R +rX "$DAR_BACKUP_DIR" 2>/dev/null || true
+fi
 find "$DAR_BACKUP_DIR" -name "*.dar" -type f -exec basename {} \;
 CLEAN_ALL=1

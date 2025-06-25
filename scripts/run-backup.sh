@@ -164,6 +164,7 @@ echo "Running dar-backup test with type: $BACKUP_TYPE_LC"
 echo
 
 docker run --rm \
+  --user "$RUN_AS_UID" \
   -e RUN_AS_UID="$RUN_AS_UID" \
   -v "$DAR_BACKUP_DIR":/backups \
   -v "$DAR_BACKUP_D_DIR":/backup.d \

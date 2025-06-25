@@ -3,85 +3,91 @@
 
 set -e
 
-# === Default UID fallback ===
 DEFAULT_UID=1000
+LOG_FILE="/tmp/dar_backup_completer.log"
 
-# === Drop privileges if running as root ===
+# === Determine effective UID ===
 if [ "$(id -u)" -eq 0 ]; then
   echo "Running as root — will drop to UID ${RUN_AS_UID:-$DEFAULT_UID}"
   export RUN_AS_UID="${RUN_AS_UID:-$DEFAULT_UID}"
 else
   echo "Already running as non-root UID $(id -u)"
+  export RUN_AS_UID="$(id -u)"
 fi
 
-# === Resolve config path from ENV or fallback ===
+# === Resolve config file ===
 DEFAULT_CONFIG="/etc/dar-backup/dar-backup.conf"
 CONFIG_PATH="${DAR_BACKUP_CONFIG:-$DEFAULT_CONFIG}"
 
-# === Validate config file ===
 if [[ ! -f "$CONFIG_PATH" ]]; then
-  echo "ERROR: Configuration file not found at '$CONFIG_PATH'" >&2
+  echo "❌ Configuration file not found: $CONFIG_PATH" >&2
   exit 1
 fi
 
-# === Create and secure required directories ===
-mkdir -p "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR" || {
-  echo "❌ Failed to create required directories"
-  exit 1
-}
+# === Ensure required directories exist ===
+for dir in "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR"; do
+  [ -z "$dir" ] && echo "❌ Required env var not set" && exit 1
+  mkdir -p "$dir" || { echo "❌ Failed to create $dir"; exit 1; }
+done
 
-chmod -R 0770 "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR" || {
-  echo "❌ Failed to set permissions on directories"
-  exit 1
-}
+# === Fix permissions and ownership (only if root) ===
+if [ "$(id -u)" -eq 0 ]; then
+  chmod -R 0770 "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR" || {
+    echo "❌ Failed to chmod directories"
+    exit 1
+  }
 
-chown -R "$RUN_AS_UID:$RUN_AS_UID" "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR" || {
-  echo "❌ Failed to set ownership on directories"
-  exit 1
-}
+  chown -R "$RUN_AS_UID:$RUN_AS_UID" "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR" || {
+    echo "❌ Failed to chown directories"
+    exit 1
+  }
 
-# === Setup log file ===
-LOG_FILE="/tmp/dar_backup_completer.log"
-touch "$LOG_FILE"
-chown "$RUN_AS_UID:$RUN_AS_UID" "$LOG_FILE"
-chmod 644 "$LOG_FILE"
-
-# === Validate required mount points ===
-[ -d "$DAR_BACKUP_DIR" ]        || { echo "❌ Missing mount: $DAR_BACKUP_DIR"; exit 1; }
-[ -d "$DAR_BACKUP_D_DIR" ]      || { echo "❌ Missing mount: $DAR_BACKUP_D_DIR"; exit 1; }
-[ -d "$DAR_BACKUP_DATA_DIR" ]   || { echo "❌ Missing mount: $DAR_BACKUP_DATA_DIR"; exit 1; }
-[ -d "$DAR_BACKUP_RESTORE_DIR" ]|| { echo "❌ Missing mount: $DAR_BACKUP_RESTORE_DIR"; exit 1; }
-
-# === Ensure /tmp is usable ===
-chmod 1777 /tmp
-touch "$LOG_FILE"
-chown "$RUN_AS_UID:$RUN_AS_UID" "$LOG_FILE"
-chmod 644 "$LOG_FILE"
-
-
-# === Ensure config file exists ===
-if [[ ! -f "$CONFIG_PATH" ]]; then
-  echo "ERROR: Configuration file not found at '$CONFIG_PATH'" >&2
-  exit 1
+  touch "$LOG_FILE"
+  chown "$RUN_AS_UID:$RUN_AS_UID" "$LOG_FILE" || true
+  chmod 644 "$LOG_FILE"
+else
+  touch "$LOG_FILE" 2>/dev/null || true
+  chmod 644 "$LOG_FILE" 2>/dev/null || true
 fi
 
-# === Build arg list ===
+# === Build argument list ===
 ARGS=()
-
-# Only append --config if user didn't explicitly give one
 if [[ ! " $* " =~ " --config " ]]; then
   ARGS+=(--config "$CONFIG_PATH")
 fi
-
 ARGS+=("$@")
 
-echo "Executing as UID $RUN_AS_UID"
-exec gosu "$RUN_AS_UID" /bin/bash -s <<EOF
-  echo "dar-backup: \$(which dar-backup)"
-  echo "manager:    \$(which manager)"
+
+# === Determine if gosu is needed ===
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Running as root — will drop to UID ${RUN_AS_UID:-$DEFAULT_UID}"
+  export RUN_AS_UID="${RUN_AS_UID:-$DEFAULT_UID}"
+  exec gosu "$RUN_AS_UID" /bin/bash -s <<EOF
+    echo "dar-backup: \$(which dar-backup)"
+    echo "manager:    \$(which manager)"
+    echo "Creating catalog databases if needed..."
+    manager --create-db --log-stdout --config "$CONFIG_PATH"
+    echo "Running dar-backup with args: ${ARGS[*]}"
+    exec dar-backup ${ARGS[*]}
+EOF
+else
+  echo "Already running as non-root UID $(id -u)"
+  echo "dar-backup: $(which dar-backup)"
+  echo "manager:    $(which manager)"
   echo "Creating catalog databases if needed..."
   manager --create-db --log-stdout --config "$CONFIG_PATH"
   echo "Running dar-backup with args: ${ARGS[*]}"
-  exec dar-backup ${ARGS[*]}
-EOF
+  exec dar-backup "${ARGS[@]}"
+fi
 
+
+# === Launch process as requested UID ===
+# echo "Executing as UID $RUN_AS_UID"
+# exec gosu "$RUN_AS_UID" /bin/bash -s <<EOF
+#   echo "dar-backup: \$(which dar-backup)"
+#   echo "manager:    \$(which manager)"
+#   echo "Creating catalog databases if needed..."
+#   manager --create-db --log-stdout --config "$CONFIG_PATH"
+#   echo "Running dar-backup with args: ${ARGS[*]}"
+#   exec dar-backup ${ARGS[*]}
+EOF
