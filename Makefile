@@ -34,7 +34,7 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 # ================================
 
 .PHONY: all all-dev base final release clean push tag login dev dev-clean labels help \
-	check_version test
+	check_version test test-integration all-dev
 
 
 check_version:
