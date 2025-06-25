@@ -32,7 +32,7 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 # ================================
 
 .PHONY: all all-dev base final release clean push tag login dev dev-clean labels help \
-	check_version ghcr-tags ghcr-list-ids ghcr-delete-id test
+	check_version test
 
 
 check_version:
@@ -142,7 +142,7 @@ commit-log:
 	fi
 
 
-
+# The used script defaults to IMAGE="dar-backup:dev" if IMAGE is not set.
 test:
 	@echo "Running dar-backup FULL + DIFF + INCR test in a temp directory..."
 	@TMPDIR=$$(mktemp -d /tmp/dar-backup-test-XXXXXX) && \

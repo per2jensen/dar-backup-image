@@ -1,6 +1,49 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+#  This script runs a backup using the dar-backup Docker image.
+# 
+#  It runs a backup based on the specified type (FULL, DIFF, INCR)
+#  with the following features:
+#
+#  1. using the baked in dar-backup.conf file (se repo).
+#
+#  2. uses the .darrc file from the PyPI package added to the image,
+#     see image details here:
+#     https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json
+#     
+#     .darrc contents:
+#      https://github.com/per2jensen/dar-backup/blob/main/v2/src/dar_backup/.darrc
+#  3. It print log messages to stdout.
+#
+#  4. Expected directory structure when running this script:
+#     WORKDIR/
+#       ├── backups/           # Where backups are stored
+#       ├── backup.d/          # Backup definitions
+#       ├── data/              # Data to backup
+#       └── restore/           # Where restored files will be placed
+#
+#     If envvar WORKDIR is set, the script uses that as the base directory.
+#
+#     If WORKDIR is not set, the script uses the directory where the script
+#     is located as the base directory.
+#
+#  5. if IMAGE is not set, the script defaults to "dar-backup:dev".
+#     You can see available images on Docker Hub here:
+#     https://hub.docker.com/r/per2jensen/dar-backup/tags 
+#
+#     If RUN_AS_UID is not set, it defaults to the current user's UID.
+#        - running the script as root is not allowed, the script will exit with an error.
+#
+#  6. You can configure the directory layout by setting the following environment variables:
+#     - DAR_BACKUP_DIR: Directory for backups (default: WORKDIR/backups)
+#     - DAR_BACKUP_DATA_DIR: Directory for data to backup (default: WORKDIR/data) 
+#     - DAR_BACKUP_D_DIR: Directory for backup definitions (default: WORKDIR/backup.d)
+#     - DAR_BACKUP_RESTORE_DIR: Directory for restored files (default: WORKDIR/restore)
+#
+#  Usage:
+#  WORKDIR=/path/to/your/workdir IMAGE=<image> ./run-backup.sh -t FULL|DIFF|INCR 
+#
 set -euo pipefail
 
 # === Config ===
@@ -13,14 +56,22 @@ if [[ -z "$WORKDIR" ]]; then
   WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
+
+export RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
+# === Drop privileges if running as root ===
+if [ "$RUN_AS_UID" -eq 0 ]; then
+  echo "❌ running as root not allowed, exciting."
+  exit 1
+fi
+
+
+# Configure directory layout here
 BASE_DIR="$WORKDIR"
 
-export RUN_AS_UID=$(id -u)
-export DAR_BACKUP_DIR="$BASE_DIR/backups"
-export DAR_BACKUP_D_DIR="$BASE_DIR/backup.d"
-export DAR_BACKUP_DATA_DIR="$BASE_DIR/data"
-export DAR_BACKUP_RESTORE_DIR="$BASE_DIR/restore"
-
+export DAR_BACKUP_DIR="${DAR_BACKUP_DIR:-$BASE_DIR/backups}"
+export DAR_BACKUP_D_DIR="${DAR_BACKUP_D_DIR:-$BASE_DIR/backup.d}"
+export DAR_BACKUP_DATA_DIR="${DAR_BACKUP_DATA_DIR:-$BASE_DIR/data}"
+export DAR_BACKUP_RESTORE_DIR="${DAR_BACKUP_RESTORE_DIR:-$BASE_DIR/restore}"
 
 
 # === Parse args ===

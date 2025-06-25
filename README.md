@@ -66,7 +66,6 @@ The [Release procedure](https://github.com/per2jensen/dar-backup-image/blob/main
 - An image pushed to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 - Metadata about the image put in [build-history.md](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
 
-
 ## 🧰 Volumes / Runtime Configuration
 
 The default dar-backup.conf baked into the image assumes the directories mentioned below.
@@ -105,6 +104,71 @@ docker run --rm \
   -v "$BACKUP_D_DIR":/backup.d \
   "$IMAGE" \
   -F --log-stdout --config /etc/dar-backup/dar-backup.conf
+```
+
+## run-backup.sh
+
+This script runs a backup using a dar-backup Docker image.
+
+It runs a backup based on the specified type (FULL, DIFF, INCR)
+with the following features:
+
+### 1
+
+Using the baked in dar-backup.conf file (se this repo).
+
+### 2
+
+Uses the .darrc file from the [PyPI package](https://pypi.org/project/dar-backup/) added to the image,
+   see image [details here](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json)
+  
+   .darrc [contents](https://github.com/per2jensen/dar-backup/blob/main/v2/src/dar_backup/.darrc)
+
+### 3
+
+It print log messages to stdout.
+
+### 4
+
+Expected directory structure when running this script:
+
+```text
+   WORKDIR/
+     ├── backups/           # Where backups are stored
+     ├── backup.d/          # Backup definitions
+     ├── data/              # Data to backup
+     └── restore/           # Where restored files will be placed
+```
+
+If envvar WORKDIR is set, the script uses that as the base directory.
+
+If WORKDIR is not set, the script uses the directory where the script is located as the base directory.
+
+### 5
+
+If IMAGE is not set, the script defaults to `dar-backup:dev`.
+
+   You can see available images on [Docker Hub here)(https://hub.docker.com/r/per2jensen/dar-backup/tags)
+
+   If RUN_AS_UID is not set, it defaults to the current user's UID.
+    - running the script as root is not allowed, the script will exit with an error.
+
+### 6
+
+You can configure the directory layout by setting the following environment variables:
+
+    - DAR_BACKUP_DIR: Directory for backups (default: WORKDIR/backups)
+
+    - DAR_BACKUP_DATA_DIR: Directory for data to backup (default: WORKDIR/data) 
+
+    - DAR_BACKUP_D_DIR: Directory for backup definitions (default: WORKDIR/backup.d)
+
+    - DAR_BACKUP_RESTORE_DIR: Directory for restored files (default: WORKDIR/restore)
+
+### Usage:
+
+```bash
+WORKDIR=/path/to/your/workdir IMAGE=`image` ./run-backup.sh -t FULL|DIFF|INCR
 ```
 
 ## 🔍 Discover Image Metadata
