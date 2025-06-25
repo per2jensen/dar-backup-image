@@ -72,7 +72,8 @@ run_test_case() {
 
   mkdir -p "$WORKDIR"
 
-  export RUN_AS_UID="${RUN_AS_UID_OVERRIDE:-1000}"
+  export RUN_AS_UID="${RUN_AS_UID_OVERRIDE:-$(id -u)}"
+  echo "🔒 Will run container with UID: $RUN_AS_UID"
   export IMAGE="${IMAGE_OVERRIDE:-$IMAGE}"
   export DAR_BACKUP_DIR="${DAR_BACKUP_DIR_OVERRIDE:-$WORKDIR/backups}"
   export DAR_BACKUP_D_DIR="${DAR_BACKUP_D_DIR_OVERRIDE:-$WORKDIR/backup.d}"
