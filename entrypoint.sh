@@ -58,17 +58,17 @@ fi
 ARGS+=("$@")
 
 
-# === Determine if gosu is needed ===
+# Run dar-backup as the specified user, dropping privileges if necessary
 if [ "$(id -u)" -eq 0 ]; then
   echo "Running as root — will drop to UID ${RUN_AS_UID:-$DEFAULT_UID}"
   export RUN_AS_UID="${RUN_AS_UID:-$DEFAULT_UID}"
-  exec gosu "$RUN_AS_UID" /bin/bash -s <<EOF
-    echo "dar-backup: \$(which dar-backup)"
-    echo "manager:    \$(which manager)"
-    echo "Creating catalog databases if needed..."
-    manager --create-db --log-stdout --config "$CONFIG_PATH"
-    echo "Running dar-backup with args: ${ARGS[*]}"
-    exec dar-backup ${ARGS[*]}
+  gosu "$RUN_AS_UID" bash <<EOF
+echo "dar-backup: \$(which dar-backup)"
+echo "manager:    \$(which manager)"
+echo "Creating catalog databases if needed..."
+manager --create-db --log-stdout --config "$CONFIG_PATH"
+echo "Running dar-backup with args: ${ARGS[*]}"
+exec dar-backup ${ARGS[*]}
 EOF
 else
   echo "Already running as non-root UID $(id -u)"
@@ -80,14 +80,3 @@ else
   exec dar-backup "${ARGS[@]}"
 fi
 
-
-# === Launch process as requested UID ===
-# echo "Executing as UID $RUN_AS_UID"
-# exec gosu "$RUN_AS_UID" /bin/bash -s <<EOF
-#   echo "dar-backup: \$(which dar-backup)"
-#   echo "manager:    \$(which manager)"
-#   echo "Creating catalog databases if needed..."
-#   manager --create-db --log-stdout --config "$CONFIG_PATH"
-#   echo "Running dar-backup with args: ${ARGS[*]}"
-#   exec dar-backup ${ARGS[*]}
-EOF

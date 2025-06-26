@@ -10,7 +10,7 @@ ARG VERSION=0.0.0
 ARG DAR_BACKUP_VERSION
 
 LABEL org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
-      org.opencontainers.image.description="Container for DAR-based backups using dar-backup" \
+      org.opencontainers.image.description="Container for DAR-based backups using `dar-backup`" \
       org.opencontainers.image.version="${VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -39,4 +39,3 @@ RUN chmod +x /entrypoint.sh
 # Entrypoint and default arguments
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--verbose", "--log-stdout"]
-

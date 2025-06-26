@@ -33,7 +33,7 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 # Targets
 # ================================
 
-.PHONY: all all-dev base final release clean push tag login dev dev-clean labels help \
+.PHONY: all all-dev base final release clean clean-all push tag login dev dev-clean labels help \
 	check_version test test-integration all-dev
 
 
@@ -167,9 +167,20 @@ test-integration: all-dev
 
 
 clean:
+	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
+		echo "❌ DAR_BACKUP_IMAGE_VERSION not set"; exit 1; \
+	fi
 	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION) || true
 	-$(DOCKER) rmi -f $(BASE_LATEST_TAG) || true
 	-$(DOCKER) rmi -f $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION) || true
+
+
+
+# Remove all images related to dar-backup
+clean-all:
+
+
+	-docker images -q 'dar-backup*' | xargs -r docker rmi -f
 
 push: check_version
 	@echo "Push $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION) to Docker Hub..."
