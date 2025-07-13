@@ -9,5 +9,40 @@
     "dockerhub_tag_url": "https://hub.docker.com/r/per2jensen/dar-backup/tags/0.5.1",
     "digest": "sha256:833164e274df1790d0e1eee58c4427ac6b036670ebf3302bc63afc682d5acbb7",
     "image_id": "sha256:882d3652c2ab2644d25e2c61ab387b25aa63893dd78705c24361bf6367a624c7"
+  },
+  {
+    "build_number": 1,
+    "tag": "0.0.mock",
+    "dar_backup_version": "9.9.9",
+    "base_image": "dar-backup-base:24.04-mock",
+    "git_revision": "mock1234",
+    "created": "2025-07-13T14:00:00Z",
+    "dockerhub_tag_url": "https://hub.docker.com/r/per2jensen/dar-backup/tags/mock",
+    "digest": "sha256:deadbeef1234567890",
+    "image_id": "sha256:cafebabef00d1234567890"
+  },
+  {
+    "build_number": 2,
+    "tag": "0.5.5",
+    "dar_backup_version": "0.8.0",
+    "base_image": "dar-backup-base:24.04-0.5.5",
+    "full_image_tag": "per2jensen/dar-backup:0.5.5",
+    "git_revision": "b583e85",
+    "created": "2025-07-13T17:01:30Z",
+    "dockerhub_tag_url": "https://hub.docker.com/r/per2jensen/dar-backup/tags/0.5.5",
+    "digest": "PJE_TEST_DIGEST",
+    "image_id": "sha256:ab30ea6b4791f022a74eea40c5cd1674abac8f2480584f01ebc8e72dc6674652"
+  },
+  {
+    "build_number": 3,
+    "tag": "0.5.6",
+    "dar_backup_version": "0.8.0",
+    "base_image": "dar-backup-base:24.04-0.5.6",
+    "full_image_tag": "per2jensen/dar-backup:0.5.6",
+    "git_revision": "b583e85",
+    "created": "2025-07-13T17:08:57Z",
+    "dockerhub_tag_url": "https://hub.docker.com/r/per2jensen/dar-backup/tags/0.5.6",
+    "digest": "sha256:ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496",
+    "image_id": "sha256:3494bd51f42da13d11f6528e1c2c51f6b1094eb66a01e9af4ba98c0674f21ffd"
   }
 ]
