@@ -280,7 +280,7 @@ make[1]: Leaving directory '/home/pj/git/dar-backup-image'
 This builds the image and runs the test cases against it.
 
 ```bash
-make FINAL_VERSION=0.5.2 DAR_BACKUP_VERSION=0.8.0 dry-run-release
+make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 dry-run-release
 ...
 2025-07-13 14:12:13,182 - INFO - Type of backup:   INCR
 2025-07-13 14:12:13,183 - INFO - ======================================
@@ -309,10 +309,55 @@ make[1]: Leaving directory '/home/pj/git/dar-backup-image/.dryrun'
 Set DOCKER_USER and DOCKER_TOKEN envvars first.
 
 ```bash
-make FINAL_VERSION=0.5.2 DAR_BACKUP_VERSION=0.8.0 release
+make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 release
 ...
-
-
-
-
-
+🔁 Skipping verify-cli-version (will be run by release)
+🔍 Verifying OCI image labels on dar-backup:0.5.6
+✅ org.opencontainers.image.authors: Per Jensen <dar-backup@pm.me>
+✅ org.opencontainers.image.base.name: ubuntu
+✅ org.opencontainers.image.base.version: 24.04
+✅ org.opencontainers.image.created: 2025-07-13T17:08:24Z
+✅ org.opencontainers.image.description: Container for DAR-based backups using 
+✅ org.opencontainers.image.licenses: GPL-3.0-or-later
+✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.6
+✅ org.opencontainers.image.revision: b583e85
+✅ org.opencontainers.image.source: https://github.com/per2jensen/dar-backup-image
+✅ org.opencontainers.image.title: dar-backup
+✅ org.opencontainers.image.url: https://hub.docker.com/r/per2jensen/dar-backup
+✅ org.opencontainers.image.version: 0.5.6
+🎉 All required OCI labels are present.
+🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.0 )
+✅ dar-backup --version is correct: 0.8.0
+🔐 Logging in to Docker Hub (2FA enabled)...
+echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+Login Succeeded
+🚀 Pushing image per2jensen/dar-backup:0.5.6
+The push refers to repository [docker.io/per2jensen/dar-backup]
+5f70bf18a086: Layer already exists 
+dab3496ba942: Layer already exists 
+6dbcafa4e191: Layer already exists 
+50838a8b9a7e: Pushed 
+db49808a00f3: Pushed 
+0dde0d1808a7: Pushed 
+76550f3c9c5b: Pushed 
+45a01f98e78c: Layer already exists 
+0.5.6: digest: sha256:ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496 size: 2812
+✅ Log entry added. Total builds: 4
+{
+  "build_number": 3,
+  "tag": "0.5.6",
+  "dar_backup_version": "0.8.0",
+  "base_image": "dar-backup-base:24.04-0.5.6",
+  "full_image_tag": "per2jensen/dar-backup:0.5.6",
+  "git_revision": "b583e85",
+  "created": "2025-07-13T17:08:57Z",
+  "dockerhub_tag_url": "https://hub.docker.com/r/per2jensen/dar-backup/tags/0.5.6",
+  "digest": "sha256:ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496",
+  "image_id": "sha256:3494bd51f42da13d11f6528e1c2c51f6b1094eb66a01e9af4ba98c0674f21ffd"
+}
+🔄 Checking if doc/build-history.json changed
+[main 93b01da] build-history: add 0.5.6 metadata
+ 1 file changed, 35 insertions(+)
+✅ doc/build-history.json updated and committed
+✅ Release complete for: per2jensen/dar-backup:0.5.6
+```
