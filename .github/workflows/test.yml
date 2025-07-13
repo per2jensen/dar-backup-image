@@ -23,11 +23,11 @@ jobs:
 
       - name: Build base ubuntu 24.04 image, and then the dev image
         run: |
-          make DAR_BACKUP_IMAGE_VERSION=dev base
-          make DAR_BACKUP_IMAGE_VERSION=dev dev
+          make FINAL_VERSION=dev base
+          make FINAL_VERSION=dev dev
 
       - name: Run FULL, DIFF & INCR tests
         run: make test
 
       - name: Run integration tests
-        run: make FINAL_VERSION=0.0.1 DAR_BACKUP_VERSION=0.8.0 test-integration
+        run: make FINAL_VERSION=dev DAR_BACKUP_VERSION=0.8.0 test-integration
