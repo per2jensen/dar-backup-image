@@ -30,4 +30,4 @@ jobs:
         run: make test
 
       - name: Run integration tests
-        run: make test-integration
+        run: make FINAL_VERSION=0.0.1 DAR_BACKUP_VERSION=0.8.0 test-integration
