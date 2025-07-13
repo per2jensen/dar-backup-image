@@ -20,7 +20,11 @@ RUN if [ -n "$DAR_BACKUP_VERSION" ]; then \
       pip3 install "dar-backup==$DAR_BACKUP_VERSION" --break-system-packages; \
     else \
       pip3 install dar-backup --break-system-packages; \
-    fi
+    fi && \
+    command -v dar-backup >/dev/null || { echo "❌ dar-backup not found in PATH"; exit 1; } && \
+    dar-backup --version
+
+
 
 # Copy the default configuration
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf

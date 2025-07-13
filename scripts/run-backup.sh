@@ -47,7 +47,7 @@
 set -euo pipefail
 
 # === Config ===
-IMAGE="dar-backup:dev"
+IMAGE="${IMAGE:-dar-backup:dev}"
 
 # Allow override of working directory for testing (e.g. from Makefile)
 WORKDIR="${WORKDIR:-}"
@@ -125,8 +125,8 @@ esac
 
 
 echo "Using image: $IMAGE"
-echo "Base directory:                  {$BASE_DIR}/"
-echo "Backup type:                     {$BACKUP_TYPE}"
+echo "Base directory:                  ${BASE_DIR}/"
+echo "Backup type:                     ${BACKUP_TYPE}"
 echo "DAR backup directory:            $DAR_BACKUP_DIR"
 echo "DAR backup definition directory: $DAR_BACKUP_D_DIR"
 echo "DAR backup data directory:       $DAR_BACKUP_DATA_DIR"

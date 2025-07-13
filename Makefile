@@ -3,8 +3,8 @@
 # Usage examples:
 # ---------------
 # make dev-clean dev
-# make DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1 final
-# make DAR_BACKUP_IMAGE_VERSION=0.9.9-rc1 release
+# make FINAL_VERSION=0.9.9-rc1 final
+# make FINAL_VERSION=0.9.9-rc1 release
 
 # ================================
 # Configuration
@@ -34,13 +34,17 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 # ================================
 
 .PHONY: all all-dev base final release clean clean-all push tag login dev dev-clean labels help \
-	check_version test test-integration all-dev
-
+	check_version test test-integration all-dev dry-run-release-internal
 
 check_version:
-	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
-		echo "❌ ERROR: You must set DAR_BACKUP_IMAGE_VERSION explicitly."; \
-		echo "   Example: make DAR_BACKUP_IMAGE_VERSION=1.0.0 final"; \
+	@if [ -z "$(FINAL_VERSION)" ]; then \
+		echo "❌ ERROR: You must set FINAL_VERSION explicitly."; \
+		echo "   Example: make FINAL_VERSION=1.0.0 final"; \
+		exit 1; \
+	fi
+	@if [ -z "$(DAR_BACKUP_VERSION)" ]; then \
+		echo "❌ ERROR: You must set DAR_BACKUP_VERSION explicitly."; \
+		echo "   Example: make DAR_BACKUP_VERSION=1.0.0 final"; \
 		exit 1; \
 	fi
 
@@ -48,18 +52,23 @@ check_version:
 base: check_version validate
 	@echo "Building base image..."
 	$(DOCKER) build --pull -f Dockerfile-base-image \
-		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
-		-t $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION) .
-	$(DOCKER) tag $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION) $(BASE_LATEST_TAG)
+		--build-arg VERSION=$(FINAL_VERSION) \
+		--label org.opencontainers.image.base.name="ubuntu" \
+		--label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
+		--label org.opencontainers.image.base.created="$(BASE_IMAGE_DATE)" \
+		--label org.opencontainers.image.version="$(FINAL_VERSION)-base" \
+		--label org.opencontainers.image.authors="Per Jensen <per2jensen@gmail.com>" \
+		-t $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION) .
+	$(DOCKER) tag $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION) $(BASE_LATEST_TAG)
 
 
 
-release: check_version final log-build-json  login push
-	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION)"
+release: check_version final verify-labels verify-cli-version  login push log-pushed-build-json
+	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
 
 
 final: check_version validate base
-	@if [ -z "$(DAR_BACKUP_VERSION)" ] || [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
+	@if [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
 		echo "❌ ERROR: DAR_BACKUP_VERSION must not be 'latest' for final builds."; \
 		echo "   Set a specific version (e.g., DAR_BACKUP_VERSION=0.8.0)"; \
 		exit 1; \
@@ -67,28 +76,68 @@ final: check_version validate base
 	$(eval BASE_IMAGE_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
-	$(eval FINAL_TAG := $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION))
-	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION))
+	$(eval FINAL_TAG := $(FINAL_IMAGE_NAME):$(FINAL_VERSION))
+	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(FINAL_VERSION))
 	@echo "Building final image: $(FINAL_TAG) and $(DOCKERHUB_TAG) ..."
 	$(DOCKER) build -f Dockerfile-dar-backup \
-	    --build-arg base="$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION)" \
-		--build-arg VERSION=$(DAR_BACKUP_IMAGE_VERSION) \
-		--label org.opencontainers.image.source=https://hub.docker.com/r/per2jensen/dar-backup \
+	    --build-arg base="$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
+		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		--label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
 		--label org.opencontainers.image.created="$(DAR_BACKUP_DATE)" \
-		--label org.opencontainers.image.base.created="$(BASE_IMAGE_DATE)" \
 		--label org.opencontainers.image.revision="$(GIT_REV)" \
 		--label org.opencontainers.image.title="dar-backup" \
-		--label org.opencontainers.image.version="$(DAR_BACKUP_IMAGE_VERSION)" \
-		--label org.opencontainers.image.description="Container for DAR-based backups using dar-backup" \
+		--label org.opencontainers.image.version="$(FINAL_VERSION)" \
+		--label org.opencontainers.image.description="Container for DAR-based backups using `dar-backup`" \
 		--label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
-		--label org.opencontainers.image.url="https://github.com/per2jensen/dar-backup-image" \
+		--label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" \
 		--label org.opencontainers.image.licenses="GPL-3.0-or-later" \
 		--label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" \
+		--label org.opencontainers.image.ref.name="$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
 		--label org.dar-backup.version="$(DAR_BACKUP_VERSION)" \
 		-t $(FINAL_TAG) \
 		-t $(DOCKERHUB_TAG) .
 
+
+
+verify-labels:
+	@$(eval FINAL_VERSION := $(or $(FINAL_VERSION)))
+	@echo "🔍 Verifying OCI image labels on $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+	@$(eval LABELS := org.opencontainers.image.authors \
+	                  org.opencontainers.image.base.name \
+	                  org.opencontainers.image.base.version \
+	                  org.opencontainers.image.created \
+	                  org.opencontainers.image.description \
+	                  org.opencontainers.image.licenses \
+	                  org.opencontainers.image.ref.name \
+	                  org.opencontainers.image.revision \
+	                  org.opencontainers.image.source \
+	                  org.opencontainers.image.title \
+	                  org.opencontainers.image.url \
+	                  org.opencontainers.image.version)
+
+	@for label in $(LABELS); do \
+	  value=$$(docker inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null | cut -d= -f2-); \
+	  if [ -z "$$value" ]; then \
+	    echo "❌ Missing or empty label: $$label"; \
+	    exit 1; \
+	  else \
+	    echo "✅ $$label: $$value"; \
+	  fi; \
+	done
+
+	@echo "🎉 All required OCI labels are present."
+
+
+verify-cli-version:
+	@echo "🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION ($(DAR_BACKUP_VERSION) )"
+	@actual_version="$$(docker run  --rm --entrypoint dar-backup $(FINAL_IMAGE_NAME):$(FINAL_VERSION) --version | head -n1 | awk '{print $$2}')" && \
+	if [ "$$actual_version" != "$(DAR_BACKUP_VERSION)" ]; then \
+	  echo "❌ Version mismatch: CLI reports '$$actual_version', expected '$(DAR_BACKUP_VERSION)'"; \
+	  exit 1; \
+	else \
+	  echo "✅ dar-backup --version is correct: $(DAR_BACKUP_VERSION)"; \
+	fi
 
 
 # ================================
@@ -100,9 +149,9 @@ log-pushed-build-json: check_version
 
 	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
 	$(eval DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
-	$(eval BASE_TAG := $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION))
-	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION) 2>/dev/null || echo ""))
-	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION)))
+	$(eval BASE_TAG := $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION))
+	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
+	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
 
 	@if [ -z "$(DIGEST)" ]; then \
 		echo "❌ Digest not found. Make sure the image has been pushed."; \
@@ -112,12 +161,12 @@ log-pushed-build-json: check_version
 	$(eval DIGEST_ONLY := $(shell echo "$(DIGEST)" | cut -d'@' -f2))
 	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
 
-	@jq --arg tag "$(DAR_BACKUP_IMAGE_VERSION)" \
-	    --arg version "$(DAR_BACKUP_VERSION)" \
+	@jq --arg tag "$(FINAL_VERSION)" \
+	    --arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
 	    --arg base "$(BASE_TAG)" \
 	    --arg rev "$(GIT_REV)" \
 	    --arg created "$(DAR_BACKUP_DATE)" \
-	    --arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(DAR_BACKUP_IMAGE_VERSION)" \
+	    --arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)" \
 	    --arg digest "$(DIGEST_ONLY)" \
 	    --arg image_id "$(IMAGE_ID)" \
 	    --argjson build_number $(BUILD_NUMBER) \
@@ -138,7 +187,7 @@ commit-log:
 	@git add -f $(BUILD_LOG_PATH)  # Force re-adding if previously deleted
 	@CHANGES=$$(git status --porcelain $(BUILD_LOG_PATH)); \
 	if [ -n "$$CHANGES" ]; then \
-		git commit -m "📦 Add build log entry for v$(DAR_BACKUP_IMAGE_VERSION) (dar-backup v$(DAR_BACKUP_VERSION))"; \
+		git commit -m "📦 Add build log entry for v$(FINAL_VERSION) (dar-backup v$(DAR_BACKUP_VERSION))"; \
 	else \
 		echo "ℹ️  No changes to $(BUILD_LOG_PATH) to commit."; \
 	fi
@@ -161,30 +210,30 @@ test:
 	echo "✅ FULL + DIFF + INCR test completed in $$TMPDIR"
 
 
+
 # Run integration tests
 test-integration: all-dev
 	bash tests/test_run_backup.sh
 
 
 clean:
-	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
-		echo "❌ DAR_BACKUP_IMAGE_VERSION not set"; exit 1; \
+	@if [ -z "$(FINAL_VERSION)" ]; then \
+		echo "❌ FINAL_VERSION not set"; exit 1; \
 	fi
-	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION) || true
+	-$(DOCKER) rmi -f $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION) || true
 	-$(DOCKER) rmi -f $(BASE_LATEST_TAG) || true
-	-$(DOCKER) rmi -f $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION) || true
+	-$(DOCKER) rmi -f $(FINAL_IMAGE_NAME):$(FINAL_VERSION) || true
 
 
 
 # Remove all images related to dar-backup
 clean-all:
-
-
 	-docker images -q 'dar-backup*' | xargs -r docker rmi -f
 
+
 push: check_version
-	@echo "Push $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION) to Docker Hub..."
-	$(DOCKER) push $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION)
+	@echo "Push $(DOCKERHUB_REPO):$(FINAL_VERSION) to Docker Hub..."
+	$(DOCKER) push $(DOCKERHUB_REPO):$(FINAL_VERSION)
 
 
 # Show image version, Git revision, and build timestamp
@@ -192,7 +241,7 @@ print-version:
 	@echo "🔖 dar-backup image metadata"
 	@echo "────────────────────────────────────────────"
 	@echo " Ubuntu Base   : $(UBUNTU_VERSION)"
-	@echo " Image Version : $(DAR_BACKUP_IMAGE_VERSION)"
+	@echo " Image Version : $(FINAL_VERSION)"
 	@echo " Git Revision  : $(GIT_REV)"
 	@echo " Build Time    : $(DAR_BACKUP_DATE)"
 
@@ -202,12 +251,38 @@ validate:
 	@command -v jq >/dev/null || { echo "❌ jq not found"; exit 1; }
 	@command -v docker >/dev/null || { echo "❌ docker not found"; exit 1; }
 
+
+
+dry-run-release:
+	@echo "🔍 Creating temporary dry-run environment..."
+	@if [ -d .dryrun ]; then \
+		echo "🧹 Removing stale .dryrun worktree..."; \
+		git worktree remove --force .dryrun; \
+	fi
+	@git worktree add -f .dryrun HEAD
+	@cd .dryrun && \
+		echo "🚧 Running release steps in .dryrun..." && \
+		DRY_RUN=1 FINAL_VERSION=$(FINAL_VERSION) make  dry-run-release-internal
+	@git worktree remove .dryrun
+	@echo "✅ Dry-run complete — no changes made to working directory"
+
+
+
+
+dry-run-release-internal: check_version
+	@$(eval FINAL_VERSION := $($(FINAL_VERSION)))
+	@echo "🔧 Building image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) (dry-run, no push to Docker Hub)"
+	$(MAKE) FINAL_VERSION=$(FINAL_VERSION) final verify-labels verify-cli-version
+	@IMAGE=$(FINAL_IMAGE_NAME):$(FINAL_VERSION) bash tests/test_run_backup.sh
+
+
+
 # ================================
 # Dev build
 # ================================
 
 all-dev: validate
-	@$(MAKE) DAR_BACKUP_IMAGE_VERSION=dev base
+	@$(MAKE) FINAL_VERSION=dev base
 	@$(MAKE) dev
 
 
@@ -229,10 +304,10 @@ dev-clean:
 
 # Show all OCI image labels in aligned key=value format
 show-labels:
-	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
-		echo "❌ ERROR: DAR_BACKUP_IMAGE_VERSION is not set."; \
+	@if [ -z "$(FINAL_VERSION)" ]; then \
+		echo "❌ ERROR: FINAL_VERSION is not set."; \
 	else \
-		docker inspect $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION) \
+		docker inspect $(FINAL_IMAGE_NAME):$(FINAL_VERSION) \
 		--format '{{ range $$k, $$v := .Config.Labels }}{{ printf "%-40s %s\n" $$k $$v }}{{ end }}'; \
 	fi
 
@@ -254,13 +329,13 @@ login:
 # Tag preview
 # ================================
 tag:
-	@if [ -z "$(DAR_BACKUP_IMAGE_VERSION)" ]; then \
-		echo "❌ DAR_BACKUP_IMAGE_VERSION is not set"; \
+	@if [ -z "$(FINAL_VERSION)" ]; then \
+		echo "❌ FINAL_VERSION is not set"; \
 	else \
-		echo "Base Image (versioned):  $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(DAR_BACKUP_IMAGE_VERSION)"; \
+		echo "Base Image (versioned):  $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)"; \
 		echo "Base Image (latest):     $(BASE_LATEST_TAG)"; \
-		echo "Final Image (local):     $(FINAL_IMAGE_NAME):$(DAR_BACKUP_IMAGE_VERSION)"; \
-		echo "Docker Hub Image:        $(DOCKERHUB_REPO):$(DAR_BACKUP_IMAGE_VERSION)"; \
+		echo "Final Image (local):     $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"; \
+		echo "Docker Hub Image:        $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
 	fi
 
 # ================================
