@@ -64,7 +64,7 @@ base: check_version validate
 
 
 
-release: check_version check-docker-creds  final verify-labels verify-cli-version  login push log-pushed-build-json
+release: check_version check-docker-creds  final verify-labels verify-cli-version login push log-pushed-build-json
 	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
 
 
@@ -178,14 +178,20 @@ log-pushed-build-json: check_version
 	@mkdir -p $(BUILD_LOG_DIR)
 	@test -f $(BUILD_LOG_PATH) || echo "[]" > $(BUILD_LOG_PATH)
 
+	$(eval DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
-	$(eval DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
-	$(eval BASE_TAG := $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION))
-	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
-	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
 
+	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
 	@if [ -z "$(DIGEST)" ]; then \
 		echo "❌ Digest not found. Make sure the image has been pushed."; \
+		exit 1; \
+	fi
+
+#	$(eval DIGEST := "PJE_TEST_DIGEST")
+
+	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
+	@if [ -z "$(IMAGE_ID)" ]; then \
+		echo "❌ Image ID not found. Did you build the final image?"; \
 		exit 1; \
 	fi
 
@@ -193,20 +199,93 @@ log-pushed-build-json: check_version
 	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
 
 	@jq --arg tag "$(FINAL_VERSION)" \
-	    --arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
+		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
+		--arg base "$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
+		--arg rev "$(GIT_REV)" \
+		--arg created "$(DATE)" \
+		--arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)" \
+		--arg digest "$(DIGEST_ONLY)" \
+		--arg image_id "$(IMAGE_ID)" \
+		--arg full_tag "$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
+		--argjson build_number $(BUILD_NUMBER) \
+		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "full_image_tag": $$full_tag, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
+		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH)
+
+
+	@echo "✅ Log entry added. Total builds: $$(jq length $(BUILD_LOG_PATH))"
+	@jq '.[-1]' $(BUILD_LOG_PATH)
+
+
+	@echo "🔄 Checking if $(BUILD_LOG_PATH) changed"
+	@if ! git diff --quiet $(BUILD_LOG_PATH); then \
+		git add $(BUILD_LOG_PATH); \
+		git commit -m "build-history: add $(FINAL_VERSION) metadata"; \
+		echo "✅ $(BUILD_LOG_PATH) updated and committed"; \
+	else \
+		echo "ℹ️ No changes to commit — build history already up to date"; \
+	fi
+
+
+
+test-log-pushed-build-json:
+	@echo "🧪 Testing log-pushed-build-json with mock values..."
+	@mkdir -p ./logs
+	@test -f ./logs/build-history.json || echo "[]" > ./logs/build-history.json
+
+	$(eval FINAL_VERSION := test-tag)
+	$(eval DAR_BACKUP_VERSION := 0.99.0-test)
+	$(eval BASE_TAG := dar-backup-base:24.04-test-tag)
+	$(eval GIT_REV := mockrev123)
+	$(eval DAR_BACKUP_DATE := 2025-07-13T00:00:00Z)
+	$(eval DOCKERHUB_REPO := per2jensen/dar-backup)
+	$(eval DIGEST_ONLY := sha256:deadbeef1234567890)
+	$(eval IMAGE_ID := sha256:cafebabef00d1234567890)
+	$(eval BUILD_LOG_PATH := ./logs/build-history.json)
+	$(eval BUILD_NUMBER := $(shell test -f ./logs/build-history.json && jq length ./logs/build-history.json || echo 0))
+
+	@jq --arg tag "$(FINAL_VERSION)" \
+		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
+		--arg base "$(BASE_TAG)" \
+		--arg rev "$(GIT_REV)" \
+		--arg created "$(DAR_BACKUP_DATE)" \
+		--arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)" \
+		--arg digest "$(DIGEST_ONLY)" \
+		--arg image_id "$(IMAGE_ID)" \
+		--argjson build_number $(BUILD_NUMBER) \
+		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
+		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH) && \
+		echo "✅ Test entry added:" && jq '.[-1]' $(BUILD_LOG_PATH)
+
+
+
+.PHONY: mock-log-json
+mock-log-json:
+	@echo "🧪 Mocking log-pushed-build-json..."
+
+	@mkdir -p $(BUILD_LOG_DIR)
+	@test -f $(BUILD_LOG_PATH) || echo "[]" > $(BUILD_LOG_PATH)
+
+	$(eval GIT_REV := mock1234)
+	$(eval DAR_BACKUP_DATE := 2025-07-13T14:00:00Z)
+	$(eval BASE_TAG := dar-backup-base:24.04-mock)
+	$(eval DIGEST_ONLY := sha256:deadbeef1234567890)
+	$(eval IMAGE_ID := sha256:cafebabef00d1234567890)
+	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
+
+	@jq --arg tag "0.0.mock" \
+	    --arg dar_backup_version "9.9.9" \
 	    --arg base "$(BASE_TAG)" \
 	    --arg rev "$(GIT_REV)" \
 	    --arg created "$(DAR_BACKUP_DATE)" \
-	    --arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)" \
+	    --arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/mock" \
 	    --arg digest "$(DIGEST_ONLY)" \
 	    --arg image_id "$(IMAGE_ID)" \
 	    --argjson build_number $(BUILD_NUMBER) \
-	    '. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
+	    '. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
 	    $(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH)
 
-	@if [ "$(COMMIT_LOG)" = "yes" ]; then \
-		$(MAKE) commit-log; \
-	fi
+	@echo "✅ Mock log entry added:"
+	@tail -n 5 $(BUILD_LOG_PATH)
 
 
 
@@ -280,8 +359,12 @@ check-docker-creds:
 
 
 push: check_version check-docker-creds
-	@echo "Push $(DOCKERHUB_REPO):$(FINAL_VERSION) to Docker Hub..."
-	$(DOCKER) push $(DOCKERHUB_REPO):$(FINAL_VERSION)
+	@if docker manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
+	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
+	else \
+	  echo "🚀 Pushing image $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
+	  docker push $(DOCKERHUB_REPO):$(FINAL_VERSION); \
+	fi
 
 
 # Show image version, Git revision, and build timestamp
