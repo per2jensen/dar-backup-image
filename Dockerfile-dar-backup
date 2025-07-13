@@ -16,14 +16,29 @@ LABEL org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install the dar-backup PyPI package
-RUN if [ -n "$DAR_BACKUP_VERSION" ]; then \
+RUN echo "🛠️ Installing dar-backup..." && \
+    if [ -n "$DAR_BACKUP_VERSION" ]; then \
       pip3 install "dar-backup==$DAR_BACKUP_VERSION" --break-system-packages; \
     else \
       pip3 install dar-backup --break-system-packages; \
     fi && \
-    command -v dar-backup >/dev/null || { echo "❌ dar-backup not found in PATH"; exit 1; } && \
-    dar-backup --version
+    pip3 show dar-backup || (echo "❌ dar-backup not installed" && exit 1)
 
+
+# PATH
+RUN echo "PATH=$PATH"
+
+# Fail early if it's not on PATH
+RUN echo "look for dar-backup in PATH: $PATH"
+RUN [ -x "$(command -v dar-backup)" ] || (echo "❌ dar-backup not executalbe" && exit 1)
+
+# Final validation
+RUN echo "🔍 Checking dar-backup..." 
+RUN if ! command -v dar-backup >/dev/null; then \
+      echo "❌ dar-backup not found in PATH" && exit 1; \
+    fi && \
+    version="$(dar-backup --version 2>/dev/null)" && \
+    echo "✅ Installed dar-backup version: $version"
 
 
 # Copy the default configuration
@@ -43,3 +58,6 @@ RUN chmod +x /entrypoint.sh
 # Entrypoint and default arguments
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--verbose", "--log-stdout"]
+
+
+RUN echo "✅ dar-backup image built successfully with version ${VERSION} and DAR_BACKUP_VERSION ${DAR_BACKUP_VERSION}"

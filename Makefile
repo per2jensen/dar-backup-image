@@ -14,8 +14,9 @@ SHELL := /bin/bash
 
 # Default values
 DOCKER ?= docker
+FINAL_VERSION ?= dev
 UBUNTU_VERSION ?= 24.04
-DAR_BACKUP_VERSION ?=
+DAR_BACKUP_VERSION ?= 0.8.0
 
 
 BASE_IMAGE_NAME = dar-backup-base
@@ -34,7 +35,7 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 # ================================
 
 .PHONY: all all-dev base final release clean clean-all push tag login dev dev-clean labels help \
-	check_version test test-integration all-dev dry-run-release-internal
+	check_version test test-integration all-dev dry-run-release-internal check-docker-creds
 
 check_version:
 	@if [ -z "$(FINAL_VERSION)" ]; then \
@@ -63,11 +64,35 @@ base: check_version validate
 
 
 
-release: check_version final verify-labels verify-cli-version  login push log-pushed-build-json
+release: check_version check-docker-creds  final verify-labels verify-cli-version  login push log-pushed-build-json
 	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
 
 
+
+final-dryrun:
+	@echo "🔎 FINAL DRY-RUN"
+	@echo "   FINAL_VERSION       = $(FINAL_VERSION)"
+	@echo "   DAR_BACKUP_VERSION  = $(DAR_BACKUP_VERSION)"
+	@echo "   UBUNTU_VERSION      = $(UBUNTU_VERSION)"
+	@echo "   BASE_IMAGE_NAME     = $(BASE_IMAGE_NAME)"
+	@echo "   FINAL_IMAGE_NAME    = $(FINAL_IMAGE_NAME)"
+	@echo "   DOCKERHUB_REPO      = $(DOCKERHUB_REPO)"
+	@echo
+	@echo "🔨 Image tags:"
+	@echo "   - $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+	@echo "   - $(DOCKERHUB_REPO):$(FINAL_VERSION)"
+	@echo
+	@echo "📦 Labels (subset):"
+	@echo "   org.opencontainers.image.version       = $(FINAL_VERSION)"
+	@echo "   org.dar-backup.version                 = $(DAR_BACKUP_VERSION)"
+	@echo "   org.opencontainers.image.revision      = $(shell git rev-parse --short HEAD)"
+	@echo "   org.opencontainers.image.created       = $(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
+	@echo
+	@echo "✅ Dry-run done. Run 'make final' to build."
+
+
 final: check_version validate base
+	@echo "🧪 DEBUG: FINAL target started"
 	@if [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
 		echo "❌ ERROR: DAR_BACKUP_VERSION must not be 'latest' for final builds."; \
 		echo "   Set a specific version (e.g., DAR_BACKUP_VERSION=0.8.0)"; \
@@ -79,7 +104,7 @@ final: check_version validate base
 	$(eval FINAL_TAG := $(FINAL_IMAGE_NAME):$(FINAL_VERSION))
 	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(FINAL_VERSION))
 	@echo "Building final image: $(FINAL_TAG) and $(DOCKERHUB_TAG) ..."
-	$(DOCKER) build -f Dockerfile-dar-backup \
+	$(DOCKER) build --no-cache -f Dockerfile-dar-backup \
 	    --build-arg base="$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
 		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
@@ -98,7 +123,13 @@ final: check_version validate base
 		-t $(FINAL_TAG) \
 		-t $(DOCKERHUB_TAG) .
 
-
+	@if ! echo "$(MAKECMDGOALS)" | grep -q release; then \
+		$(MAKE) verify-cli-version; \
+		$(MAKE) verify-labels; \
+	else \
+		echo "🔁 Skipping verify-cli-version (will be run by release)"; \
+	fi
+	
 
 verify-labels:
 	@$(eval FINAL_VERSION := $(or $(FINAL_VERSION)))
@@ -231,7 +262,24 @@ clean-all:
 	-docker images -q 'dar-backup*' | xargs -r docker rmi -f
 
 
-push: check_version
+check-docker-creds:
+	@missing=0; \
+	if [ -z "$(DOCKER_USER)" ]; then \
+	  echo "❌ Missing environment variable: DOCKER_USER"; \
+	  missing=1; \
+	fi; \
+	if [ -z "$(DOCKER_TOKEN)" ]; then \
+	  echo "❌ Missing environment variable: DOCKER_TOKEN"; \
+	  missing=1; \
+	fi; \
+	if [ "$$missing" -eq 1 ]; then \
+	  echo "💡 Please export both DOCKER_USER and DOCKER_TOKEN"; \
+	  exit 1; \
+	fi; \
+	echo "🔐 Docker credentials are present."
+
+
+push: check_version check-docker-creds
 	@echo "Push $(DOCKERHUB_REPO):$(FINAL_VERSION) to Docker Hub..."
 	$(DOCKER) push $(DOCKERHUB_REPO):$(FINAL_VERSION)
 
@@ -282,19 +330,19 @@ dry-run-release-internal: check_version
 # ================================
 
 all-dev: validate
-	@$(MAKE) FINAL_VERSION=dev base
+	@$(MAKE) base
 	@$(MAKE) dev
 
 
 dev: validate
-	@echo "Building development image: dar-backup:dev ..."
-	$(DOCKER) build -f Dockerfile-dar-backup \
-		--build-arg VERSION=dev \
-		-t dar-backup:dev .
+	@echo "Building development image: $(FINAL_VERSION) ..."
+	$(DOCKER) build --no-cache -f Dockerfile-dar-backup \
+		--build-arg FINAL_VERSION=$(FINAL_VERSION) \
+		-t dar-backup:$(FINAL_VERSION) .
 
 dev-clean:
-	@echo "Removing dev image..."
-	-$(DOCKER) rmi -f dar-backup:dev || true
+	@echo "Removing local $(FINAL_VERSION) image..."
+	-$(DOCKER) rmi -f dar-backup:$(FINAL_VERSION) || true
 
 
 
