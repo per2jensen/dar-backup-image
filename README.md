@@ -119,6 +119,11 @@ docker run --rm \
   -F --log-stdout --config /etc/dar-backup/dar-backup.conf
 ```
 
+The `--config` option to `dar-backup` is referencing the [baked-in config file](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf). In other words, the config file is part of the container image. To use another config file you have multiple options:
+
+- Modify the [baked-in](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf) and build a new image.
+- Use --config option to point to another (for example: /backup/dar-backup.conf, which in the example above means you physically put it on "$BACKUP_DIR"/dar-backup.conf)
+
 ## run-backup.sh
 
 This script runs a backup using a dar-backup Docker image.
