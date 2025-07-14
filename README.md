@@ -86,16 +86,17 @@ The mapping between physical directories on your file system and the expected di
 Determine if you want to built an image yourself, or use one of mine from Docker Hub.
 
 ```bash
-# Build base image
-docker build -f Dockerfile-base-image -t dar-backup-base:24.04 .
-# Build final image
-docker build -f Dockerfile-dar-backup -t dar-backup:0.5.6 .
+# make a container
+$ make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 dev  # make a development image
 
+# check
+$ docker images |grep "^dar-backup "
+dar-backup              0.5.6         9323c1007e66   About a minute ago   174MB
 
-# Set IMAGE to your own or mine
+# Set IMAGE to your own
 export IMAGE=dar-backup:0.5.6  # your own locally build image
 
-# Set IMAGE to one of mine on Docker Hub
+# Or set IMAGE to one of mine on Docker Hub
 export IMAGE=per2jensen/dar-backup:0.5.6
 ```
 
