@@ -72,29 +72,42 @@ The default dar-backup.conf baked into the image assumes the directories mention
 
 The locations should be mounted with actual directories on your machine for backups.
 
-| Volume Mount | Purpose                                          |
-| ------------ | ------------------------------------------------ |
-| `/data`      | Source directory for backup                      |
-| `/backup`    | `dar` archives and .par2 files are put here      |
-| `/restore`   | Optional restore target                          |
-| `/backup.d`  | Contains backup definition files                 |
+|Directories in file system| Directories in container| Purpose   |
+|------------------------- | ------------------------| ---------------------------------------------|
+|/some/dir/to/backup/      | `/data`                 | Source directory for backup                  |
+|/keep/backups/here/       | `/backup`               | `dar` archives and .par2 files are put here  |
+|/restore/tests/           | `/restore`              | Optional restore target                      |
+|/backup/definitions/      | `/backup.d`             | Contains backup definition files             |
+
+The mapping between physical directories on your file system and the expected directories inside the container is performed by the `-v /physical/dir:/container/dir` options  (see example below).
 
 ## 🚀 Usage Example
+
+Determine if you want to built an image yourself, or use one of mine from Docker Hub.
 
 ```bash
 # Build base image
 docker build -f Dockerfile-base-image -t dar-backup-base:24.04 .
-
 # Build final image
-docker build -f Dockerfile-dar-backup -t dar-backup:0.5.0-alpha .
+docker build -f Dockerfile-dar-backup -t dar-backup:0.5.6 .
 
+
+# Set IMAGE to your own or mine
+export IMAGE=dar-backup:0.5.6  # your own locally build image
+
+# Set IMAGE to one of mine on Docker Hub
+export IMAGE=per2jensen/dar-backup:0.5.6
+```
+
+Now run `dar-backup` in the container
+
+```bash
 # Run it (from script or manually)
 # Configuration
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=/tmp/test-backups
 export RESTORE_DIR=/tmp/test-restore
 export BACKUP_D_DIR=/tmp/test-backup.d
-export IMAGE=per2jensen/dar-backup:0.5.0-alpha
 
 docker run --rm \
   -e RUN_AS_UID=1000 \
