@@ -4,16 +4,38 @@
 [![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)](https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/weekly_clones.png)
 [![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/weekly_clones.png)  <sub>🎯 Stats powered by [ClonePulse](https://github.com/per2jensen/clonepulse)</sub>
 
-## Links to Gihub repositories
+## 🗄️ dar-backup-image
 
-`Dar-backup` is a Python wrapper around the very excellent [dar](https://github.com/Edrusb/DAR) backup program. `Dar-backup` is known to work on Ubuntu, it probably works on a multitude of Linux'es.
+`dar-backup-image` is a Docker image that bundles the powerful dar (Disk ARchiver) utility with the robust Python wrapper `dar-backup`. Together, they provide a flexible, automated, and verifiable backup solution suited for long-term data retention.
 
-`Dar-backup-image` is `dar-backup` baked into a Docker image.
+This image makes it easy to run `dar-backup` in a clean, isolated container environment — perfect for use in cron jobs, systemd timers, or CI pipelines. Whether you're backing up from FUSE-based cloud storage or verifying years-old archives, this image delivers consistent, reproducible results without requiring dar or Python tooling on the host.
 
-| Topic              | Link to Github   |
-| -------------------| ---------------- |
+At its core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for reliable full, differential, and incremental backups. It validates archives, performs restore tests, manages catalog databases, and optionally generates redundancy files to protect against bit rot.
+
+🔧 Highlights
+
+    Automated backup logic with dar-backup: tested, restore-verified, and redundancy-enhanced
+
+    Stateless and portable: no installation required on the host system
+
+    Ideal for FUSE filesystems: works without root, designed for user-space storage
+
+    Includes par2 for integrity protection
+
+    Ready for CI / cron / systemd: just mount volumes and go
+
+>The default entrypoint of this image is `dar-backup`, meaning any docker run invocation without a command will start dar-backup directly. You can also run dar, par2, or a shell interactively by overriding the entrypoint.
+
+Use `dar-backup-image` to centralize and simplify your backup operations — with restore confidence built in.
+
+## Useful links
+
+| Topic| Link   |
+| -----| ------ |
 | `dar-backup`       | [dar-backup on Github](https://github.com/per2jensen/dar-backup) |
 | `dar-backup-image` | [dar-backup-image](https://github.com/per2jensen/dar-backup-image)|
+| `Docker Hub repo`  | [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags) |
+| `dar`              | [Disk ARchive](http://dar.linux.free.fr/)|
 
 ## Docker Hub image repo
 
@@ -77,7 +99,7 @@ The locations should be mounted with actual directories on your machine for back
 |/some/dir/to/backup/      | `/data`                 | Source directory for backup                  |
 |/keep/backups/here/       | `/backup`               | `dar` archives and .par2 files are put here  |
 |/restore/tests/           | `/restore`              | Optional restore target                      |
-|/backup/definitions/      | `/backup.d`             | Contains backup definition files             |
+|[/backup/definitions/](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#backup-definition-example)      | `/backup.d`             | Contains backup definition files             |
 
 The mapping between physical directories on your file system and the expected directories inside the container is performed by the `-v /physical/dir:/container/dir` options  (see example below).
 
@@ -105,13 +127,13 @@ Now run `dar-backup` in the container
 ```bash
 # Run it (from script or manually)
 # Configuration
-export DATA_DIR=/tmp/test-data
-export BACKUP_DIR=/tmp/test-backups
-export RESTORE_DIR=/tmp/test-restore
-export BACKUP_D_DIR=/tmp/test-backup.d
+export DATA_DIR=/tmp/test-data          # the data to backup
+export BACKUP_DIR=/tmp/test-backups     # the directory that keeps the backups
+export RESTORE_DIR=/tmp/test-restore    # the directory used for restore tests during backup verification
+export BACKUP_D_DIR=/tmp/test-backup.d  # the directory keeping the `backup definitions`
 
 docker run --rm \
-  -e RUN_AS_UID=1000 \
+  -e RUN_AS_UID=$(id -u) \
   -v "$DATA_DIR":/data \
   -v "$BACKUP_DIR":/backup \
   -v "$RESTORE_DIR":/restore \
@@ -125,6 +147,8 @@ The `--config` option to `dar-backup` is referencing the [baked-in config file](
 - Modify the [baked-in](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf) and build a new image.
 - Use --config option to point to another (for example: /backup/dar-backup.conf, which in the example above means you physically put it on "$BACKUP_DIR"/dar-backup.conf)
 
+The container uses gosu to drop root privileges. Pass -e RUN_AS_UID=$(id -u) to run as your own user inside the container.
+
 ## run-backup.sh
 
 This script runs a backup using a dar-backup Docker image.
@@ -134,7 +158,7 @@ with the following features:
 
 ### 1
 
-Using the baked in dar-backup.conf file (se this repo).
+Using the baked in [dar-backup.conf](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf) file (se more [here](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#config)).
 
 ### 2
 
@@ -240,6 +264,74 @@ docker inspect per2jensen/dar-backup:0.5.1 | jq '.[0].Config.Labels'
 curl -s 'https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags?page_size=100' \
   | jq -r '.results[].name' | sort -V
 ```
+
+## Image deep diving
+
+Although `dar-backup` is the primary CLI inside the container, you can also run dar directly from the image to take manual backups or inspect archives — perfect for advanced workflows or testing.
+
+Here's a minimal example of how to use dar directly:
+
+```bash
+export DATA_DIR=/tmp/test-data
+export BACKUP_DIR=tmp/test-backups
+export IMAGE=per2jensen/dar-backup:0.5.6
+touch /tmp/test-data/TEST.txt
+
+docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
+```
+
+Example output
+
+```bash
+No terminal found for user interaction. All questions will be assumed a negative answer (less destructive choice), which most of the time will abort the program.
+
+ --------------------------------------------
+ 1 inode(s) saved
+   including 0 hard link(s) treated
+ 0 inode(s) changed at the moment of the backup and could not be saved properly
+ 0 byte(s) have been wasted in the archive to resave changing files
+ 0 inode(s) with only metadata changed
+ 0 inode(s) not saved (no inode/file change)
+ 0 inode(s) failed to be saved (filesystem error)
+ 0 inode(s) ignored (excluded by filters)
+ 0 inode(s) recorded as deleted from reference backup
+ --------------------------------------------
+ Total number of inode(s) considered: 1
+ --------------------------------------------
+ EA saved for 0 inode(s)
+ FSA saved for 1 inode(s)
+ --------------------------------------------
+```
+
+This shows that even without dar-backup, you can still invoke dar manually — helpful for debugging, recovery scenarios, or power-user workflows.
+
+    🧠 Tip: You can also run par2 directly using --entrypoint par2 if needed.
+
+## Common `dar-backup` commands
+
+### Full backup
+
+dar-backup --full-backup
+
+### Diff backup (requires prior FULL)
+
+dar-backup --differential-backup
+
+### Incremental backup (requires DIFF)
+
+dar-backup --incremental-backup
+
+### List available archives
+
+dar-backup --list
+
+### List contents of a backup
+
+dar-backup --list-contents <archive_name>
+
+### Restore
+
+dar-backup --restore <archive_name>
 
 ## Release procedure
 
