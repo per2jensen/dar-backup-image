@@ -28,6 +28,13 @@ At its core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for re
 
 Use `dar-backup-image` to centralize and simplify your backup operations — with restore confidence built in.
 
+<a name="dockerhub-builds"></a>
+## Builds uploaded to Docker Hub
+
+|Tag|`dar-backup`version|Git Revision|Docker Hub|
+|---|-------------------|------------|----------|
+| 0.5.6 | 0.8.0 | b583e85 | [tag:0.5.6](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.6/images/sha256-ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496) |
+
 ## Useful links
 
 | Topic| Link   |
@@ -36,6 +43,12 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 | `dar-backup-image` | [dar-backup-image](https://github.com/per2jensen/dar-backup-image)|
 | `Docker Hub repo`  | [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags) |
 | `dar`              | [Disk ARchive](http://dar.linux.free.fr/)|
+
+## License
+
+`dar-backup-image`is licensed under `GPL 3` or later.
+
+If you are unfamiliar with that license, take a look at the [LICENSE file in this repo](https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE)
 
 ## Docker Hub image repo
 
@@ -79,6 +92,12 @@ make all-dev
 make test
 ```
 
+Two images are built:
+
+1. A [base image](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile-base-image) which currently is a slimmed down ubuntu 24.04 image
+
+2. [dar-backup image](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile-dar-backup) is installed on top of the base image
+
 ## 🔧 Image Tags
 
 Some  images are put on [DockerHub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
@@ -87,6 +106,18 @@ The [Release procedure](https://github.com/per2jensen/dar-backup-image/blob/main
 
 - An image pushed to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 - Metadata about the image put in [build-history.md](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
+
+### 🐳 tagging strategy
+
+For now I am not using `latest`, as the images have not yet demonstrated their quality.
+
+I am currently going with:
+
+| Tag        | Description                                      | Docker Hub | Example Usage  |
+|------------|--------------------------------------------------|------------|----------------|
+| `:0.x.y`   | Versioned releases following semantic versioning | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.6`   |
+| `:stable`  | Latest "good" and trusted version; perhaps `:rc` | ✅ Yes     | `docker pull per2jensen/dar-backup:stable` |
+| `:dev`     | Development version; may be broken or incomplete | ❌ No      | `docker run dar-backup:dev` |
 
 ## 🧰 Volumes / Runtime Configuration
 
@@ -109,14 +140,14 @@ Determine if you want to built an image yourself, or use one of mine from Docker
 
 ```bash
 # make a container
-$ make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 dev  # make a development image
+$ make FINAL_VERSION=dev DAR_BACKUP_VERSION=0.8.0 dev  # make a local development image
 
 # check
-$ docker images |grep "^dar-backup "
-dar-backup              0.5.6         9323c1007e66   About a minute ago   174MB
+$ docker images |grep "dev"
+dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
 
 # Set IMAGE to your own
-export IMAGE=dar-backup:0.5.6  # your own locally build image
+export IMAGE=dar-backup:dev  # your own locally build image
 
 # Or set IMAGE to one of mine on Docker Hub
 export IMAGE=per2jensen/dar-backup:0.5.6

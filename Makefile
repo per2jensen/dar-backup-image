@@ -64,7 +64,7 @@ base: check_version validate
 
 
 
-release: check_version check-docker-creds  final verify-labels verify-cli-version login push log-pushed-build-json
+release: check_version check-docker-creds  final verify-labels verify-cli-version log-pushed-build-json login push log-pushed-build-json
 	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
 
 
@@ -181,13 +181,11 @@ log-pushed-build-json: check_version
 	$(eval DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
 
-	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
-	@if [ -z "$(DIGEST)" ]; then \
-		echo "❌ Digest not found. Make sure the image has been pushed."; \
-		exit 1; \
-	fi
-
-#	$(eval DIGEST := "PJE_TEST_DIGEST")
+ 	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
+ 	@if [ -z "$(DIGEST)" ]; then \
+ 		echo "❌ Digest not found. Make sure the image has been pushed."; \
+ 		exit 1; \
+ 	fi
 
 	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
 	@if [ -z "$(IMAGE_ID)" ]; then \
@@ -197,6 +195,7 @@ log-pushed-build-json: check_version
 
 	$(eval DIGEST_ONLY := $(shell echo "$(DIGEST)" | cut -d'@' -f2))
 	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
+
 
 	@jq --arg tag "$(FINAL_VERSION)" \
 		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
@@ -225,6 +224,23 @@ log-pushed-build-json: check_version
 		echo "ℹ️ No changes to commit — build history already up to date"; \
 	fi
 
+
+	@echo "📘 Updating README.md with latest build row..."
+	@FINAL_VERSION="$(FINAL_VERSION)" \
+	 DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
+	 GIT_REV="$(GIT_REV)" \
+	 DOCKERHUB_REPO="$(DOCKERHUB_REPO)" \
+	 DIGEST_ONLY="$(DIGEST_ONLY)" \
+	 ./scripts/patch-readme-build.sh
+
+	@echo "🔄 Checking if README.md changed"
+	@if ! git diff --quiet README.md; then \
+		git add README.md; \
+		git commit -m "Release: add tag $(FINAL_VERSION)"; \
+		echo "✅ README.md updated and committed"; \
+	else \
+		echo "ℹ️ No changes to commit — README.md already up to date"; \
+	fi
 
 
 test-log-pushed-build-json:
@@ -255,7 +271,6 @@ test-log-pushed-build-json:
 		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
 		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH) && \
 		echo "✅ Test entry added:" && jq '.[-1]' $(BUILD_LOG_PATH)
-
 
 
 
@@ -333,9 +348,10 @@ check-docker-creds:
 
 
 push: check_version check-docker-creds
+	exit 1
 	@if docker manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
-	else \
+	else
 	  echo "🚀 Pushing image $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
 	  docker push $(DOCKERHUB_REPO):$(FINAL_VERSION); \
 	fi
