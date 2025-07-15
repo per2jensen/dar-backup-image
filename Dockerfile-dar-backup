@@ -47,4 +47,4 @@ ENV DAR_BACKUP_CONFIG=/etc/dar-backup/dar-backup.conf \
 
 # Entrypoint and default args
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["--verbose", "--log-stdout"]
+#CMD ["--verbose", "--log-stdout"]
