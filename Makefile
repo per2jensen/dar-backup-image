@@ -35,7 +35,7 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 # ================================
 
 .PHONY: all all-dev base final release clean clean-all push tag login dev dev-clean labels help \
-	check_version test test-integration all-dev dry-run-release-internal check-docker-creds
+	check_version test test-integration all-dev dry-run-release-internal check-docker-creds test-log-pushed-build-json
 
 check_version:
 	@if [ -z "$(FINAL_VERSION)" ]; then \
@@ -203,7 +203,7 @@ log-pushed-build-json: check_version
 		--arg base "$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
 		--arg rev "$(GIT_REV)" \
 		--arg created "$(DATE)" \
-		--arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)" \
+		--arg url "https://hub.docker.com/repository/docker/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)/$(DIGEST_ONLY)" \
 		--arg digest "$(DIGEST_ONLY)" \
 		--arg image_id "$(IMAGE_ID)" \
 		--arg full_tag "$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
@@ -248,7 +248,7 @@ test-log-pushed-build-json:
 		--arg base "$(BASE_TAG)" \
 		--arg rev "$(GIT_REV)" \
 		--arg created "$(DAR_BACKUP_DATE)" \
-		--arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)" \
+		--arg url "https://hub.docker.com/repository/docker/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)/$(DIGEST_ONLY)" \
 		--arg digest "$(DIGEST_ONLY)" \
 		--arg image_id "$(IMAGE_ID)" \
 		--argjson build_number $(BUILD_NUMBER) \
@@ -256,36 +256,6 @@ test-log-pushed-build-json:
 		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH) && \
 		echo "✅ Test entry added:" && jq '.[-1]' $(BUILD_LOG_PATH)
 
-
-
-.PHONY: mock-log-json
-mock-log-json:
-	@echo "🧪 Mocking log-pushed-build-json..."
-
-	@mkdir -p $(BUILD_LOG_DIR)
-	@test -f $(BUILD_LOG_PATH) || echo "[]" > $(BUILD_LOG_PATH)
-
-	$(eval GIT_REV := mock1234)
-	$(eval DAR_BACKUP_DATE := 2025-07-13T14:00:00Z)
-	$(eval BASE_TAG := dar-backup-base:24.04-mock)
-	$(eval DIGEST_ONLY := sha256:deadbeef1234567890)
-	$(eval IMAGE_ID := sha256:cafebabef00d1234567890)
-	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
-
-	@jq --arg tag "0.0.mock" \
-	    --arg dar_backup_version "9.9.9" \
-	    --arg base "$(BASE_TAG)" \
-	    --arg rev "$(GIT_REV)" \
-	    --arg created "$(DAR_BACKUP_DATE)" \
-	    --arg url "https://hub.docker.com/r/$(DOCKERHUB_REPO)/tags/mock" \
-	    --arg digest "$(DIGEST_ONLY)" \
-	    --arg image_id "$(IMAGE_ID)" \
-	    --argjson build_number $(BUILD_NUMBER) \
-	    '. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
-	    $(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH)
-
-	@echo "✅ Mock log entry added:"
-	@tail -n 5 $(BUILD_LOG_PATH)
 
 
 
@@ -338,7 +308,11 @@ clean:
 
 # Remove all images related to dar-backup
 clean-all:
-	-docker images -q 'dar-backup*' | xargs -r docker rmi -f
+	@echo "Cleaning all dangling images..."
+	-$(DOCKER) images -f "dangling=true"
+	-$(DOCKER) image prune -f
+	@echo "Cleaning all dar-backup images..."
+	-$(DOCKER) images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep '^dar-backup' | awk '{print $2}' | xargs -r docker rmi -f
 
 
 check-docker-creds:
