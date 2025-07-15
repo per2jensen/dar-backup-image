@@ -28,6 +28,52 @@ At its core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for re
 
 Use `dar-backup-image` to centralize and simplify your backup operations — with restore confidence built in.
 
+---
+
+## 📑 Table of Contents
+
+- [📦 dar-backup image for container backups and more](#-dar-backup-image-for-container-backups-and-more)
+  - [🗄️ dar-backup-image](#️-dar-backup-image)
+  - [📑 Table of Contents](#-table-of-contents)
+  - [Builds uploaded to Docker Hub](#builds-uploaded-to-docker-hub)
+  - [🔧 Hands-on Demo: `dar-backup` in a Container](#-hands-on-demo-dar-backup-in-a-container)
+  - [Useful links](#useful-links)
+  - [License](#license)
+  - [Docker Hub image repo](#docker-hub-image-repo)
+  - [Description](#description)
+  - [How to test](#how-to-test)
+  - [🔧 Image Tags](#-image-tags)
+    - [🐳 tagging strategy](#-tagging-strategy)
+  - [🧰 Volumes / Runtime Configuration](#-volumes--runtime-configuration)
+  - [🚀 Usage Example](#-usage-example)
+  - [run-backup.sh](#run-backupsh)
+    - [1](#1)
+    - [2](#2)
+    - [3](#3)
+    - [4](#4)
+    - [5](#5)
+    - [6](#6)
+    - [Usage](#usage)
+  - [🔍 Discover Image Metadata](#-discover-image-metadata)
+    - [🧪 1. Check Tool Versions](#-1-check-tool-versions)
+    - [🏷️ 2. Inspect Image Labels](#️-2-inspect-image-labels)
+    - [📦 3. List Available Image Tags](#-3-list-available-image-tags)
+  - [Image deep diving](#image-deep-diving)
+  - [Common `dar-backup` commands](#common-dar-backup-commands)
+    - [Full backup](#full-backup)
+    - [Diff backup (requires prior FULL)](#diff-backup-requires-prior-full)
+    - [Incremental backup (requires DIFF)](#incremental-backup-requires-diff)
+    - [List available archives](#list-available-archives)
+    - [List contents of a backup](#list-contents-of-a-backup)
+    - [Restore](#restore)
+  - [Release procedure](#release-procedure)
+    - [Check version numbers and more](#check-version-numbers-and-more)
+    - [Build final](#build-final)
+    - [Do a dry-run release](#do-a-dry-run-release)
+    - [Do a Release](#do-a-release)
+
+---
+
 <a name="dockerhub-builds"></a>
 ## Builds uploaded to Docker Hub
 
@@ -35,6 +81,23 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 |---|-------------------|------------|----------|
 | 0.5.7| 0.8.0| ddf8afb|[tag:0.5.7](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.7/images/sha256:d66580f01bf9cbfc18267c3da4df25c9c0d4cd73f49e983ee71dd26742899f49)|
 | 0.5.6 | 0.8.0 | b583e85 | [tag:0.5.6](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.6/images/sha256-ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496) |
+
+---
+
+## 🔧 Hands-on Demo: `dar-backup` in a Container
+
+Curious how it all works in practice?
+
+Check out the [📄 step-by-step demo](https://github.com/per2jensen/dar-backup-image/blob/main/doc/demo-containerized-dar-backup.md), which walks through:
+
+- A full backup from mounted directories
+- Archive listing and contents inspection
+- Selective file restore (e.g., `.JPG` only)
+- Output logs, par2 generation, and verification
+
+All performed using `docker run` — no host installation required.
+
+---
 
 ## Useful links
 
@@ -45,11 +108,15 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 | `Docker Hub repo`  | [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags) |
 | `dar`              | [Disk ARchive](http://dar.linux.free.fr/)|
 
+---
+
 ## License
 
 `dar-backup-image`is licensed under `GPL 3` or later.
 
 If you are unfamiliar with that license, take a look at the [LICENSE file in this repo](https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE)
+
+---
 
 ## Docker Hub image repo
 
@@ -60,6 +127,8 @@ Those fond of curl can do this:
 ```bash
 curl -s https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags | jq '.results[].name'
 ```
+
+---
 
 ## Description
 
@@ -77,11 +146,7 @@ This image includes:
 - Clean, minimal Ubuntu 24.04 base (~170 MB)
 - CIS-aligned permissions and user-drop via gosu
 
-## License
-
-This repo is licensed under the GPL 3.0 License
-
-If you are not familiar with the license take a look at the included LICENSE file in the repository.
+---
 
 ## How to test
 
@@ -108,6 +173,8 @@ The [Release procedure](https://github.com/per2jensen/dar-backup-image/blob/main
 - An image pushed to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 - Metadata about the image put in [build-history.md](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
 
+---
+
 ### 🐳 tagging strategy
 
 For now I am not using `latest`, as the images have not yet demonstrated their quality.
@@ -119,6 +186,8 @@ I am currently going with:
 | `:0.x.y`   | Versioned releases following semantic versioning | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.6`   |
 | `:stable`  | Latest "good" and trusted version; perhaps `:rc` | ✅ Yes     | `docker pull per2jensen/dar-backup:stable` |
 | `:dev`     | Development version; may be broken or incomplete | ❌ No      | `docker run dar-backup:dev` |
+
+---
 
 ## 🧰 Volumes / Runtime Configuration
 
@@ -134,6 +203,8 @@ The locations should be mounted with actual directories on your machine for back
 |[/backup/definitions/](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#backup-definition-example)      | `/backup.d`             | Contains backup definition files             |
 
 The mapping between physical directories on your file system and the expected directories inside the container is performed by the `-v /physical/dir:/container/dir` options  (see example below).
+
+---
 
 ## 🚀 Usage Example
 
@@ -180,6 +251,8 @@ The `--config` option to `dar-backup` is referencing the [baked-in config file](
 - Use --config option to point to another (for example: /backup/dar-backup.conf, which in the example above means you physically put it on "$BACKUP_DIR"/dar-backup.conf)
 
 The container uses gosu to drop root privileges. Pass -e RUN_AS_UID=$(id -u) to run as your own user inside the container.
+
+---
 
 ## run-backup.sh
 
@@ -239,6 +312,8 @@ You can configure the directory layout by setting the following environment vari
 - DAR_BACKUP_D_DIR: Directory for backup definitions (default: WORKDIR/backup.d)
 
 - DAR_BACKUP_RESTORE_DIR: Directory for restored files (default: WORKDIR/restore)
+
+---
 
 ### Usage
 
@@ -339,6 +414,8 @@ This shows that even without dar-backup, you can still invoke dar manually — h
 
     🧠 Tip: You can also run par2 directly using --entrypoint par2 if needed.
 
+---
+
 ## Common `dar-backup` commands
 
 ### Full backup
@@ -364,6 +441,8 @@ dar-backup --list-contents <archive_name>
 ### Restore
 
 dar-backup --restore <archive_name>
+
+---
 
 ## Release procedure
 
