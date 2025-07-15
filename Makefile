@@ -181,11 +181,11 @@ log-pushed-build-json: check_version
 	$(eval DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
 
- 	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
- 	@if [ -z "$(DIGEST)" ]; then \
- 		echo "❌ Digest not found. Make sure the image has been pushed."; \
- 		exit 1; \
- 	fi
+	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
+	@if [ -z "$(DIGEST)" ]; then \
+		echo "❌ Digest not found. Make sure the image has been pushed."; \
+		exit 1; \
+	fi
 
 	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
 	@if [ -z "$(IMAGE_ID)" ]; then \
@@ -195,7 +195,6 @@ log-pushed-build-json: check_version
 
 	$(eval DIGEST_ONLY := $(shell echo "$(DIGEST)" | cut -d'@' -f2))
 	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
-
 
 	@jq --arg tag "$(FINAL_VERSION)" \
 		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
