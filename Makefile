@@ -203,7 +203,7 @@ log-pushed-build-json: check_version
 		--arg base "$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
 		--arg rev "$(GIT_REV)" \
 		--arg created "$(DATE)" \
-		--arg url "https://hub.docker.com/repository/docker/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)/$(DIGEST_ONLY)" \
+		--arg url "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
 		--arg digest "$(DIGEST_ONLY)" \
 		--arg image_id "$(IMAGE_ID)" \
 		--arg full_tag "$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
@@ -248,7 +248,7 @@ test-log-pushed-build-json:
 		--arg base "$(BASE_TAG)" \
 		--arg rev "$(GIT_REV)" \
 		--arg created "$(DAR_BACKUP_DATE)" \
-		--arg url "https://hub.docker.com/repository/docker/$(DOCKERHUB_REPO)/tags/$(FINAL_VERSION)/$(DIGEST_ONLY)" \
+		--arg url "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
 		--arg digest "$(DIGEST_ONLY)" \
 		--arg image_id "$(IMAGE_ID)" \
 		--argjson build_number $(BUILD_NUMBER) \
