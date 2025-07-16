@@ -25,7 +25,7 @@ You’ll need:
 - A mounted backup target directory (`$BACKUP_DIR`)
 - A directory for restore testing (`$RESTORE_DIR`)
 - One or more backup definitions in `$BACKUP_D_DIR`
-- A `dar-backup` image (e.g., `per2jensen/dar-backup:0.5.6`)
+- A `dar-backup` image (e.g., `per2jensen/dar-backup:0.5.8`)
 
 ---
 
@@ -73,7 +73,7 @@ export DATA_DIR=/home/pj/data                   # Source data
 export BACKUP_DIR=/media/pj/usb/image-test      # USB disk or backup destination
 export RESTORE_DIR=/tmp/test-restore            # Directory for restore testing
 export BACKUP_D_DIR=/tmp/test-backup.d          # Backup definitions location
-export IMAGE=per2jensen/dar-backup:dev          # dar-backup Docker image
+export IMAGE=per2jensen/dar-backup:0.5.8          # dar-backup Docker image
 
 docker run --rm \
   -e RUN_AS_UID=$(id -u) \
