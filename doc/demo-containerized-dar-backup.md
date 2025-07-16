@@ -73,7 +73,7 @@ export DATA_DIR=/home/pj/data                   # Source data
 export BACKUP_DIR=/media/pj/usb/image-test      # USB disk or backup destination
 export RESTORE_DIR=/tmp/test-restore            # Directory for restore testing
 export BACKUP_D_DIR=/tmp/test-backup.d          # Backup definitions location
-export IMAGE=per2jensen/dar-backup:0.5.8          # dar-backup Docker image
+export IMAGE=per2jensen/dar-backup:0.5.9          # dar-backup Docker image
 
 docker run --rm \
   -e RUN_AS_UID=$(id -u) \
@@ -248,7 +248,7 @@ $ docker run --rm   -e RUN_AS_UID=$(id -u) \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
   "$IMAGE" -r  media-test-backup_FULL_2025-07-15 \
-  --selection=\" -I '*.JPG' -g data/2025/2025-07\" \
+  --selection=" -I '*.JPG' -g data/2025/2025-07" \
   --config /etc/dar-backup/dar-backup.conf
 ```
 
