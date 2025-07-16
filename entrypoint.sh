@@ -59,11 +59,11 @@ export HOME="/tmp"
 # Run as specified user using setpriv (no shell re-parsing)
 if [ "$(id -u)" -eq 0 ]; then
   # Pre-run manager directly
-  setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_UID" --init-groups --no-new-privs \
+  setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_UID"  --clear-groups  --no-new-privs \
     manager --create-db --config "$CONFIG_PATH"
 
   # Then exec dar-backup directly with preserved arguments
-  exec setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_UID" --init-groups --no-new-privs \
+  exec setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_UID"  --clear-groups  --no-new-privs \
     dar-backup "${ARGS[@]}"
 else
   manager --create-db --config "$CONFIG_PATH"
