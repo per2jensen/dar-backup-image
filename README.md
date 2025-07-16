@@ -79,6 +79,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 
 |Tag|`dar-backup`version|Git Revision|Docker Hub|
 |---|-------------------|------------|----------|
+| 0.5.9| 0.8.1| 34c6e68|[tag:0.5.9](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.9/images/sha256:9d440fbbc0f4cd39f40b271ed19b55bcf1b4ed580d29a5ee0947109d770b7c14)|
 | 0.5.8| 0.8.0| 500d801|[tag:0.5.8](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.8/images/sha256:f8d438aa2e907661c14f42c2202c09776b777f4fd24cec49fee4a6b759306594)|
 | 0.5.7| 0.8.0| ddf8afb|[tag:0.5.7](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.7/images/sha256:d66580f01bf9cbfc18267c3da4df25c9c0d4cd73f49e983ee71dd26742899f49)|
 | 0.5.6 | 0.8.0 | b583e85 | [tag:0.5.6](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.6/images/sha256-ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496) |
