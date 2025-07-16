@@ -1,0 +1,47 @@
+########################################
+##   default backup definition
+########################################
+#
+#  Default is to backup everything in and below /data
+#
+#  Use multiple -g to include various directories
+#  Use multiple -P to exclude other directoreis
+#
+
+# Switch to ordered selection mode, which means that the following
+# options will be considered top to bottom
+ -am
+
+# Backup Root dir
+ -R /
+
+# Directories to backup below the Root dir
+# multiple -g can be given
+#  -g data/a/dir
+#  -g data/include/another/dir
+#  
+ -g data/
+
+
+# Directories to exclude below the Root dir
+# -P data/some/dir/to/exlude
+# -P data/exlude/another/dir
+
+
+# compression level
+ -z5
+
+# no overwrite, if you rerun a backup, 'dar' halts and asks what to do
+# as dar-backup is given -Q option, the result is dar-backup does not 
+# overwrite an existing archive.
+ -n
+
+ # size of each slice in the archive
+ --slice 12G
+
+# see https://github.com/per2jensen/dar-backup?tab=readme-ov-file#restore-test-exit-code-4
+--comparison-field=ignore-owner
+
+# bypass directores marked as cache directories
+# http://dar.linux.free.fr/doc/Features.html
+--cache-directory-tagging

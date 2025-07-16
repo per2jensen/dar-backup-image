@@ -293,6 +293,10 @@ If envvar WORKDIR is set, the script uses that as the base directory.
 
 If WORKDIR is not set, the script uses the directory where the script is located as the base directory.
 
+More info on [backup definitions in general](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#backup-definition-example)
+
+View [supplied `default` backup definition](https://github.com/per2jensen/dar-backup-image/blob/main/doc/backup-definitions/default)
+
 ### 5
 
 If IMAGE is not set, the script defaults to `dar-backup:dev`.
@@ -308,9 +312,11 @@ You can configure the directory layout by setting the following environment vari
 
 - DAR_BACKUP_DIR: Directory for backups (default: WORKDIR/backups)
 
-- DAR_BACKUP_DATA_DIR: Directory for data to backup (default: WORKDIR/data) 
+- DAR_BACKUP_DATA_DIR: Directory for data to backup (default: WORKDIR/data)
 
 - DAR_BACKUP_D_DIR: Directory for backup definitions (default: WORKDIR/backup.d)
+
+  - Take a look at the [supplied `default` backup definition](https://github.com/per2jensen/dar-backup-image/blob/main/doc/backup-definitions/default)
 
 - DAR_BACKUP_RESTORE_DIR: Directory for restored files (default: WORKDIR/restore)
 
