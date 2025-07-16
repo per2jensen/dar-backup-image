@@ -19,11 +19,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
+        util-linux \
         python3 \
         python3-pip \
         dar \
         par2 \
-        gosu \
         tzdata && \
     # Remove man pages, docs, locales, and unused share files
     rm -rf /usr/share/man/* \
