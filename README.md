@@ -79,11 +79,11 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 
 |Tag|`dar-backup`version|Git Revision|Docker Hub|
 |---|-------------------|------------|----------|
+| 0.5.12| 0.8.2| 122cc02|[tag:0.5.12](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.12/images/sha256:7b11d610a717ba6405c6161363664aad2e8fa5f875988fb295a4318205a32be5)|
 | 0.5.11| 0.8.2| 30f25b5|[tag:0.5.11](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.11/images/sha256:830c127c8890e07305c00b6ab85310a22f12bd817c576efe6a8141713fbdc5e2)|
 | 0.5.10| 0.8.1| 1d684b9|[tag:0.5.10](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.10/images/sha256:af49320e79c5448fe784d3a57cb109e3eed07bf285eccb888cd0602c8489fb51)|
 | 0.5.9| 0.8.1| 34c6e68|[tag:0.5.9](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.9/images/sha256:9d440fbbc0f4cd39f40b271ed19b55bcf1b4ed580d29a5ee0947109d770b7c14)|
 | 0.5.8| 0.8.0| 500d801|[tag:0.5.8](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.8/images/sha256:f8d438aa2e907661c14f42c2202c09776b777f4fd24cec49fee4a6b759306594)|
-| 0.5.7| 0.8.0| ddf8afb|[tag:0.5.7](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.7/images/sha256:d66580f01bf9cbfc18267c3da4df25c9c0d4cd73f49e983ee71dd26742899f49)|
 
 ---
 
