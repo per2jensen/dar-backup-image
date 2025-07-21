@@ -339,8 +339,6 @@ check-docker-creds:
 
 
 push: check_version check-docker-creds
-	echo "exiting early to avoid accidental push"
-	exit 1
 	@if docker manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
 	else \
