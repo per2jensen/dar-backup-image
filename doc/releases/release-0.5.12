@@ -1,0 +1,31 @@
+dar-backup-image v0.5.12 — First Public Release (Developer Preview)
+
+GitHub: v0.5.12
+
+This is the first tagged release of the `dar-backup` Docker image, providing a containerized environment for dar-backup with secure defaults, a unified build process, and an automated test suite.
+
+Highlights
+
+    Single Dockerfile build
+    Simplified image build, replacing multiple legacy build paths.
+
+    Security-focused
+
+        Runs as a non-root user (daruser, UID 1000).
+
+        Removed pip, setuptools, wheel, and unnecessary tooling from the runtime image.
+
+        Cleaned intermediate layers and minimized dependencies.
+
+        Verified clean (no high/critical CVEs) with Scout.
+
+    Improved testing
+
+        Full end-to-end test suite covering FULL, DIFF, and INCR backups using stateful and stateless datasets.
+
+        SHA256-based tracing ensures test reproducibility and data integrity validation.
+
+        New test cases validate restore functionality and .db creation via the manager tool.
+
+    Ready for developer use
+    While not yet production-certified, this image is now stable enough for test, evaluation, and integration work.

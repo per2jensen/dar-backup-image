@@ -58,6 +58,8 @@ fi
 
 
 export RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
+export RUN_AS_GID="${RUN_AS_GID:-$(id -g)}"
+
 # === Drop privileges if running as root ===
 if [ "$RUN_AS_UID" -eq 0 ]; then
   echo "❌ running as root not allowed, exciting."
@@ -136,9 +138,6 @@ echo "DAR backup restore directory:    $DAR_BACKUP_RESTORE_DIR"
 # === Setup required directories ===
 mkdir -p "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR"
 
-# === Sample data ===
-echo "Sample file" > "$DAR_BACKUP_DATA_DIR/hello.txt"
-
 # === Sample backup definition file ===
 cat <<EOF > "$DAR_BACKUP_D_DIR/default"
 # Basic ordered selection
@@ -163,11 +162,14 @@ EOF
 echo "Running dar-backup test with type: $BACKUP_TYPE_LC"
 echo
 
+
+
 docker run --rm \
+  --user "$RUN_AS_UID:$RUN_AS_GID" \
   -e RUN_AS_UID="$RUN_AS_UID" \
   -v "$DAR_BACKUP_DIR":/backups \
   -v "$DAR_BACKUP_D_DIR":/backup.d \
   -v "$DAR_BACKUP_DATA_DIR":/data \
   -v "$DAR_BACKUP_RESTORE_DIR":/restore \
   "$IMAGE" \
-  "$BACKUP_FLAG" --log-stdout
+  "$BACKUP_FLAG" --log-stdout --verbose
