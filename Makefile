@@ -6,6 +6,8 @@
 # make FINAL_VERSION=0.9.9-rc1 final
 # make FINAL_VERSION=0.9.9-rc1 release
 
+
+
 # ================================
 # Configuration
 # ================================
@@ -15,14 +17,12 @@ SHELL := /bin/bash
 # Default values
 DOCKER ?= docker
 FINAL_VERSION ?= dev
+
 UBUNTU_VERSION ?= 24.04
-DAR_BACKUP_VERSION ?= 0.8.0
+DAR_BACKUP_VERSION ?= 0.8.2
 
-
-BASE_IMAGE_NAME = dar-backup-base
 FINAL_IMAGE_NAME = dar-backup
 DOCKERHUB_REPO = per2jensen/dar-backup
-BASE_LATEST_TAG = $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)
 
 # === Build log configuration ===
 BUILD_LOG_DIR ?= doc
@@ -30,11 +30,12 @@ BUILD_LOG_FILE ?= build-history.json
 BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 
 
+
 # ================================
 # Targets
 # ================================
 
-.PHONY: all all-dev base final release clean clean-all push tag login dev dev-clean labels help \
+.PHONY: all all-dev final release clean clean-all push tag login dev dev-clean labels help \
 	check_version test test-integration all-dev dry-run-release-internal check-docker-creds test-log-pushed-build-json
 
 check_version:
@@ -50,23 +51,13 @@ check_version:
 	fi
 
 
-base: check_version validate
-	@echo "Building base image..."
-	$(DOCKER) build --pull -f Dockerfile-base-image \
-		--build-arg VERSION=$(FINAL_VERSION) \
-		--label org.opencontainers.image.base.name="ubuntu" \
-		--label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
-		--label org.opencontainers.image.base.created="$(BASE_IMAGE_DATE)" \
-		--label org.opencontainers.image.version="$(FINAL_VERSION)-base" \
-		--label org.opencontainers.image.authors="Per Jensen <per2jensen@gmail.com>" \
-		-t $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION) .
-	$(DOCKER) tag $(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION) $(BASE_LATEST_TAG)
+# Base image target is now a no-op (we only have one Dockerfile now)
+base:
+	@echo "Skipping separate base image build (single Dockerfile in use)"
 
 
-
-release: check_version check-docker-creds  final verify-labels verify-cli-version login push log-pushed-build-json
+release: check_version check-docker-creds final verify-labels verify-cli-version login push log-pushed-build-json
 	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
-
 	@echo "🏷️ Tagging release as v$(FINAL_VERSION)..."
 	@if git rev-parse "v$(FINAL_VERSION)" >/dev/null 2>&1; then \
 		echo "🔁 Git tag 'v$(FINAL_VERSION)' already exists — skipping tag creation."; \
@@ -75,6 +66,7 @@ release: check_version check-docker-creds  final verify-labels verify-cli-versio
 		git push origin "v$(FINAL_VERSION)"; \
 		echo "✅ Git tag 'v$(FINAL_VERSION)' created and pushed."; \
 	fi
+
 
 final-dryrun:
 	@echo "🔎 FINAL DRY-RUN"
@@ -98,30 +90,32 @@ final-dryrun:
 	@echo "✅ Dry-run done. Run 'make final' to build."
 
 
-final: check_version validate base
+
+
+
+final: check_version validate
 	@echo "🧪 DEBUG: FINAL target started"
 	@if [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
 		echo "❌ ERROR: DAR_BACKUP_VERSION must not be 'latest' for final builds."; \
 		echo "   Set a specific version (e.g., DAR_BACKUP_VERSION=0.8.0)"; \
 		exit 1; \
 	fi
-	$(eval BASE_IMAGE_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
 	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
 	$(eval FINAL_TAG := $(FINAL_IMAGE_NAME):$(FINAL_VERSION))
 	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(FINAL_VERSION))
 	@echo "Building final image: $(FINAL_TAG) and $(DOCKERHUB_TAG) ..."
-	$(DOCKER) build --no-cache -f Dockerfile-dar-backup \
-	    --build-arg base="$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
+	$(DOCKER) build --no-cache -f Dockerfile \
 		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		--label org.opencontainers.image.base.name=ubuntu \
+		--label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
 		--label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
 		--label org.opencontainers.image.created="$(DAR_BACKUP_DATE)" \
 		--label org.opencontainers.image.revision="$(GIT_REV)" \
 		--label org.opencontainers.image.title="dar-backup" \
 		--label org.opencontainers.image.version="$(FINAL_VERSION)" \
-		--label org.opencontainers.image.description="Container for DAR-based backups using `dar-backup`" \
-		--label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
+		--label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" \
 		--label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" \
 		--label org.opencontainers.image.licenses="GPL-3.0-or-later" \
 		--label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" \
@@ -136,7 +130,7 @@ final: check_version validate base
 	else \
 		echo "🔁 Skipping verify-cli-version (will be run by release)"; \
 	fi
-	
+
 
 verify-labels:
 	@$(eval FINAL_VERSION := $(or $(FINAL_VERSION)))
@@ -294,27 +288,18 @@ commit-log:
 	fi
 
 
-# The used script defaults to IMAGE="dar-backup:dev" if IMAGE is not set.
 test:
-	@echo "Running dar-backup FULL + DIFF + INCR test in a temp directory..."
-	@TMPDIR=$$(mktemp -d /tmp/dar-backup-test-XXXXXX) && \
-	TEST_SCRIPT=$${TEST_SCRIPT:-scripts/run-backup.sh} && \
-	SCRIPT_NAME=$$(basename $$TEST_SCRIPT) && \
-	cp $$TEST_SCRIPT $$TMPDIR/$$SCRIPT_NAME && \
-	chmod +x $$TMPDIR/$$SCRIPT_NAME && \
-	cd $$TMPDIR && \
-	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t FULL  || { echo "❌ FULL backup failed"; exit 1; }  && \
-	echo "first_diff_file" > $$TMPDIR/data/diff.txt && \
-	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t DIFF  || { echo "❌ DIFF backup failed"; exit 1; }  && \
-	echo "incr_file" > $$TMPDIR/data/incr.txt && \
-	WORKDIR=$$TMPDIR ./$$SCRIPT_NAME -t INCR  || { echo "❌ INCR backup failed"; exit 1; } && \
-	echo "✅ FULL + DIFF + INCR test completed in $$TMPDIR"
-
-
-
-# Run integration tests
-test-integration: all-dev
+	@echo "Running full test suite via tests/test_run_backup.sh..."
+	@_IMAGE=dar-backup:$${FINAL_VERSION:-dev}; \
+	RUN_AS_UID=$$(id -u) \
+	RUN_AS_GID=$$(id -g) \
+	IMAGE=$$_IMAGE \
 	bash tests/test_run_backup.sh
+
+
+test-integration: all-dev
+	@IMAGE=dar-backup:$${FINAL_VERSION:-dev} bash tests/test_run_backup.sh
+
 
 
 clean:
@@ -354,6 +339,8 @@ check-docker-creds:
 
 
 push: check_version check-docker-creds
+	echo "exiting early to avoid accidental push"
+	exit 1
 	@if docker manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
 	else \
@@ -412,11 +399,14 @@ all-dev: validate
 	@$(MAKE) dev
 
 
+
 dev: validate
 	@echo "Building development image: $(FINAL_VERSION) ..."
-	$(DOCKER) build --no-cache -f Dockerfile-dar-backup \
-		--build-arg FINAL_VERSION=$(FINAL_VERSION) \
+	$(DOCKER) build --no-cache -f Dockerfile \
+		--build-arg VERSION=$(FINAL_VERSION) \
+		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		-t dar-backup:$(FINAL_VERSION) .
+
 
 dev-clean:
 	@echo "Removing local $(FINAL_VERSION) image..."
