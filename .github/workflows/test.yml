@@ -28,7 +28,7 @@ jobs:
 
       - name: Build base ubuntu 24.04 image, and then the dev image
         run: |
-        make FINAL_VERSION=dev DAR_BACKUP_VERSION=0.8.2 dev
+          make FINAL_VERSION=dev DAR_BACKUP_VERSION=0.8.2 dev
 
       - name: Run FULL, DIFF & INCR tests
         run: make test
