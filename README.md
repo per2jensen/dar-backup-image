@@ -67,7 +67,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [List contents of a backup](#list-contents-of-a-backup)
     - [Restore](#restore)
   - [Release procedure](#release-procedure)
-    - [Check version numbers and more](#check-version-numbers-and-more)
+    - [Build dev](#build-dev)
     - [Build final](#build-final)
     - [Do a dry-run release](#do-a-dry-run-release)
     - [Do a Release](#do-a-release)
@@ -455,54 +455,99 @@ dar-backup --restore <archive_name>
 
 ## Release procedure
 
-### Check version numbers and more
+### Build dev
 
 ```bash
-make FINAL_VERSION=0.5.2  DAR_BACKUP_VERSION=0.8.0 final-dryrun 
-🔎 FINAL DRY-RUN
-   FINAL_VERSION       = 0.5.2
-   DAR_BACKUP_VERSION  = 0.8.0
-   UBUNTU_VERSION      = 24.04
-   BASE_IMAGE_NAME     = dar-backup-base
-   FINAL_IMAGE_NAME    = dar-backup
-   DOCKERHUB_REPO      = per2jensen/dar-backup
+make dev-nuke
+....
+```
 
-🔨 Image tags:
-   - dar-backup:0.5.2
-   - per2jensen/dar-backup:0.5.2
+```bash
+make FINAL_VERSION=0.5.13 DAR_BACKUP_VERSION=0.8.2 dev
+```
 
-📦 Labels (subset):
-   org.opencontainers.image.version       = 0.5.2
-   org.dar-backup.version                 = 0.8.0
-   org.opencontainers.image.revision      = 5cca8a9
-   org.opencontainers.image.created       = 2025-07-13T14:06:57Z
+gives
 
-✅ Dry-run done. Run 'make final' to build.
+```bash
+Building development image (cached & labeled): 0.5.13                                                                             
+docker build -f Dockerfile \
+  --build-arg VERSION=0.5.13 \
+  --build-arg DAR_BACKUP_VERSION=0.8.2 \
+  --label org.opencontainers.image.base.name=ubuntu --label org.opencontainers.image.base.version="24.04" --label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" --label org.opencontainers.image.created="2025-07-22T14:20:22Z" --label org.opencontainers.image.revision="d58c85c" --label org.opencontainers.image.title="dar-backup" --label org.opencontainers.image.version="0.5.13" --label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" --label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" --label org.opencontainers.image.licenses="GPL-3.0-or-later" --label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" --label org.opencontainers.image.ref.name="per2jensen/dar-backup:0.5.13" --label org.dar-backup.version="0.8.2" \
+  -t dar-backup:dev \
+  .
+[+] Building 1.0s (14/14) FINISHED                                                                                 docker:default
+ => [internal] load build definition from Dockerfile                                                                         0.0s
+ => => transferring dockerfile: 2.56kB                                                                                       0.0s
+ => [internal] load metadata for docker.io/library/ubuntu:24.04                                                              0.5s
+ => [internal] load .dockerignore                                                                                            0.0s
+ => => transferring context: 567B                                                                                            0.0s
+ => [builder 1/2] FROM docker.io/library/ubuntu:24.04@sha256:a08e551cb33850e4740772b38217fc1796a66da2506d312abe51acda354ff0  0.0s
+ => [internal] load build context                                                                                            0.0s
+ => => transferring context: 70B                                                                                             0.0s
+ => CACHED [stage-1 2/8] RUN apt-get update && apt-get dist-upgrade -y   && apt-get install -y --no-install-recommends       0.0s
+ => CACHED [builder 2/2] RUN apt-get update && apt-get install -y --no-install-recommends       python3 python3-venv python  0.0s
+ => CACHED [stage-1 3/8] COPY --from=builder /opt/venv /opt/venv                                                             0.0s
+ => CACHED [stage-1 4/8] RUN find /opt/venv -type d -name "__pycache__" -exec rm -rf {} +   && find /opt/venv -type f -name  0.0s
+ => CACHED [stage-1 5/8] COPY dar-backup.conf /etc/dar-backup/dar-backup.conf                                                0.0s
+ => CACHED [stage-1 6/8] COPY entrypoint.sh /entrypoint.sh                                                                   0.0s
+ => CACHED [stage-1 7/8] RUN chmod +x /entrypoint.sh                                                                         0.0s
+ => CACHED [stage-1 8/8] RUN userdel -f ubuntu 2>/dev/null || true   && rm -rf /home/ubuntu || true   && useradd -r -u 1000  0.0s
+ => exporting to image                                                                                                       0.1s
+ => => exporting layers                                                                                                      0.0s
+ => => writing image sha256:1aedcdb31d27aeec793dde6da9576d656e70c4d15390e8615abd73643f75969f                                 0.0s
+ => => naming to docker.io/library/dar-backup:dev                     
 ```
 
 ### Build final
 
 ```bash
-make FINAL_VERSION=0.5.2 DAR_BACKUP_VERSION=0.8.0 final
-...
-🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.0 )
-✅ dar-backup --version is correct: 0.8.0
-make[1]: Leaving directory '/home/pj/git/dar-backup-image'
+make FINAL_VERSION=0.5.13 DAR_BACKUP_VERSION=0.8.2 final
+```
+
+gives
+
+```bash
+🔎 Ensuring dar-backup:dev exists and is fresh…
+✅ dar-backup:dev is fresh (age 0m0s)
+🛠️  Tagging final image as 0.5.13…
+
+🔎 Verifying CLI version…
 make[1]: Entering directory '/home/pj/git/dar-backup-image'
-🔍 Verifying OCI image labels on dar-backup:0.5.2
+🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.2 )
+✅ dar-backup --version is correct: 0.8.2
+make[1]: Leaving directory '/home/pj/git/dar-backup-image'
+
+🔍 Verifying OCI image labels…
+make[1]: Entering directory '/home/pj/git/dar-backup-image'
+🔍 Verifying OCI image labels on dar-backup:0.5.13
 ✅ org.opencontainers.image.authors: Per Jensen <dar-backup@pm.me>
 ✅ org.opencontainers.image.base.name: ubuntu
 ✅ org.opencontainers.image.base.version: 24.04
-✅ org.opencontainers.image.created: 2025-07-13T14:09:02Z
-✅ org.opencontainers.image.description: Container for DAR-based backups using 
+✅ org.opencontainers.image.created: 2025-07-22T14:20:22Z
+✅ org.opencontainers.image.description: Container for DAR-based backups using `dar-backup`
 ✅ org.opencontainers.image.licenses: GPL-3.0-or-later
-✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.2
-✅ org.opencontainers.image.revision: 5cca8a9
+✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.13
+✅ org.opencontainers.image.revision: d58c85c
 ✅ org.opencontainers.image.source: https://github.com/per2jensen/dar-backup-image
 ✅ org.opencontainers.image.title: dar-backup
 ✅ org.opencontainers.image.url: https://hub.docker.com/r/per2jensen/dar-backup
-✅ org.opencontainers.image.version: 0.5.2
+✅ org.opencontainers.image.version: 0.5.13
 🎉 All required OCI labels are present.
+make[1]: Leaving directory '/home/pj/git/dar-backup-image'
+
+📊 Image layer size report (for audit):
+make[1]: Entering directory '/home/pj/git/dar-backup-image'
+🔍 Image size report for dar-backup:0.5.13
+───────────────────────────────────────────────
+Total Size: 143MB (ID: 1aedcdb31d27)
+
+Largest layers (all sizes in MB):
+78.1 MB    /bin/sh -c #(nop) ADD file:b4619a63cd7829e1338ddaa4995ca17003002dd54b0dfd675a6f5
+6.83 MB    COPY /opt/venv /opt/venv # buildkit
+58 MB      RUN /bin/sh -c apt-get update && apt-get dist-upgrade -y   && apt-get install -y
+
+Tip: Use 'make dev-nuke' for a fully fresh rebuild if something looks off.
 make[1]: Leaving directory '/home/pj/git/dar-backup-image'
 ```
 
@@ -511,33 +556,74 @@ make[1]: Leaving directory '/home/pj/git/dar-backup-image'
 This builds the image and runs the test cases against it.
 
 ```bash
-make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 dry-run-release
+$ make FINAL_VERSION=0.5.13 DAR_BACKUP_VERSION=0.8.2 dry-run-release
+
+🔍 Creating temporary dry-run environment...
+🧹 Removing stale .dryrun worktree...
+Preparing worktree (detached HEAD bf4dabd)
+HEAD is now at bf4dabd draft
+🚧 Running release steps in .dryrun...
+make[1]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
+🔧 Building image dar-backup:0.5.13 (dry-run, no push to Docker Hub)
+make FINAL_VERSION=0.5.13 final verify-labels verify-cli-version
+make[2]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
+🔎 Ensuring dar-backup:dev exists and is fresh…
+🛠️  Tagging final image as 0.5.13…
+
+🔎 Verifying CLI version…
+make[3]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
+🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.2 )
+✅ dar-backup --version is correct: 0.8.2
+make[3]: Leaving directory '/home/pj/git/dar-backup-image/.dryrun'
+
+🔍 Verifying OCI image labels…
+make[3]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
+🔍 Verifying OCI image labels on dar-backup:0.5.13
+✅ org.opencontainers.image.authors: Per Jensen <dar-backup@pm.me>
+✅ org.opencontainers.image.base.name: ubuntu
+✅ org.opencontainers.image.base.version: 24.04
+✅ org.opencontainers.image.created: 2025-07-22T14:20:22Z
+✅ org.opencontainers.image.description: Container for DAR-based backups using `dar-backup`
+✅ org.opencontainers.image.licenses: GPL-3.0-or-later
+✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.13
+✅ org.opencontainers.image.revision: d58c85c
+✅ org.opencontainers.image.source: https://github.com/per2jensen/dar-backup-image
+✅ org.opencontainers.image.title: dar-backup
+✅ org.opencontainers.image.url: https://hub.docker.com/r/per2jensen/dar-backup
+✅ org.opencontainers.image.version: 0.5.13
+🎉 All required OCI labels are present.
+make[3]: Leaving directory '/home/pj/git/dar-backup-image/.dryrun'
+
+📊 Image layer size report (for audit):
+make[3]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
+🔍 Image size report for dar-backup:0.5.13
+───────────────────────────────────────────────
+Total Size: 143MB (ID: 1aedcdb31d27)
+
+Largest layers (all sizes in MB):
+78.1 MB    /bin/sh -c #(nop) ADD file:b4619a63cd7829e1338ddaa4995ca17003002dd54b0dfd675a6f5
+6.83 MB    COPY /opt/venv /opt/venv # buildkit
+58 MB      RUN /bin/sh -c apt-get update && apt-get dist-upgrade -y   && apt-get install -y
+
+Tip: Use 'make dev-nuke' for a fully fresh rebuild if something looks off.
 ...
-2025-07-13 14:12:13,182 - INFO - Type of backup:   INCR
-2025-07-13 14:12:13,183 - INFO - ======================================
-2025-07-13 14:12:13,184 - INFO - ===> Starting INCR backup for /backup.d/default
-[14:12:13] [~] Not a terminal — progress bar skipped.        rich_progress.py:62
-2025-07-13 14:12:13,219 - INFO - INCR backup completed successfully.
-2025-07-13 14:12:13,435 - INFO - Catalog for archive '/backups/default_INCR_2025-07-13' added successfully to its manager.
-2025-07-13 14:12:13,436 - INFO - Starting verification...
-[14:12:13] [~] Not a terminal — progress bar skipped.        rich_progress.py:62
-2025-07-13 14:12:13,504 - INFO - Archive integrity test passed.
-2025-07-13 14:12:13,569 - INFO - No files between 1MB and 20MB for verification, skipping
-2025-07-13 14:12:13,569 - INFO - Verification completed successfully.
-2025-07-13 14:12:13,569 - INFO - Generate par2 redundancy files.
-2025-07-13 14:12:13,570 - INFO - 1/1: Now generating par2 files for /backups/default_INCR_2025-07-13.1.dar
-2025-07-13 14:12:13,603 - INFO - 1/1: Done
-2025-07-13 14:12:13,603 - INFO - par2 files completed successfully.
-2025-07-13 14:12:13,603 - INFO - END TIME: 1752415933
-✔ INCR backup (requires DIFF first)
-make[1]: Leaving directory '/home/pj/git/dar-backup-image/.dryrun'
-✅ Dry-run complete — no changes made to working directory
+Running pytest (full suite)...
+====================================================== test session starts =======================================================
+platform linux -- Python 3.12.3, pytest-7.4.4, pluggy-1.4.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/pj/git/dar-backup-image
+collected 10 items            
 ...
+====================================================== 10 passed in 14.99s =======================================================
+make[1]: Leaving directory '/home/pj/git/dar-backup-image'
 ```
 
 ### Do a Release
 
-Set DOCKER_USER and DOCKER_TOKEN envvars first.
+Set envvars:
+
+- DOCKER_USER
+- DOCKER_TOKEN
 
 ```bash
 make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 release
