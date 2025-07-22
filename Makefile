@@ -122,6 +122,16 @@ final: check_version validate dev-clean
 		-t $(FINAL_TAG) -t $(DOCKERHUB_TAG) .
 
 
+	@if ! echo "$(MAKECMDGOALS)" | grep -q release; then \
+		$(MAKE) verify-cli-version; \
+		$(MAKE) verify-labels; \
+	else \
+		echo "🔁 Skipping verify-cli-version (will be run by release)"; \
+	fi
+
+	@echo
+	@echo "📊 Image layer size report (for audit):"
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
 
 
 final-old: check_version validate
@@ -150,8 +160,18 @@ final-old: check_version validate
 		-t $(FINAL_TAG) \
 		-t $(DOCKERHUB_TAG) .
 
-	$(MAKE) verify-cli-version
-	$(MAKE) verify-labels
+
+	@if ! echo "$(MAKECMDGOALS)" | grep -q release; then \
+		$(MAKE) verify-cli-version; \
+		$(MAKE) verify-labels; \
+	else \
+		echo "🔁 Skipping verify-cli-version (will be run by release)"; \
+	fi
+
+	@echo
+	@echo "📊 Image layer size report (for audit):"
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
+
 
 
 final-old2: check_version validate
@@ -484,6 +504,17 @@ dev-nuke:
 		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		-t dar-backup:$(FINAL_VERSION) .
+
+
+size-report:
+	@echo "🔍 Image size report for dar-backup:$(FINAL_VERSION)"
+	@echo "───────────────────────────────────────────────"
+	@docker images dar-backup:$(FINAL_VERSION) --format "Total Size: {{.Size}} (ID: {{.ID}})"
+	@echo
+	@echo "Largest layers (all sizes in MB):"
+	@scripts/size-report.sh dar-backup:$(FINAL_VERSION)
+	@echo
+	@echo "Tip: Use 'make dev-nuke' for a fully fresh rebuild if something looks off."
 
 
 

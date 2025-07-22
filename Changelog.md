@@ -1,5 +1,32 @@
 # dar-backup-image Changelog
 
+## v0.5.13 - 2025-07-22
+
+Github link: [v0.5.13](https://github.com/per2jensen/dar-backup-image/tree/v0.5.13)
+
+### Added
+
+- **`make size-report`**: New target to display image layer sizes in MB (normalized, readable table).  
+- **`make dev-nuke`**: Easy cleanup of all build cache and layers for troubleshooting.
+
+### Changed
+
+- Image size reduced from **270 MB → 143 MB** while retaining:
+  - Standard `ubuntu:24.04` base image (no switch to slim/minimal).  
+  - Full `dist-upgrade` for security updates.  
+- Combined redundant `RUN` steps in Dockerfile to shrink intermediate layers.
+- Virtualenv cleanup improved (removes tests, `pip`, `setuptools`, and `wheel` entirely).  
+- Truncated long Docker history commands in size reports for easier reading.
+
+### Testing
+
+- Legacy Bash test suite replaced with **pytest setup**
+  - Proper fixtures and `conftest.py`.
+  - Stateful FULL → DIFF → INCR tests combined into a single coherent test.
+  - SHA256 hash reporting preserved for dataset integrity checks.
+
+---
+
 ## v0.5.12 - 2025-07-21
 
 Github link: [v0.5.12](https://github.com/per2jensen/dar-backup-image/tree/v0.5.12)

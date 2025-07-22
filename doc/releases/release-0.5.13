@@ -1,0 +1,34 @@
+dar-backup-image v0.5.13 – Leaner, Smarter, Fully Tested
+
+This release focuses on streamlined testing, smaller images, and better build tooling while retaining security and stability.
+Highlights
+
+    Image size reduced from 270 MB → 143 MB
+
+        Switched to python3-minimal and removed unnecessary Python packaging tools.
+
+        Cleaned up locales, man pages, caches, and build artifacts.
+
+        Combined Docker RUN steps to reduce intermediate layers.
+
+    Security preserved
+
+        Retained dist-upgrade during image build to ensure all base packages are patched.
+
+    Testing overhauled
+
+        Legacy Bash-based test suite migrated to pytest (v7.4.4) with proper fixtures and conftest.py.
+
+        Stateful backup chain tests (FULL → DIFF → INCR) combined into a single cohesive test.
+
+        SHA256 hashes printed during test runs for easy integrity verification.
+
+        Tests now run quickly via make test using the dev build.
+
+    Developer experience improvements
+
+        Added make size-report to analyze image layer sizes (normalized to MB, with readable output).
+
+        Integrated automatic image size audit into make final builds — each release build shows a full layer breakdown.
+
+        Added make dev-nuke to prune all cache and layers for clean troubleshooting builds.
