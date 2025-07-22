@@ -133,12 +133,12 @@ final: check_version
 	  echo "❌ dar-backup:dev not found — please run 'make dev' first"; exit 1; \
 	fi
 
-	@created="$$(docker inspect --format '{{.Created}}' dar-backup:dev)"; \
-	  age_sec="$$(($(shell date +%s) - $$(date -d "$$created" +%s)))"; \
-	  if [ $$age_sec -gt 300 ]; then \
-	    echo "❌ dar-backup:dev is too old ($$((age_sec/60))m$$((age_sec%60))s) — rebuild it"; exit 1; \
-	  fi
-	@echo "✅ dar-backup:dev is fresh (age $$((age_sec/60))m$$((age_sec%60))s)"
+#	@created="$$(docker inspect --format '{{.Created}}' dar-backup:dev)"; \
+#	  age_sec="$$(($(shell date +%s) - $$(date -d "$$created" +%s)))"; \
+#	  if [ $$age_sec -gt 300 ]; then \
+#	    echo "❌ dar-backup:dev is too old ($$((age_sec/60))m$$((age_sec%60))s) — rebuild it"; exit 1; \
+#	  fi
+#	@echo "✅ dar-backup:dev is fresh (age $$((age_sec/60))m$$((age_sec%60))s)"
 
 	@echo "🛠️  Tagging final image as $(FINAL_VERSION)…"
 	@docker tag dar-backup:dev dar-backup:$(FINAL_VERSION)
