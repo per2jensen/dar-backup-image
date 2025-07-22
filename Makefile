@@ -91,9 +91,70 @@ final-dryrun:
 
 
 
+final: check_version validate dev-clean
+	@echo "Tagging and labeling final image: dar-backup:$(FINAL_VERSION)"
+	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
+	$(eval DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
+	$(eval FINAL_TAG := dar-backup:$(FINAL_VERSION))
+	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(FINAL_VERSION))
+
+	# Apply labels (OCI metadata)
+	docker image inspect $(FINAL_TAG) >/dev/null 2>&1 || \
+	  (echo "❌ Dev image $(FINAL_TAG) not found. Run 'make dev' first." && exit 1)
+
+	docker tag $(FINAL_TAG) $(DOCKERHUB_TAG)
+
+	# Optionally apply labels using docker buildx (without rebuilding layers)
+	docker buildx build --load \
+		--label org.opencontainers.image.base.name=ubuntu \
+		--label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
+		--label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
+		--label org.opencontainers.image.created="$(DAR_BACKUP_DATE)" \
+		--label org.opencontainers.image.revision="$(GIT_REV)" \
+		--label org.opencontainers.image.title="dar-backup" \
+		--label org.opencontainers.image.version="$(FINAL_VERSION)" \
+		--label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" \
+		--label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" \
+		--label org.opencontainers.image.licenses="GPL-3.0-or-later" \
+		--label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" \
+		--label org.opencontainers.image.ref.name="$(DOCKERHUB_TAG)" \
+		--label org.dar-backup.version="$(DAR_BACKUP_VERSION)" \
+		-t $(FINAL_TAG) -t $(DOCKERHUB_TAG) .
 
 
-final: check_version validate
+
+
+final-old: check_version validate
+	@echo "🧪 Building final image: dar-backup:$(FINAL_VERSION) ..."
+	$(eval DAR_BACKUP_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
+	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
+	$(eval FINAL_TAG := dar-backup:$(FINAL_VERSION))
+	$(eval DOCKERHUB_TAG := $(DOCKERHUB_REPO):$(FINAL_VERSION))
+
+	$(DOCKER) build -f Dockerfile \
+		--build-arg VERSION=$(FINAL_VERSION) \
+		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		--label org.opencontainers.image.base.name=ubuntu \
+		--label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
+		--label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
+		--label org.opencontainers.image.created="$(DAR_BACKUP_DATE)" \
+		--label org.opencontainers.image.revision="$(GIT_REV)" \
+		--label org.opencontainers.image.title="dar-backup" \
+		--label org.opencontainers.image.version="$(FINAL_VERSION)" \
+		--label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" \
+		--label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" \
+		--label org.opencontainers.image.licenses="GPL-3.0-or-later" \
+		--label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" \
+		--label org.opencontainers.image.ref.name="$(DOCKERHUB_TAG)" \
+		--label org.dar-backup.version="$(DAR_BACKUP_VERSION)" \
+		-t $(FINAL_TAG) \
+		-t $(DOCKERHUB_TAG) .
+
+	$(MAKE) verify-cli-version
+	$(MAKE) verify-labels
+
+
+final-old2: check_version validate
 	@echo "🧪 DEBUG: FINAL target started"
 	@if [ "$(DAR_BACKUP_VERSION)" = "latest" ]; then \
 		echo "❌ ERROR: DAR_BACKUP_VERSION must not be 'latest' for final builds."; \
@@ -288,13 +349,11 @@ commit-log:
 	fi
 
 
-test:
-	@echo "Running full test suite via tests/test_run_backup.sh..."
-	@_IMAGE=dar-backup:$${FINAL_VERSION:-dev}; \
-	RUN_AS_UID=$$(id -u) \
-	RUN_AS_GID=$$(id -g) \
-	IMAGE=$$_IMAGE \
-	bash tests/test_run_backup.sh
+test: all-dev
+	@echo "Running pytest (full suite)..."
+	@FINAL_VERSION=$${FINAL_VERSION:-dev}; \
+	IMAGE=dar-backup:$${FINAL_VERSION} \
+	pytest -s -v $(PYTEST_ARGS) tests/
 
 
 test-integration: all-dev
@@ -392,23 +451,39 @@ dry-run-release-internal: check_version
 # Dev build
 # ================================
 
-all-dev: validate
-	@$(MAKE) base
-	@$(MAKE) dev
+all-dev: dev
 
 
 
 dev: validate
-	@echo "Building development image: $(FINAL_VERSION) ..."
-	$(DOCKER) build --no-cache -f Dockerfile \
+	@echo "Building development image (cached): $(FINAL_VERSION) ..."
+	$(DOCKER) build -f Dockerfile \
 		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		-t dar-backup:$(FINAL_VERSION) .
 
 
+# Default clean: keeps Ubuntu/base layers for faster rebuilds
 dev-clean:
-	@echo "Removing local $(FINAL_VERSION) image..."
+	@echo "Removing local $(FINAL_VERSION) image and old dangling layers..."
 	-$(DOCKER) rmi -f dar-backup:$(FINAL_VERSION) || true
+	-$(DOCKER) image prune -f
+	@echo "Rebuilding image (keeping base cache)..."
+	$(DOCKER) build --no-cache -f Dockerfile \
+		--build-arg VERSION=$(FINAL_VERSION) \
+		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		-t dar-backup:$(FINAL_VERSION) .
+
+# Full nuke: deletes *all* caches and forces a completely fresh build
+dev-nuke:
+	@echo "Pruning ALL Docker build caches and images (this may take a while)..."
+	-$(DOCKER) builder prune -a -f
+	-$(DOCKER) image prune -a -f
+	@echo "Rebuilding image from scratch..."
+	$(DOCKER) build --no-cache -f Dockerfile \
+		--build-arg VERSION=$(FINAL_VERSION) \
+		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		-t dar-backup:$(FINAL_VERSION) .
 
 
 
