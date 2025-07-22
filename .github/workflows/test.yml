@@ -24,7 +24,7 @@ jobs:
       - name: Install required system packages
         run: |
           sudo apt update
-          sudo apt install -y python3 pytest 
+          sudo apt install -y python3 python3-pytest
 
       - name: Build base ubuntu 24.04 image, and then the dev image
         run: |
