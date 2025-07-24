@@ -41,19 +41,31 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
   - [License](#license)
   - [Docker Hub image repo](#docker-hub-image-repo)
   - [Description](#description)
+  - [Directory Layout and Permissions](#directory-layout-and-permissions)
+    - [How Directory Overrides Work](#how-directory-overrides-work)
+    - [UID and GID Behavior](#uid-and-gid-behavior)
+    - [Recommended Directory Layouts](#recommended-directory-layouts)
+      - [Personal (All Under Your Home Directory)](#personal-all-under-your-home-directory)
+      - [Shared Group Setup (Multiple Users)](#shared-group-setup-multiple-users)
+      - [Dedicated Service Account (Automated Backups)](#dedicated-service-account-automated-backups)
+  - [Environment Variables](#environment-variables)
   - [How to test](#how-to-test)
   - [🔧 Image Tags](#-image-tags)
     - [🐳 tagging strategy](#-tagging-strategy)
   - [🧰 Volumes / Runtime Configuration](#-volumes--runtime-configuration)
   - [🚀 Usage Example](#-usage-example)
   - [run-backup.sh](#run-backupsh)
-    - [1](#1)
-    - [2](#2)
-    - [3](#3)
-    - [4](#4)
-    - [5](#5)
-    - [6](#6)
-    - [Usage](#usage)
+    - [Baked-in config file](#baked-in-config-file)
+    - [PyPI .darrc](#pypi-darrc)
+    - [3 Logs to stdout](#3-logs-to-stdout)
+    - [Default directory layout](#default-directory-layout)
+    - [Image used](#image-used)
+    - [Backup Definitions](#backup-definitions)
+      - [Usage](#usage)
+      - [How It Works Internally](#how-it-works-internally)
+      - [Example](#example)
+    - [⚠️ Common Pitfalls](#️-common-pitfalls)
+    - [Basic usage](#basic-usage)
   - [🔍 Discover Image Metadata](#-discover-image-metadata)
     - [🧪 1. Check Tool Versions](#-1-check-tool-versions)
     - [🏷️ 2. Inspect Image Labels](#️-2-inspect-image-labels)
@@ -66,11 +78,12 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [List available archives](#list-available-archives)
     - [List contents of a backup](#list-contents-of-a-backup)
     - [Restore](#restore)
-  - [Release procedure](#release-procedure)
-    - [Build dev](#build-dev)
-    - [Build final](#build-final)
-    - [Do a dry-run release](#do-a-dry-run-release)
-    - [Do a Release](#do-a-release)
+  - [Using the Makefile](#using-the-makefile)
+    - [Common Targets](#common-targets)
+    - [Testing Locally Built Images](#testing-locally-built-images)
+    - [Testing Released Images from Docker Hub](#testing-released-images-from-docker-hub)
+    - [Releasing a New Version](#releasing-a-new-version)
+    - [Recommended Workflow](#recommended-workflow)
 
 ---
 
@@ -81,9 +94,6 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 |---|-------------------|------------|----------|
 | 0.5.13| 0.8.2| ba12177|[tag:0.5.13](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.13/images/sha256:69bd96f894ff4708b1377cb61cac55d4269f6ea5de5a09d7d6885f4181fdcd1c)|
 | 0.5.12| 0.8.2| 122cc02|[tag:0.5.12](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.12/images/sha256:7b11d610a717ba6405c6161363664aad2e8fa5f875988fb295a4318205a32be5)|
-| 0.5.11| 0.8.2| 30f25b5|[tag:0.5.11](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.11/images/sha256:830c127c8890e07305c00b6ab85310a22f12bd817c576efe6a8141713fbdc5e2)|
-| 0.5.10| 0.8.1| 1d684b9|[tag:0.5.10](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.10/images/sha256:af49320e79c5448fe784d3a57cb109e3eed07bf285eccb888cd0602c8489fb51)|
-| 0.5.9| 0.8.1| 34c6e68|[tag:0.5.9](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.9/images/sha256:9d440fbbc0f4cd39f40b271ed19b55bcf1b4ed580d29a5ee0947109d770b7c14)|
 
 ---
 
@@ -148,6 +158,122 @@ This image includes:
 - [dar-backup](https://github.com/per2jensen/dar-backup) (my `dar` Python based wrapper)
 - Clean, minimal Ubuntu 24.04 base (~170 MB)
 - CIS-aligned permissions and user-drop via gosu
+
+---
+
+## Directory Layout and Permissions
+
+The `run-backup.sh` script uses a standardized directory structure to ensure backups work consistently across environments. These directories are host-mounted into the container so that all backup archives, definitions, and restored files remain accessible outside Docker.
+
+By default, the script expects (or creates) the following structure relative to `WORKDIR`:
+
+- `$WORKDIR/backups` → Mounted as `/backups` (DAR archives and logs)  
+- `$WORKDIR/backup.d` → Mounted as `/backup.d` (backup definition files)  
+- `$WORKDIR/data` → Mounted as `/data` (source data to back up)  
+- `$WORKDIR/restore` → Mounted as `/restore` (restored files)
+
+### How Directory Overrides Work
+
+The script resolves its directory paths in the following priority order:
+
+1. If an explicit directory environment variable is set (`DAR_BACKUP_DIR`, `DAR_BACKUP_D_DIR`, `DAR_BACKUP_DATA_DIR`, or `DAR_BACKUP_RESTORE_DIR`), that value is used.
+2. Otherwise, if `WORKDIR` is set, each directory defaults to a subdirectory of `WORKDIR` (e.g., `$WORKDIR/backups`).
+3. If neither is set, the script defaults to using the directory where `run-backup.sh` resides as the base.
+
+This allows full flexibility: you can set `WORKDIR` once for a standard layout, or override specific directories individually.
+
+### UID and GID Behavior
+
+All files written by `dar-backup` inside the container will match your host user and group:
+
+- By default, `RUN_AS_UID` and `RUN_AS_GID` are set to your current UID and GID.
+- These are passed to Docker via `--user "$RUN_AS_UID:$RUN_AS_GID"`.
+- Running as `root` (UID 0) is disallowed; the script will exit with an error.
+- You can override these values for special cases, such as:
+
+  - **Group-based backups:**  
+    `RUN_AS_GID=$(getent group backupgrp | cut -d: -f3)`  
+    Ensures all archives are group-writable.
+
+  - **Service accounts:**  
+    `RUN_AS_UID=1050 RUN_AS_GID=1050 ./run-backup.sh -t FULL`  
+    Matches ownership for automated or scheduled jobs.
+
+### Recommended Directory Layouts
+
+Here are three common configurations, depending on your use case:
+
+#### Personal (All Under Your Home Directory)
+
+For single-user systems:
+
+```bash
+WORKDIR=$HOME/dar-backup
+$HOME/dar-backup/backups # DAR archives and logs
+$HOME/dar-backup/backup.d # Backup definition files
+$HOME/dar-backup/data # Source data to back up
+$HOME/dar-backup/restore # Restored files
+```
+
+Permissions: Owned entirely by your user (default behavior).
+
+#### Shared Group Setup (Multiple Users)
+
+For teams or shared servers, use a group to manage permissions:
+
+```bash
+WORKDIR=/srv/dar-backup
+Group ownership
+
+chown -R :backupgrp /srv/dar-backup
+chmod -R 2770 /srv/dar-backup
+```
+
+Environment for group-based runs:
+
+```bash
+RUN_AS_UID=$(id -u)
+RUN_AS_GID=$(getent group backupgrp | cut -d: -f3)
+```
+
+All members of `backupgrp` can write backups while keeping data private.
+
+#### Dedicated Service Account (Automated Backups)
+
+For scheduled or service-based backups:
+
+```bash
+WORKDIR=/mnt/backups
+```
+
+Owned by a dedicated backup user (UID 1050:GID 1050)
+
+Run with:
+
+```bash
+RUN_AS_UID=1050 RUN_AS_GID=1050 ./run-backup.sh -t FULL
+```
+
+This ensures consistent ownership for cron jobs or automated workflows.
+
+For full environment variable documentation, see the header comments in [`run-backup.sh`](./run-backup.sh).
+
+## Environment Variables
+
+Here’s a quick reference for all environment variables used by the script:
+
+| Variable                | Default                  | Purpose                                                        |
+|-------------------------|--------------------------|----------------------------------------------------------------|
+| `IMAGE`                 | `dar-backup:dev`         | Docker image tag to use for the backup container.             |
+| `WORKDIR`               | Script directory         | Base directory for all backup-related paths.                  |
+| `RUN_AS_UID`            | Current user's UID       | UID passed to Docker to avoid root-owned files.               |
+| `RUN_AS_GID`            | Current user's GID       | GID passed to Docker for correct file group ownership.        |
+| `DAR_BACKUP_DIR`        | `$WORKDIR/backups`       | Host directory for DAR archives and logs (mounted at `/backups`). |
+| `DAR_BACKUP_D_DIR`      | `$WORKDIR/backup.d`      | Host directory for backup definition files (mounted at `/backup.d`). |
+| `DAR_BACKUP_DATA_DIR`   | `$WORKDIR/data`          | Host directory containing source data (mounted at `/data`).    |
+| `DAR_BACKUP_RESTORE_DIR`| `$WORKDIR/restore`       | Host directory for restored files (mounted at `/restore`).     |
+
+For details on behavior, UID/GID handling, and usage examples, see the comments in [`run-backup.sh`](./run-backup.sh).
 
 ---
 
@@ -264,22 +390,22 @@ This script runs a backup using a dar-backup Docker image.
 It runs a backup based on the specified type (FULL, DIFF, INCR)
 with the following features:
 
-### 1
+### Baked-in config file
 
 Using the baked in [dar-backup.conf](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf) file (se more [here](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#config)).
 
-### 2
+### PyPI .darrc
 
 Uses the .darrc file from the [PyPI package](https://pypi.org/project/dar-backup/) added to the image,
    see image [details here](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json)
   
    .darrc [contents](https://github.com/per2jensen/dar-backup/blob/main/v2/src/dar_backup/.darrc)
 
-### 3
+### 3 Logs to stdout
 
 It print log messages to stdout.
 
-### 4
+### Default directory layout
 
 Expected directory structure when running this script:
 
@@ -295,11 +421,24 @@ If envvar WORKDIR is set, the script uses that as the base directory.
 
 If WORKDIR is not set, the script uses the directory where the script is located as the base directory.
 
+These directories are host-mounted into the container so your data and archives remain accessible:
+
+| Host Directory (default)      | Container Mount  | Purpose                           |
+|--------------------------------|------------------|-----------------------------------|
+| `$WORKDIR/backups`             | `/backups`       | DAR archives and log files       |
+| `$WORKDIR/backup.d`            | `/backup.d`      | Backup definition files          |
+| `$WORKDIR/data`                | `/data`          | Source data for the backup       |
+| `$WORKDIR/restore`             | `/restore`       | Destination for restore tests    |
+
+You can override any of these paths by setting the environment variables:
+`DAR_BACKUP_DIR`, `DAR_BACKUP_D_DIR`, `DAR_BACKUP_DATA_DIR`, `DAR_BACKUP_RESTORE_DIR`.  
+If none are set, `WORKDIR` (or the script’s own directory) is used as the base.
+
 More info on [backup definitions in general](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#backup-definition-example)
 
 View [supplied `default` backup definition](https://github.com/per2jensen/dar-backup-image/blob/main/doc/backup-definitions/default)
 
-### 5
+### Image used
 
 If IMAGE is not set, the script defaults to `dar-backup:dev`.
 
@@ -308,26 +447,103 @@ If IMAGE is not set, the script defaults to `dar-backup:dev`.
    If RUN_AS_UID is not set, it defaults to the current user's UID.
     - running the script as root is not allowed, the script will exit with an error.
 
-### 6
+### Backup Definitions
 
-You can configure the directory layout by setting the following environment variables:
+The `run-backup.sh` script supports selecting a specific backup definition file, which allows you to maintain multiple dataset or policy definitions.
 
-- DAR_BACKUP_DIR: Directory for backups (default: WORKDIR/backups)
+Each backup definition file resides in:
 
-- DAR_BACKUP_DATA_DIR: Directory for data to backup (default: WORKDIR/data)
+$DAR_BACKUP_D_DIR (default: $WORKDIR/backup.d)
 
-- DAR_BACKUP_D_DIR: Directory for backup definitions (default: WORKDIR/backup.d)
+and is automatically mounted into the container at `/backup.d`.
 
-  - Take a look at the [supplied `default` backup definition](https://github.com/per2jensen/dar-backup-image/blob/main/doc/backup-definitions/default)
+> **Note on daily backups per definition:**  
+> `dar-backup` will only create one `FULL`, one `DIFF`, and one `INCR` backup **per definition per calendar day**.  
+> - You can run all three types (FULL → DIFF → INCR) on the same day.  
+> - A second run of the *same type* (e.g., another FULL) will be skipped to avoid overwriting the existing archive.
+> - To force a new run, either remove or archive the previous `.dar` files for that definition/date.
+> -- Use [`cleanup`](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#cleanup-options) for safe archive deletions
 
-- DAR_BACKUP_RESTORE_DIR: Directory for restored files (default: WORKDIR/restore)
+
+
+#### Usage
+
+To specify a backup definition, use the `-d` or `--backup-definition` option:
+
+```bash
+WORKDIR=/path/to/workdir ./run-backup.sh -t FULL -d my-dataset
+```
+
+This instructs `dar-backup` to load:
+
+$DAR_BACKUP_D_DIR/my-dataset
+
+instead of the default definition (`default`).
+
+If no `-d` option is supplied, the script falls back to the default definition.  
+The `run-backup.sh` script also generates a minimal default definition file at:
+
+$DAR_BACKUP_D_DIR/default
+
+if none exists.
+
+#### How It Works Internally
+
+The script passes the chosen definition to `dar-backup` using:
+
+```bash
+--backup-definition "<name>"
+```
+
+This is achieved dynamically using:
+
+```bash
+${BACKUP_DEF:+--backup-definition "$BACKUP_DEF"}
+```
+
+in the `docker run` command, which:
+
+- Adds `--backup-definition "<name>"` if `BACKUP_DEF` is non-empty.
+- Skips it entirely if no `-d` was provided (dar-backup then uses the default definition).
 
 ---
 
-### Usage
+#### Example
+
+1. Create a new definition file:
 
 ```bash
-WORKDIR=/path/to/your/workdir IMAGE=`image` ./run-backup.sh -t FULL|DIFF|INCR
+echo "-R /data/projects -z5 -am --slice 5G" > $HOME/dar-backup/backup.d/projects
+```
+
+2. Run a differential backup using it:
+
+```bash
+WORKDIR=$HOME/dar-backup ./run-backup.sh -t DIFF -d projects
+```
+
+The backup will:
+- Store archives in `$HOME/dar-backup/backups`.
+- Use `/backup.d/projects` as the definition.
+- Retain ownership based on `RUN_AS_UID` and `RUN_AS_GID`.
+
+### ⚠️ Common Pitfalls
+
+> - **Why is my backup skipped?**  
+>   Only one `FULL`, one `DIFF`, and one `INCR` backup can be created per definition per day.  
+>   If a run is skipped, remove or archive the existing `.dar` files for that definition/date.
+>
+> - **Permission issues on host files?**  
+>   Ensure `RUN_AS_UID` and `RUN_AS_GID` match the desired owner.  
+>   If unsure, run `id -u` and `id -g` to get your UID and GID.
+>
+> - **Definition not found?**  
+>   Make sure your `backup.d/<name>` file exists (or let the script auto-create `default`).
+
+### Basic usage
+
+```bash
+WORKDIR=/path/to/your/workdir IMAGE=`image` ./run-backup.sh -t FULL|DIFF|INCR -d "backup_definition"
 ```
 
 ## 🔍 Discover Image Metadata
@@ -453,228 +669,109 @@ dar-backup --restore <archive_name>
 
 ---
 
-## Release procedure
+## Using the Makefile
 
-### Build dev
+The `Makefile` automates building, testing, and releasing the `dar-backup-image` Docker images.  
+It supports **local development builds**, **final version tagging**, and **release workflows** (including Docker Hub pushes).
 
-```bash
-make dev-nuke
-....
-```
+### Common Targets
 
-```bash
-make FINAL_VERSION=0.5.13 DAR_BACKUP_VERSION=0.8.2 dev
-```
+| Target                        | What It Does                                                                                         |
+|-------------------------------|------------------------------------------------------------------------------------------------------|
+| `make dev`                    | Builds a **development image** (`dar-backup:dev`) using the local Dockerfile and configuration.      |
+| `make all-dev`                | Builds both the base image and the `dar-backup:dev` image (default dependency for most other targets).|
+| `make test`                   | Builds `dar-backup:dev` (via `all-dev`) and runs the full pytest suite against it.                   |
+| `make FINAL_VERSION=x.y.z final` | Tags the current `dar-backup:dev` as `dar-backup:x.y.z` and verifies version/labels.                        |
+| `make FINAL_VERSION=x.y.z test`  | Builds (or re-tags) `dar-backup:x.y.z`, then runs pytest against it.                                      |
+| `make IMAGE=per2jensen/dar-backup:x.y.z test-pulled` | Pulls the specified released image from Docker Hub and tests it (skips local build).                                 |
+| `make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c dry-run-release` | Creates a detached worktree, builds the image as `dar-backup:x.y.z`, runs tests, verifies labels, but does **not** push to Hub. |
+| `make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c release`         | Builds, verifies, tests, and **pushes the final image** to Docker Hub, also updating `doc/build-history.json` and `READNE.md`.                   |
+| `make size-report`            | Displays a normalized report of image layer sizes (for auditing image size).                       |
+| `make dev-nuke`               | Cleans all cached layers and build artifacts (forces a full fresh build next time).                 |
 
-gives
+---
 
-```bash
-Building development image (cached & labeled): 0.5.13                                                                             
-docker build -f Dockerfile \
-  --build-arg VERSION=0.5.13 \
-  --build-arg DAR_BACKUP_VERSION=0.8.2 \
-  --label org.opencontainers.image.base.name=ubuntu --label org.opencontainers.image.base.version="24.04" --label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" --label org.opencontainers.image.created="2025-07-22T14:20:22Z" --label org.opencontainers.image.revision="d58c85c" --label org.opencontainers.image.title="dar-backup" --label org.opencontainers.image.version="0.5.13" --label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" --label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" --label org.opencontainers.image.licenses="GPL-3.0-or-later" --label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" --label org.opencontainers.image.ref.name="per2jensen/dar-backup:0.5.13" --label org.dar-backup.version="0.8.2" \
-  -t dar-backup:dev \
-  .
-[+] Building 1.0s (14/14) FINISHED                                                                                 docker:default
- => [internal] load build definition from Dockerfile                                                                         0.0s
- => => transferring dockerfile: 2.56kB                                                                                       0.0s
- => [internal] load metadata for docker.io/library/ubuntu:24.04                                                              0.5s
- => [internal] load .dockerignore                                                                                            0.0s
- => => transferring context: 567B                                                                                            0.0s
- => [builder 1/2] FROM docker.io/library/ubuntu:24.04@sha256:a08e551cb33850e4740772b38217fc1796a66da2506d312abe51acda354ff0  0.0s
- => [internal] load build context                                                                                            0.0s
- => => transferring context: 70B                                                                                             0.0s
- => CACHED [stage-1 2/8] RUN apt-get update && apt-get dist-upgrade -y   && apt-get install -y --no-install-recommends       0.0s
- => CACHED [builder 2/2] RUN apt-get update && apt-get install -y --no-install-recommends       python3 python3-venv python  0.0s
- => CACHED [stage-1 3/8] COPY --from=builder /opt/venv /opt/venv                                                             0.0s
- => CACHED [stage-1 4/8] RUN find /opt/venv -type d -name "__pycache__" -exec rm -rf {} +   && find /opt/venv -type f -name  0.0s
- => CACHED [stage-1 5/8] COPY dar-backup.conf /etc/dar-backup/dar-backup.conf                                                0.0s
- => CACHED [stage-1 6/8] COPY entrypoint.sh /entrypoint.sh                                                                   0.0s
- => CACHED [stage-1 7/8] RUN chmod +x /entrypoint.sh                                                                         0.0s
- => CACHED [stage-1 8/8] RUN userdel -f ubuntu 2>/dev/null || true   && rm -rf /home/ubuntu || true   && useradd -r -u 1000  0.0s
- => exporting to image                                                                                                       0.1s
- => => exporting layers                                                                                                      0.0s
- => => writing image sha256:1aedcdb31d27aeec793dde6da9576d656e70c4d15390e8615abd73643f75969f                                 0.0s
- => => naming to docker.io/library/dar-backup:dev                     
-```
+### Testing Locally Built Images
 
-### Build final
+During development, build and test the local `dar-backup:dev` image:
 
 ```bash
-make FINAL_VERSION=0.5.13 DAR_BACKUP_VERSION=0.8.2 final
+make dev       # Build dar-backup:dev
+make test      # Run tests against dar-backup:dev
 ```
 
-gives
+To test a specific local version (tagged dar-backup:x.y.z):
 
 ```bash
-🔎 Ensuring dar-backup:dev exists and is fresh…
-✅ dar-backup:dev is fresh (age 0m0s)
-🛠️  Tagging final image as 0.5.13…
-
-🔎 Verifying CLI version…
-make[1]: Entering directory '/home/pj/git/dar-backup-image'
-🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.2 )
-✅ dar-backup --version is correct: 0.8.2
-make[1]: Leaving directory '/home/pj/git/dar-backup-image'
-
-🔍 Verifying OCI image labels…
-make[1]: Entering directory '/home/pj/git/dar-backup-image'
-🔍 Verifying OCI image labels on dar-backup:0.5.13
-✅ org.opencontainers.image.authors: Per Jensen <dar-backup@pm.me>
-✅ org.opencontainers.image.base.name: ubuntu
-✅ org.opencontainers.image.base.version: 24.04
-✅ org.opencontainers.image.created: 2025-07-22T14:20:22Z
-✅ org.opencontainers.image.description: Container for DAR-based backups using `dar-backup`
-✅ org.opencontainers.image.licenses: GPL-3.0-or-later
-✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.13
-✅ org.opencontainers.image.revision: d58c85c
-✅ org.opencontainers.image.source: https://github.com/per2jensen/dar-backup-image
-✅ org.opencontainers.image.title: dar-backup
-✅ org.opencontainers.image.url: https://hub.docker.com/r/per2jensen/dar-backup
-✅ org.opencontainers.image.version: 0.5.13
-🎉 All required OCI labels are present.
-make[1]: Leaving directory '/home/pj/git/dar-backup-image'
-
-📊 Image layer size report (for audit):
-make[1]: Entering directory '/home/pj/git/dar-backup-image'
-🔍 Image size report for dar-backup:0.5.13
-───────────────────────────────────────────────
-Total Size: 143MB (ID: 1aedcdb31d27)
-
-Largest layers (all sizes in MB):
-78.1 MB    /bin/sh -c #(nop) ADD file:b4619a63cd7829e1338ddaa4995ca17003002dd54b0dfd675a6f5
-6.83 MB    COPY /opt/venv /opt/venv # buildkit
-58 MB      RUN /bin/sh -c apt-get update && apt-get dist-upgrade -y   && apt-get install -y
-
-Tip: Use 'make dev-nuke' for a fully fresh rebuild if something looks off.
-make[1]: Leaving directory '/home/pj/git/dar-backup-image'
+make FINAL_VERSION=0.5.14 test
 ```
 
-### Do a dry-run release
+### Testing Released Images from Docker Hub
 
-This builds the image and runs the test cases against it.
+After publishing a release, test the exact image on Docker Hub (ignoring local builds):
 
 ```bash
-$ make FINAL_VERSION=0.5.13 DAR_BACKUP_VERSION=0.8.2 dry-run-release
-
-🔍 Creating temporary dry-run environment...
-🧹 Removing stale .dryrun worktree...
-Preparing worktree (detached HEAD bf4dabd)
-HEAD is now at bf4dabd draft
-🚧 Running release steps in .dryrun...
-make[1]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
-🔧 Building image dar-backup:0.5.13 (dry-run, no push to Docker Hub)
-make FINAL_VERSION=0.5.13 final verify-labels verify-cli-version
-make[2]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
-🔎 Ensuring dar-backup:dev exists and is fresh…
-🛠️  Tagging final image as 0.5.13…
-
-🔎 Verifying CLI version…
-make[3]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
-🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.2 )
-✅ dar-backup --version is correct: 0.8.2
-make[3]: Leaving directory '/home/pj/git/dar-backup-image/.dryrun'
-
-🔍 Verifying OCI image labels…
-make[3]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
-🔍 Verifying OCI image labels on dar-backup:0.5.13
-✅ org.opencontainers.image.authors: Per Jensen <dar-backup@pm.me>
-✅ org.opencontainers.image.base.name: ubuntu
-✅ org.opencontainers.image.base.version: 24.04
-✅ org.opencontainers.image.created: 2025-07-22T14:20:22Z
-✅ org.opencontainers.image.description: Container for DAR-based backups using `dar-backup`
-✅ org.opencontainers.image.licenses: GPL-3.0-or-later
-✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.13
-✅ org.opencontainers.image.revision: d58c85c
-✅ org.opencontainers.image.source: https://github.com/per2jensen/dar-backup-image
-✅ org.opencontainers.image.title: dar-backup
-✅ org.opencontainers.image.url: https://hub.docker.com/r/per2jensen/dar-backup
-✅ org.opencontainers.image.version: 0.5.13
-🎉 All required OCI labels are present.
-make[3]: Leaving directory '/home/pj/git/dar-backup-image/.dryrun'
-
-📊 Image layer size report (for audit):
-make[3]: Entering directory '/home/pj/git/dar-backup-image/.dryrun'
-🔍 Image size report for dar-backup:0.5.13
-───────────────────────────────────────────────
-Total Size: 143MB (ID: 1aedcdb31d27)
-
-Largest layers (all sizes in MB):
-78.1 MB    /bin/sh -c #(nop) ADD file:b4619a63cd7829e1338ddaa4995ca17003002dd54b0dfd675a6f5
-6.83 MB    COPY /opt/venv /opt/venv # buildkit
-58 MB      RUN /bin/sh -c apt-get update && apt-get dist-upgrade -y   && apt-get install -y
-
-Tip: Use 'make dev-nuke' for a fully fresh rebuild if something looks off.
-...
-Running pytest (full suite)...
-====================================================== test session starts =======================================================
-platform linux -- Python 3.12.3, pytest-7.4.4, pluggy-1.4.0 -- /usr/bin/python3
-cachedir: .pytest_cache
-rootdir: /home/pj/git/dar-backup-image
-collected 10 items            
-...
-====================================================== 10 passed in 14.99s =======================================================
-make[1]: Leaving directory '/home/pj/git/dar-backup-image'
+make IMAGE=per2jensen/dar-backup:0.5.14 test-pulled
 ```
 
-### Do a Release
+This:
 
-Set envvars:
+    Pulls the image from Docker Hub.
 
-- DOCKER_USER
-- DOCKER_TOKEN
+    Runs the full pytest suite (no local build).
+
+### Releasing a New Version
+
+    Dry-run the release (build & test only, no push):
 
 ```bash
-make FINAL_VERSION=0.5.6 DAR_BACKUP_VERSION=0.8.0 release
-...
-🔁 Skipping verify-cli-version (will be run by release)
-🔍 Verifying OCI image labels on dar-backup:0.5.6
-✅ org.opencontainers.image.authors: Per Jensen <dar-backup@pm.me>
-✅ org.opencontainers.image.base.name: ubuntu
-✅ org.opencontainers.image.base.version: 24.04
-✅ org.opencontainers.image.created: 2025-07-13T17:08:24Z
-✅ org.opencontainers.image.description: Container for DAR-based backups using 
-✅ org.opencontainers.image.licenses: GPL-3.0-or-later
-✅ org.opencontainers.image.ref.name: per2jensen/dar-backup:0.5.6
-✅ org.opencontainers.image.revision: b583e85
-✅ org.opencontainers.image.source: https://github.com/per2jensen/dar-backup-image
-✅ org.opencontainers.image.title: dar-backup
-✅ org.opencontainers.image.url: https://hub.docker.com/r/per2jensen/dar-backup
-✅ org.opencontainers.image.version: 0.5.6
-🎉 All required OCI labels are present.
-🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION (0.8.0 )
-✅ dar-backup --version is correct: 0.8.0
-🔐 Logging in to Docker Hub (2FA enabled)...
-echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
-Login Succeeded
-🚀 Pushing image per2jensen/dar-backup:0.5.6
-The push refers to repository [docker.io/per2jensen/dar-backup]
-5f70bf18a086: Layer already exists 
-dab3496ba942: Layer already exists 
-6dbcafa4e191: Layer already exists 
-50838a8b9a7e: Pushed 
-db49808a00f3: Pushed 
-0dde0d1808a7: Pushed 
-76550f3c9c5b: Pushed 
-45a01f98e78c: Layer already exists 
-0.5.6: digest: sha256:ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496 size: 2812
-✅ Log entry added. Total builds: 4
-{
-  "build_number": 3,
-  "tag": "0.5.6",
-  "dar_backup_version": "0.8.0",
-  "base_image": "dar-backup-base:24.04-0.5.6",
-  "full_image_tag": "per2jensen/dar-backup:0.5.6",
-  "git_revision": "b583e85",
-  "created": "2025-07-13T17:08:57Z",
-  "dockerhub_tag_url": "https://hub.docker.com/r/per2jensen/dar-backup/tags/0.5.6",
-  "digest": "sha256:ef94dae75ecc698f4e81d49020fcf1c3d0490d3c257f97c3dd33c974d6e1c496",
-  "image_id": "sha256:3494bd51f42da13d11f6528e1c2c51f6b1094eb66a01e9af4ba98c0674f21ffd"
-}
-🔄 Checking if doc/build-history.json changed
-[main 93b01da] build-history: add 0.5.6 metadata
- 1 file changed, 35 insertions(+)
-✅ doc/build-history.json updated and committed
-✅ Release complete for: per2jensen/dar-backup:0.5.6
+make FINAL_VERSION=0.5.14 DAR_BACKUP_VERSION=0.8.3 dry-run-release
 ```
+
+This validates:
+
+    The image builds correctly.
+
+    Labels and dar-backup --version match.
+
+    All tests pass.
+
+Perform the actual release (push to Docker Hub):
+
+```bash
+export DOCKER_USER=your-username
+  export DOCKER_TOKEN=your-access-token  # do not put token in bash_history
+make FINAL_VERSION=0.5.14 DAR_BACKUP_VERSION=0.8.3 release
+```
+
+The release target will:
+
+    Build and tag dar-backup:0.5.14.
+
+    Verify labels and CLI version.
+
+    Run tests.
+
+    Push the image to Docker Hub.
+
+    Update doc/build-history.json.
+
+### Recommended Workflow
+
+    During development:
+    make dev && make test
+
+    Before release:
+    make dev-nuke
+    make FINAL_VERSION=x.y.z test (validate your local final image)
+
+    Dry-run release:
+    make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c dry-run-release
+
+    Push the final image:
+    make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c release
+
+    Verify the published image:
+    make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
+
+---

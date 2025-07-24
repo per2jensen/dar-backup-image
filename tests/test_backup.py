@@ -1,8 +1,14 @@
 import os
 import shutil
 import subprocess
-from pathlib import Path
 import pytest
+import os
+import shutil
+import pytest
+import subprocess
+import re
+
+from pathlib import Path
 from utils import compare_to_originals
 from utils import sha256sum, compare_to_originals
 
@@ -175,3 +181,94 @@ def test_manager_creates_db(test_env, image):
         "--create-db", "--config", "/etc/dar-backup/dar-backup.conf"
     ], check=True)
     assert any(Path(test_env["DAR_BACKUP_DIR"]).glob("*.db"))
+
+
+###==============================
+
+
+SCRIPT = "scripts/run-backup.sh"
+
+def run_script(test_env, *args, expect_fail=False):
+    env = os.environ.copy()
+    env.update(test_env)
+    result = subprocess.run([SCRIPT, *args], env=env, capture_output=True)
+    if expect_fail:
+        assert result.returncode != 0, f"Expected failure but got success\n{result.stdout.decode()}"
+    else:
+        assert result.returncode == 0, f"Script failed ({result.returncode}): {result.stderr.decode()}"
+    return result
+
+def create_definition(backup_d_dir, name, content):
+    fpath = Path(backup_d_dir) / name
+    fpath.write_text(content)
+    return fpath
+
+
+def dar_files_for_definition(backup_dir, definition, btype):
+    """
+    Return list of DAR files matching <definition>_<btype>_YYYY-MM-DD.<slice>.dar.
+    """
+    pattern = re.compile(
+        rf"^{re.escape(definition)}_{btype}_[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}\.[0-9]+\.dar$"
+    )
+    return [f for f in Path(backup_dir).glob("*.dar") if pattern.match(f.name)]
+
+
+
+
+def test_fail_when_definition_does_not_exist(test_env, dataset):
+    """
+    Verify that specifying -d with a non-existent file causes failure.
+    """
+    run_script(test_env, "-t", "INCR", "-d", "does-not-exist", expect_fail=True)
+
+
+
+#============
+
+def test_default_chain_with_default_definition(test_env, dataset):
+    """
+    Verify FULL → DIFF → INCR chain works with the default definition.
+    Ensures each stage produces .dar files named for "default".
+    """
+    def_name = "default"
+    for stage in ["FULL", "DIFF", "INCR"]:
+        run_script(test_env, "-t", stage)
+        # Check that the expected .dar file(s) exist
+        dar_files = dar_files_for_definition(test_env["DAR_BACKUP_DIR"], def_name, stage)
+        assert dar_files, f"No DAR files for {def_name} at stage {stage}"
+
+def test_full_and_diff_with_custom_definition(test_env, dataset):
+    """
+    Verify that a custom definition can do FULL followed by DIFF backups.
+    """
+    def_name = "customdef"
+    create_definition(
+        test_env["DAR_BACKUP_D_DIR"],
+        def_name,
+        "-am\n-R /data\n-z1\n--slice 1G\n# custom def\n"
+    )
+    # FULL
+    run_script(test_env, "-t", "FULL", "-d", def_name)
+    dar_files = dar_files_for_definition(test_env["DAR_BACKUP_DIR"], def_name, "FULL")
+    assert dar_files
+
+    # DIFF (requires FULL)
+    run_script(test_env, "-t", "DIFF", "-d", def_name)
+    dar_files = dar_files_for_definition(test_env["DAR_BACKUP_DIR"], def_name, "DIFF")
+    assert dar_files
+
+def test_full_diff_incr_with_longform(test_env, dataset):
+    """
+    Verify long option --backup-definition works through FULL → DIFF → INCR.
+    """
+    def_name = "longform"
+    create_definition(
+        test_env["DAR_BACKUP_D_DIR"],
+        def_name,
+        "-am\n-R /data\n-z2\n--slice 2G\n# longform test\n"
+    )
+    for stage in ["FULL", "DIFF", "INCR"]:
+        run_script(test_env, "-t", stage, "--backup-definition", def_name)
+        dar_files = dar_files_for_definition(test_env["DAR_BACKUP_DIR"], def_name, stage)
+        assert dar_files, f"No DAR files for {def_name} at stage {stage}"

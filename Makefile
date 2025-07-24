@@ -322,6 +322,16 @@ test: all-dev
 	pytest -s -v $(PYTEST_ARGS) tests/
 
 
+# Test using a pulled image (skips local build)
+test-pulled:
+	@if [ -z "$(IMAGE)" ]; then \
+		echo "❌ IMAGE must be specified, e.g. 'make IMAGE=per2jensen/dar-backup:0.5.13 test-pulled'"; \
+		exit 1; \
+	fi
+	@echo "🔄 Pulling latest image from Docker Hub: $(IMAGE)"
+	@docker pull $(IMAGE)
+	@echo "▶ Running tests using $(IMAGE) (no local build)"
+	@IMAGE=$(IMAGE) pytest -s -v $(PYTEST_ARGS) tests/
 
 
 test-integration: all-dev test

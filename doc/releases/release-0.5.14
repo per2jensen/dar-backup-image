@@ -1,0 +1,25 @@
+## v0.5.14 – July 24, 2025
+
+### Highlights
+
+- **Custom backup definitions (`-d` / `--backup-definition`)**  
+  `run-backup.sh` now supports selecting specific backup definitions, so you can maintain separate datasets or policies.  
+  Archives are named automatically as `<definition>_<type>_<date>.<slice>.dar`. Falls back to `default` if none is given.
+
+- **Docker Hub verification (`make test-pulled`)**  
+  New Makefile target to pull a released image from Docker Hub and run the full pytest suite — no local build needed.
+
+- **Improved usability & documentation**  
+  - README now explains directory overrides, UID/GID handling, and three typical setups (personal, group, service).  
+  - Usage examples for custom backup definitions.  
+  - `run-backup.sh` shows which definition is used at runtime.
+
+### Internal
+
+- Refactored `run-backup.sh` to handle `-d` cleanly and generate `default` if missing.
+- Test suite updated:
+  - Verifies FULL → DIFF → INCR chains for multiple definitions.
+  - Ensures DIFF/INCR only run when prerequisites exist.
+  - Confirms archive naming and Docker Hub images pass tests.
+
+[View full Changelog](https://github.com/per2jensen/dar-backup-image/blob/main/CHANGELOG.md#v0514---2025-07-24)

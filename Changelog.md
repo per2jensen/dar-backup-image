@@ -1,5 +1,44 @@
 # dar-backup-image Changelog
 
+## v0.5.14 - 2025-07-24
+
+Github link: [v0.5.14](https://github.com/per2jensen/dar-backup-image/tree/v0.5.14)
+
+### Added
+
+- **Backup definition support (`-d` / `--backup-definition`)**  
+  - `run-backup.sh` now accepts `-d <name>` or `--backup-definition <name>` to select a specific definition file.  
+  - Falls back to `default` (auto-created if missing) when no definition is given.  
+  - Backup archives now follow the pattern:  
+    `<definition>_<type>_YYYY-MM-DD.<slice>.dar`
+
+- **Expanded script documentation**  
+  - Comprehensive header in `run-backup.sh` describing:
+    - Environment variables, UID/GID handling, and directory resolution order.
+    - Daily backup rules (one FULL, one DIFF, one INCR per definition per day).
+    - Multiple quick-start examples for personal, shared, and automated setups.
+  - README updated with matching directory layout, UID/GID, and usage examples.
+
+### Changed
+
+- **Updated `run-backup.sh` behavior**  
+  - Enforces the **one-per-day-per-type rule** for backups.
+  - Displays which backup definition is being used in its output.
+  - Now generates a default `backup.d/default` if none exists (ensuring first-run success).
+
+- **Improved testing**  
+  - New pytest tests for the `-d`/`--backup-definition` feature:
+    - Confirms correct DAR filenames.
+    - Validates separate runs with different definitions.
+    - Covers default fallback behavior when `-d` is omitted.
+  - Tests updated to start from a **clean slate** (removes old archives) so FULL → DIFF → INCR chains work reliably.
+
+### Testing
+
+- Full test suite passes (`make test`) with **stateful chains** and **definition-aware backups**.
+- Ensured compatibility with Docker Hub–pulled and locally built images.
+  - `make IMAGE=per2jensen/dar-backup:0.5.13 test-pulled` succeeds
+
 ## v0.5.13 - 2025-07-22
 
 Github link: [v0.5.13](https://github.com/per2jensen/dar-backup-image/tree/v0.5.13)
