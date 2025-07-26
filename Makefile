@@ -51,7 +51,7 @@ LABEL_ARGS = \
 # Targets
 # ================================
 
-.PHONY: all all-dev final release clean clean-all push tag login dev dev-clean labels help \
+.PHONY: all all-dev dev-rebuild final release clean clean-all push tag login dev dev-clean labels help \
 	check_version test test-integration all-dev dry-run-release-internal check-docker-creds test-log-pushed-build-json
 
 check_version:
@@ -92,9 +92,10 @@ all-dev: dev
 
 # Default clean: keeps Ubuntu/base layers for faster rebuilds
 dev-clean: check_version
-	@echo "Removing local $(FINAL_VERSION) image and old dangling layers..."
+	@echo "⚡ Fast clean:  Removing local $(FINAL_VERSION) image and old dangling layers..."
 	-$(DOCKER) rmi -f dar-backup:$(FINAL_VERSION) || true
 	-$(DOCKER) image prune -f
+	@echo "Tip: Use 'make dev-nuke' for a full rebuild without cache."
 	@echo "Rebuilding image (via 'make dev' to preserve labels)..."
 	$(MAKE) dev \
 		FINAL_VERSION=$(FINAL_VERSION) \
@@ -102,7 +103,7 @@ dev-clean: check_version
 
 # Full nuke: deletes *all* caches and forces a completely fresh build
 dev-nuke:
-	@echo "Pruning ALL Docker build caches and images (this may take a while)..."
+	@echo "🧨 Full nuke: Pruning ALL Docker build caches and images (this may take a while)..."
 	-$(DOCKER) builder prune -a -f
 	-$(DOCKER) image prune -a -f
 	@echo "Rebuilding image from scratch..."
@@ -111,7 +112,7 @@ dev-nuke:
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		-t dar-backup:$(FINAL_VERSION) .
 
-
+dev-rebuild: dev-nuke dev
 
 
 # Dev image build (always produce a fully labeled dar-backup:dev)

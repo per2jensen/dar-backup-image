@@ -35,6 +35,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 - [📦 dar-backup image for container backups and more](#-dar-backup-image-for-container-backups-and-more)
   - [🗄️ dar-backup-image](#️-dar-backup-image)
   - [📑 Table of Contents](#-table-of-contents)
+  - [`dar` versions](#dar-versions)
   - [Builds uploaded to Docker Hub](#builds-uploaded-to-docker-hub)
   - [🔧 Hands-on Demo: `dar-backup` in a Container](#-hands-on-demo-dar-backup-in-a-container)
   - [Useful links](#useful-links)
@@ -84,8 +85,36 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [Testing Released Images from Docker Hub](#testing-released-images-from-docker-hub)
     - [Releasing a New Version](#releasing-a-new-version)
     - [Recommended Workflow](#recommended-workflow)
+  - [Software this project benefits from](#software-this-project-benefits-from)
 
 ---
+
+## `dar` versions
+
+Starting with `dar-backup-image` **0.5.15**, `dar` (v2.7.18) is compiled from source rather than using Ubuntu 24.04’s older package.  
+
+This provides the **latest features, performance optimizations, and bug fixes** (including full zstd, lz4, Argon2, GPGME, and remote repository support).
+
+The [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile) verifies the source tarball using **Denis Corbin’s GPG key**, checks all critical features, and only includes the built binary if everything passes.
+
+To view the embedded `dar` version:
+
+```bash
+docker run -it --entrypoint /usr/local/bin/dar dar-backup:dev --version
+```
+
+Expected (abridged) output, confirming core capabilities:
+
+```bash
+ dar version 2.7.18, Copyright (C) 2002-2025 Denis Corbin
+
+ Using libdar 6.8.2 built with compilation time options:
+   gzip compression (libz)      : YES
+   Strong encryption (libgcrypt): YES
+   Public key ciphers (gpgme)   : YES
+   Large files support (> 2GB)  : YES
+   Remote repository (libcurl)  : YES (HTTPS, zstd, SSH, HTTP/2)
+```
 
 <a name="dockerhub-builds"></a>
 ## Builds uploaded to Docker Hub
@@ -776,3 +805,10 @@ The release target will:
     make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ---
+
+## Software this project benefits from
+
+- [DAR of course :-)](http://dar.linux.free.fr/)
+- [Ubuntu](https://ubuntu.com/)
+- [Python](https://python.org/)
+- [GNU sofware](https://www.fsf.org/)

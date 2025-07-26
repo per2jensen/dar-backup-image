@@ -52,3 +52,7 @@ coverage.xml
 *.coverage
 .cache/
 
+# allow the dar 2.7.18 tarball
+!dar-2.7.18.tar.gz
+
+
