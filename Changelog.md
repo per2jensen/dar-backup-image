@@ -1,5 +1,36 @@
 # dar-backup-image Changelog
 
+## v0.5.15 - 2025-07-26
+
+Github link: [v0.5.15](https://github.com/per2jensen/dar-backup-image/tree/v0.5.15)
+
+### Added
+
+- **`dar` compiled from source (v2.7.18)**  
+  - Replaces Ubuntu 24.04’s older `dar` package with the latest upstream release.
+  - The build process:
+    - Verifies the tarball using **Denis Corbin’s GPG signature**.
+    - Builds from source with **full feature set** (zstd, lz4, Argon2, GPGME, librsync, and remote repository support).
+    - Runs **strict feature verification** (gzip, encryption, symlink handling, multi-threading, etc.) before including it in the final image.
+  - Ensures consistent, modern functionality.
+
+### Changed
+
+- **Docker image improvements**
+  - Stripped unnecessary build artifacts and documentation.
+  - Optimized venv cleanup, reducing the final image size to **~160 MB**.
+  - Improved linker and runtime configuration for smooth `libdar64` and `libthreadar` loading.
+
+### Testing
+
+- Full pytest suite passes after integrating source-built `dar`.
+- Confirmed compatibility with both locally built and pulled images:
+
+  ```bash
+  make test
+  make IMAGE=per2jensen/dar-backup:0.5.15 test-pulled
+  ```
+
 ## v0.5.14 - 2025-07-24
 
 Github link: [v0.5.14](https://github.com/per2jensen/dar-backup-image/tree/v0.5.14)
