@@ -30,6 +30,11 @@ Thumbs.db
 *.zip
 *.img
 *.iso
+!src/dar/dar-*.tar.gz
+!src/dar/dar-*.tar.gz.sig
+
+# Keep Denis Corbin’s signing key
+!doc/denis-corbin.gpg
 
 # Docker stuff
 Dockerfile-*~
@@ -53,6 +58,3 @@ coverage.xml
 .cache/
 
 # allow the dar 2.7.18 tarball
-!dar-2.7.18.tar.gz
-
-
