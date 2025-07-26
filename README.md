@@ -20,6 +20,8 @@ At its core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for re
 
     Ideal for FUSE filesystems: works without root, designed for user-space storage
 
+    The image automatically loads its baked-in config (/etc/dar-backup/dar-backup.conf). No --config argument is required unless you need a custom one.
+
     Includes par2 for integrity protection
 
     Ready for CI / cron / systemd: just mount volumes and go
@@ -402,15 +404,18 @@ docker run --rm \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
   "$IMAGE" \
-  -F --log-stdout --config /etc/dar-backup/dar-backup.conf
+  -F --log-stdout
 ```
 
-The `--config` option to `dar-backup` is referencing the [baked-in config file](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf). In other words, the config file is part of the container image. To use another config file you have multiple options:
+The image automatically uses [`/etc/dar-backup/dar-backup.conf`](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf) unless you override it.
+
+To use another config file you have multiple options:
 
 - Modify the [baked-in](https://github.com/per2jensen/dar-backup-image/blob/main/dar-backup.conf) and build a new image.
 - Use --config option to point to another (for example: /backup/dar-backup.conf, which in the example above means you physically put it on "$BACKUP_DIR"/dar-backup.conf)
+- Let DAR_BACKUP_CONFIG point to a config file.
 
-The container uses gosu to drop root privileges. Pass -e RUN_AS_UID=$(id -u) to run as your own user inside the container.
+The container uses set-priv to drop root privileges. Pass -e RUN_AS_UID=$(id -u) to run as your own user inside the container.
 
 ---
 
@@ -637,7 +642,7 @@ Here's a minimal example of how to use dar directly:
 ```bash
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=tmp/test-backups
-export IMAGE=per2jensen/dar-backup:0.5.6
+export IMAGE=per2jensen/dar-backup:0.5.15
 touch /tmp/test-data/TEST.txt
 
 docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
@@ -734,7 +739,7 @@ make test      # Run tests against dar-backup:dev
 To test a specific local version (tagged dar-backup:x.y.z):
 
 ```bash
-make FINAL_VERSION=0.5.14 test
+make FINAL_VERSION=0.5.15 test
 ```
 
 ### Testing Released Images from Docker Hub
@@ -742,7 +747,7 @@ make FINAL_VERSION=0.5.14 test
 After publishing a release, test the exact image on Docker Hub (ignoring local builds):
 
 ```bash
-make IMAGE=per2jensen/dar-backup:0.5.14 test-pulled
+make IMAGE=per2jensen/dar-backup:0.5.15 test-pulled
 ```
 
 This:
@@ -756,7 +761,7 @@ This:
     Dry-run the release (build & test only, no push):
 
 ```bash
-make FINAL_VERSION=0.5.14 DAR_BACKUP_VERSION=0.8.3 dry-run-release
+make FINAL_VERSION=0.5.15 DAR_BACKUP_VERSION=0.8.2 dry-run-release
 ```
 
 This validates:
@@ -772,12 +777,12 @@ Perform the actual release (push to Docker Hub):
 ```bash
 export DOCKER_USER=your-username
   export DOCKER_TOKEN=your-access-token  # do not put token in bash_history
-make FINAL_VERSION=0.5.14 DAR_BACKUP_VERSION=0.8.3 release
+make FINAL_VERSION=0.5.15 DAR_BACKUP_VERSION=0.8.2 release
 ```
 
 The release target will:
 
-    Build and tag dar-backup:0.5.14.
+    Build and tag dar-backup:0.5.15.
 
     Verify labels and CLI version.
 
