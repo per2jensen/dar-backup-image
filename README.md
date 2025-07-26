@@ -121,6 +121,7 @@ Expected (abridged) output, confirming core capabilities:
 
 |Tag|`dar-backup`version|Git Revision|Docker Hub|
 |---|-------------------|------------|----------|
+| 0.5.15| 0.8.2| 3a40112|[tag:0.5.15](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.15/images/sha256:386e095482e6cdcff0a0ec23924bae196ea5da31cdd4f6f7a1d62b89786f517f)|
 | 0.5.14| 0.8.2| eba3646|[tag:0.5.14](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.14/images/sha256:0ba8c08ef240728693b200c102dc78d1f39510da66e0581262d720c81c0ad015)|
 | 0.5.13| 0.8.2| ba12177|[tag:0.5.13](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.13/images/sha256:69bd96f894ff4708b1377cb61cac55d4269f6ea5de5a09d7d6885f4181fdcd1c)|
 | 0.5.12| 0.8.2| 122cc02|[tag:0.5.12](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.12/images/sha256:7b11d610a717ba6405c6161363664aad2e8fa5f875988fb295a4318205a32be5)|
