@@ -384,7 +384,7 @@ dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
 export IMAGE=dar-backup:dev  # your own locally build image
 
 # Or set IMAGE to one of mine on Docker Hub
-export IMAGE=per2jensen/dar-backup:0.5.6
+VERSION=0.5.15; export IMAGE=per2jensen/dar-backup:${VERSION}
 ```
 
 Now run `dar-backup` in the container
@@ -500,8 +500,6 @@ and is automatically mounted into the container at `/backup.d`.
 > - To force a new run, either remove or archive the previous `.dar` files for that definition/date.
 > -- Use [`cleanup`](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#cleanup-options) for safe archive deletions
 
-
-
 #### Usage
 
 To specify a backup definition, use the `-d` or `--backup-definition` option:
@@ -593,7 +591,7 @@ Learn what's inside the `dar-backup` image: program versions, build metadata, an
 Run the image with different entrypoints to check the bundled versions of `dar-backup`, `dar`, and `par2`:
 
 ```bash
-IMAGE=per2jensen/dar-backup:0.5.1
+VERSION=0.5.15; IMAGE=per2jensen/dar-backup:${VERSION}
 
 # dar-backup version
 docker run --rm --entrypoint "dar-backup" "$IMAGE" -v
@@ -612,8 +610,10 @@ docker run --rm --entrypoint "" "$IMAGE" \
 ### 🏷️ 2. Inspect Image Labels
 
 ```bash
-docker pull per2jensen/dar-backup:0.5.1
-docker inspect per2jensen/dar-backup:0.5.1 | jq '.[0].Config.Labels'
+VERSION=0.5.15; docker pull per2jensen/dar-backup:${VERSION}
+docker inspect per2jensen/dar-backup:${VERSION} | jq '.[0].Config.Labels'
+
+Example output:
 
 {
   "org.opencontainers.image.base.created": "2025-06-19T13:38:32Z",
@@ -642,7 +642,7 @@ Here's a minimal example of how to use dar directly:
 ```bash
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=tmp/test-backups
-export IMAGE=per2jensen/dar-backup:0.5.15
+VERSION=0.5.15; export IMAGE=per2jensen/dar-backup:${VERSION}
 touch /tmp/test-data/TEST.txt
 
 docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
