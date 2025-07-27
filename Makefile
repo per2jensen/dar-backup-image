@@ -261,6 +261,9 @@ log-pushed-build-json: check_version
 	 DIGEST_ONLY="$(DIGEST_ONLY)" \
 	 ./scripts/patch-readme-build.sh
 
+	@echo "🔄 Updating version examples in README.md to VERSION=$(FINAL_VERSION)"
+	@sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md
+
 	@echo "🔄 Checking if README.md changed"
 	@if ! git diff --quiet README.md; then \
 		git add README.md; \
@@ -269,6 +272,24 @@ log-pushed-build-json: check_version
 	else \
 		echo "ℹ️ No changes to commit — README.md already up to date"; \
 	fi
+
+
+
+update-readme-version:
+	@echo "🔄 Updating version examples in README.md to VERSION=$(FINAL_VERSION)"
+	@if sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md; then \
+	  if ! git diff --quiet README.md; then \
+	    git add README.md; \
+	    git commit -m "examples updated to VERSION=$(FINAL_VERSION)"; \
+	    echo "✅ README.md updated and committed"; \
+	  else \
+	    echo "ℹ️ No changes to commit — README.md already up to date"; \
+	  fi; \
+	else \
+	  echo "❌ sed command failed — README.md not updated"; \
+	  exit 1; \
+	fi
+
 
 
 test-log-pushed-build-json:
