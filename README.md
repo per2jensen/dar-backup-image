@@ -130,6 +130,7 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 
 |Tag|`dar-backup`version|Git Revision|Docker Hub|
 |---|-------------------|------------|----------|
+| 0.5.16| 0.8.2| 9b6dc45|[tag:0.5.16](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.16/images/sha256:462d35c545b2d516bfa402374b2ef1566f1f68298280dcdbefe5a1a9e45130af)|
 | 0.5.15| 0.8.2| 3a40112|[tag:0.5.15](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.15/images/sha256:386e095482e6cdcff0a0ec23924bae196ea5da31cdd4f6f7a1d62b89786f517f)|
 | 0.5.14| 0.8.2| eba3646|[tag:0.5.14](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.14/images/sha256:0ba8c08ef240728693b200c102dc78d1f39510da66e0581262d720c81c0ad015)|
 | 0.5.13| 0.8.2| ba12177|[tag:0.5.13](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.13/images/sha256:69bd96f894ff4708b1377cb61cac55d4269f6ea5de5a09d7d6885f4181fdcd1c)|
@@ -391,7 +392,7 @@ dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
 export IMAGE=dar-backup:dev  # your own locally build image
 
 # Or set IMAGE to one of mine on Docker Hub
-VERSION=0.5.15; export IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.5.16; export IMAGE=per2jensen/dar-backup:${VERSION}
 ```
 
 Now run `dar-backup` in the container
@@ -598,7 +599,7 @@ Learn what's inside the `dar-backup` image: program versions, build metadata, an
 Run the image with different entrypoints to check the bundled versions of `dar-backup`, `dar`, and `par2`:
 
 ```bash
-VERSION=0.5.15; IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.5.16; IMAGE=per2jensen/dar-backup:${VERSION}
 
 # dar-backup version
 docker run --rm --entrypoint "dar-backup" "$IMAGE" -v
@@ -617,7 +618,7 @@ docker run --rm --entrypoint "" "$IMAGE" \
 ### 🏷️ 2. Inspect Image Labels
 
 ```bash
-VERSION=0.5.15; docker pull per2jensen/dar-backup:${VERSION}
+VERSION=0.5.16; docker pull per2jensen/dar-backup:${VERSION}
 docker inspect per2jensen/dar-backup:${VERSION} | jq '.[0].Config.Labels'
 
 Example output:
@@ -649,7 +650,7 @@ Here's a minimal example of how to use dar directly:
 ```bash
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=tmp/test-backups
-VERSION=0.5.15; export IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.5.16; export IMAGE=per2jensen/dar-backup:${VERSION}
 touch /tmp/test-data/TEST.txt
 
 docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
