@@ -1,5 +1,18 @@
 # dar-backup-image Changelog
 
+## v0.5.16 - 2025-08-01
+
+Github link: [v0.5.16](https://github.com/per2jensen/dar-backup-image/tree/v0.5.16)
+
+### Changed
+
+- **`dar` compiled from source (v2.7.19)**  
+  - Replaces Ubuntu 24.04’s older `dar` package with the latest upstream release.
+  - The build process:
+    - Verifies the tarball using **Denis Corbin’s GPG signature**.
+    - Builds from source with **full feature set** (zstd, lz4, Argon2, GPGME, librsync, and remote repository support).
+    - Runs **strict feature verification** (gzip, encryption, symlink handling, multi-threading, etc.) before including it in the final image.
+
 ## v0.5.15 - 2025-07-26
 
 Github link: [v0.5.15](https://github.com/per2jensen/dar-backup-image/tree/v0.5.15)

@@ -10,7 +10,7 @@
 
 This image makes it easy to run `dar-backup` in a clean, isolated container environment — perfect for use in cron jobs, systemd timers, or CI pipelines. Whether you're backing up from FUSE-based cloud storage or verifying years-old archives, this image delivers consistent, reproducible results without requiring dar or Python tooling on the host.
 
-At its core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for reliable full, differential, and incremental backups. It validates archives, performs restore tests, manages catalog databases, and optionally generates redundancy files to protect against bit rot.
+At it's core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for reliable full, differential, and incremental backups. It validates archives, performs restore tests, manages catalog databases, and optionally generates redundancy files to protect against bit rot.
 
 🔧 Highlights
 
@@ -93,24 +93,31 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 
 ## `dar` versions
 
-Starting with `dar-backup-image` **0.5.15**, `dar` (v2.7.18) is compiled from source rather than using Ubuntu 24.04’s older package.  
+Starting with `dar-backup-image` **0.5.15**, `dar` (v2.7.18) is compiled from source rather than using Ubuntu 24.04’s older package.
 
-This provides the **latest features, performance optimizations, and bug fixes** (including full zstd, lz4, Argon2, GPGME, and remote repository support).
+Table of `dar` version in `dar-backup-image` tagged images:
+| Tag | `dar` | Note |
+|---|-------------------|------------|
+| 0.5.16| 2.17.19| [Release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/)
+| 0.5.15| 2.17.18| [Release note 2.7.18](https://sourceforge.net/p/dar/mailman/message/59186067/) |
+| ... - 0.5.14| 2.17.13| Ubuntu 24.04 standard |
+
+`dar` is compiled to provide the **latest features, performance optimizations, and bug fixes** (including full zstd, lz4, Argon2, GPGME, and remote repository support).
 
 The [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile) verifies the source tarball using **Denis Corbin’s GPG key**, checks all critical features, and only includes the built binary if everything passes.
 
 To view the embedded `dar` version:
 
 ```bash
-docker run -it --entrypoint /usr/local/bin/dar dar-backup:dev --version
+docker run -it --entrypoint /usr/local/bin/dar dar-backup:<tag> --version
 ```
 
-Expected (abridged) output, confirming core capabilities:
+Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 
 ```bash
- dar version 2.7.18, Copyright (C) 2002-2025 Denis Corbin
+ dar version 2.7.19, Copyright (C) 2002-2025 Denis Corbin
 
- Using libdar 6.8.2 built with compilation time options:
+ Using libdar 6.8.3 built with compilation time options:
    gzip compression (libz)      : YES
    Strong encryption (libgcrypt): YES
    Public key ciphers (gpgme)   : YES

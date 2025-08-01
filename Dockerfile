@@ -7,7 +7,7 @@
 FROM ubuntu:24.04 AS builder
 
 ARG DAR_BACKUP_VERSION
-ARG DAR_VERSION=2.7.18
+ARG DAR_VERSION=2.7.19
 ENV DEBIAN_FRONTEND=noninteractive PATH="/opt/venv/bin:$PATH" DAR_DIR=/usr/local
 
 # Install build deps (Python for dar-backup, toolchain for DAR)
