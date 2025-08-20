@@ -1,0 +1,127 @@
+# .github/workflows/ci.yml
+name: CI — build, test, scan
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write         # for GHCR push/pull
+  security-events: write  # for SARIF upload
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+  IMAGE_NAME: dar-backup
+  CI_TAG: ci-${{ github.sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read DAR_BACKUP_VERSION
+        id: ver
+        run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set meta
+        id: meta
+        run: echo "image_ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CI_TAG }}" >> $GITHUB_OUTPUT
+
+      - name: Build with Makefile and tag locally
+        run: |
+          make FINAL_VERSION=dev DAR_BACKUP_VERSION=${{ steps.ver.outputs.v }} dev
+          docker tag dar-backup:dev "${{ steps.meta.outputs.image_ref }}"
+
+      - name: Push to GHCR (temp CI tag)
+        run: docker push "${{ steps.meta.outputs.image_ref }}"
+
+  test:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull CI image
+        run: docker pull "${{ needs.build.outputs.image_ref }}"
+      - name: Run FULL, DIFF & INCR tests
+        run: make test
+      - name: Run integration tests
+        run: make test-integration
+
+  sbom_vuln_scan:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GRYPE_DB_AUTO_UPDATE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull CI image
+        run: docker pull "${{ needs.build.outputs.image_ref }}"
+
+      - name: Cache Grype DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype
+          key: grype-db-${{ runner.os }}-${{ runner.arch }}-week-${{ github.run_id }}
+
+      - name: Install Syft
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+      - name: Install Grype
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Update Grype DB (optional)
+        if: env.GRYPE_DB_AUTO_UPDATE == 'true'
+        run: grype db update
+
+      - name: Generate SBOM
+        run: syft "${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json
+
+      - name: Scan with Grype (fail on high/critical)
+        run: |
+          set -e
+          grype "sbom:sbom-cyclonedx.json" -o table --fail-on High | tee grype-report.txt
+          grype "sbom:sbom-cyclonedx.json" -o sarif > grype.sarif
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom-cyclonedx.json
+
+      - name: Upload Grype report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-report
+          path: grype-report.txt
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: grype.sarif
