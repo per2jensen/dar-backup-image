@@ -1,0 +1,56 @@
+
+# Python artifacts
+__pycache__/
+src/clonepulse/__pycache__/
+*.py[cod]
+*.pyo
+
+
+# Editor/IDE files
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+*.log
+*.sublime-project
+*.sublime-workspace
+.vscode/
+.idea/
+
+# OS-generated
+.DS_Store
+Thumbs.db
+
+# Archives or temporary test files
+*.tar
+*.tar.gz
+*.zip
+*.img
+*.iso
+!src/dar/dar-*.tar.gz
+!src/dar/dar-*.tar.gz.sig
+
+# Docker stuff
+Dockerfile-*~
+docker-compose.yml~
+
+# Build/test output
+test-output/
+build/
+dist/
+scripts/test/*
+test/
+.eggs/
+*.egg-info/
+.eggs/
+*.egg
+.env
+
+# CI artifacts (if any)
+coverage.xml
+*.coverage
+.cache/
+
+# ignore DRY-RUN
+.dryrun
