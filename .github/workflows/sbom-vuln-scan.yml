@@ -1,0 +1,100 @@
+name: sbom-and-vuln-scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IMAGE: dar-backup:dev
+      # Optional: set to "false" to force offline scan when cache is warm
+      GRYPE_DB_AUTO_UPDATE: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read DAR_BACKUP_VERSION file
+        id: ver
+        run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
+
+      # 1) Build the image
+      - name: Build dev image with pinned dar-backup
+        run: make FINAL_VERSION=dev DAR_BACKUP_VERSION=${{ steps.ver.outputs.v }} dev
+
+      # 2) Cache Grype DB between runs
+      # Cache key formula:
+      #   - OS + grype version + week number keeps cache fresh but not too chatty
+      #   - Change "week-$(date +%G-%V)" to "month-$(date +%Y-%m)" if preferred
+      - name: Compute cache key
+        id: cache-key
+        run: |
+          VER=$(curl -sL https://raw.githubusercontent.com/anchore/grype/main/VERSION)
+          echo "ver=$VER" >> $GITHUB_OUTPUT
+          echo "week=$(date +%G-%V)" >> $GITHUB_OUTPUT
+
+      - name: Cache Grype DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype
+          key: grype-db-${{ runner.os }}-${{ steps.cache-key.outputs.ver }}-${{ steps.cache-key.outputs.week }}
+
+      # 3) Install Syft and Grype (static binaries)
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype version
+
+      # 4) (Optional) update the DB if cache miss or forced
+      - name: Update Grype DB (if allowed)
+        if: env.GRYPE_DB_AUTO_UPDATE == 'true'
+        run: grype db update
+
+      # 5) Generate SBOM
+      - name: Generate SBOM (CycloneDX JSON)
+        run: syft "$IMAGE" -o cyclonedx-json > sbom-cyclonedx.json
+
+      # 6) Vulnerability scan using cached or freshly updated DB
+      - name: Scan with Grype (fail on high/critical)
+        run: |
+          set -e
+          # Human-readable report for logs + artifact
+          grype "sbom:sbom-cyclonedx.json" -o table --fail-on High | tee grype-report.txt
+          # SARIF for GitHub Security tab
+          grype "sbom:sbom-cyclonedx.json" -o sarif > grype.sarif
+
+      # 7) Upload artifacts for audit trail
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom-cyclonedx.json
+
+      # 8) Upload Grype vulnerability report
+      - name: Upload Grype report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-report
+          path: grype-report.txt
+
+      # 9) Publish SARIF to Code Scanning
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: grype.sarif
