@@ -1,12 +1,12 @@
 {
   "annotations": [
     {
-      "date": "2025-06-15",
-      "label": "Daily max: 66"
-    },
-    {
       "date": "2025-08-15",
       "label": "GH stats failing ..."
+    },
+    {
+      "date": "2025-06-15",
+      "label": "Daily max: 66"
     }
   ],
   "total_clones": 409,
