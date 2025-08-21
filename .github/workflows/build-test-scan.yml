@@ -140,6 +140,27 @@ jobs:
           JSON=$(syft "docker:$IMG" -o json)
           SYFT_CONFIG=$(echo "$JSON" | jq -r '.source.target.imageID // empty' | sed 's/^sha256://')
           SYFT_MANIFEST=$(echo "$JSON" | jq -r '.source.target.manifestDigest // empty' | sed 's/^sha256://')
+          SYFT_USERINPUT=$(echo "$JSON" | jq -r '.source.target.userInput // empty')
+
+          echo "docker config:   ${DOCKER_CONFIG:-<none>}"
+          echo "syft   config:   ${SYFT_CONFIG:-<none>}"
+          echo "docker manifest: ${DOCKER_MANIFEST:-<none>}"
+          echo "syft   manifest: ${SYFT_MANIFEST:-<none>}"
+          echo "syft   input:    ${SYFT_USERINPUT:-<none>}"
+
+          if [ -n "$SYFT_CONFIG" ]; then
+            test "$DOCKER_CONFIG" = "$SYFT_CONFIG" || { echo "Digest mismatch (config)"; exit 1; }
+          elif [ -n "$SYFT_MANIFEST" ]; then
+            test "$DOCKER_MANIFEST" = "$SYFT_MANIFEST" || { echo "Digest mismatch (manifest)"; exit 1; }
+          else
+            # Fallback: ensure Syft scanned the exact daemon image reference
+            test "$SYFT_USERINPUT" = "docker:$IMG" || { echo "Syft source mismatch"; exit 1; }
+          fi
+
+          # Syft JSON (daemon source). Some versions omit digests; handle gracefully.
+          JSON=$(syft "docker:$IMG" -o json)
+          SYFT_CONFIG=$(echo "$JSON" | jq -r '.source.target.imageID // empty' | sed 's/^sha256://')
+          SYFT_MANIFEST=$(echo "$JSON" | jq -r '.source.target.manifestDigest // empty' | sed 's/^sha256://')
           SYFT_SOURCE=$(echo "$JSON" | jq -r '.source.name')
 
           echo "docker config:   ${DOCKER_CONFIG:-<none>}"
@@ -203,5 +224,3 @@ jobs:
             echo "- Components: $comps"
             echo "- Vulnerabilities (all severities): $vulns"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          
