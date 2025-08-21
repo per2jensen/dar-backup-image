@@ -344,6 +344,13 @@ test: all-dev
 	pytest -s -v $(PYTEST_ARGS) tests/
 
 
+test-nobuild:
+	@echo "Running pytest (full suite)..."
+	@FINAL_VERSION=$${FINAL_VERSION:-dev}; \
+	IMAGE=$${IMAGE:-dar-backup:$${FINAL_VERSION}}; \
+	pytest -s -v $(PYTEST_ARGS) tests/
+
+
 # Test using a pulled image (skips local build)
 test-pulled:
 	@if [ -z "$(IMAGE)" ]; then \

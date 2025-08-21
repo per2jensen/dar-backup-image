@@ -11,6 +11,10 @@ permissions:
   packages: write         # for GHCR push/pull
   security-events: write  # for SARIF upload
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}
   IMAGE_NAME: dar-backup
@@ -52,6 +56,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install required system packages
+        run: |
+          sudo apt update
+          sudo apt install -y python3 python3-pytest
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -60,10 +72,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image
         run: docker pull "${{ needs.build.outputs.image_ref }}"
+
+      - name: Ensure image exists
+        run: docker image inspect "${{ needs.build.outputs.image_ref }}" > /dev/null
+
+      - name: Show image digest
+        run: docker image inspect "${{ needs.build.outputs.image_ref }}" --format '{{.RepoTags}} {{.Id}} {{.Size}}'
       - name: Run FULL, DIFF & INCR tests
-        run: make test
-      - name: Run integration tests
-        run: make test-integration
+        run: make IMAGE="${{ needs.build.outputs.image_ref }}" test-nobuild
 
   sbom_vuln_scan:
     needs: build
@@ -82,11 +98,21 @@ jobs:
       - name: Pull CI image
         run: docker pull "${{ needs.build.outputs.image_ref }}"
 
+      - name: Compute Grype cache key
+        id: cache-key
+        run: |
+          VER=$(curl -sL https://raw.githubusercontent.com/anchore/grype/main/VERSION)
+          echo "ver=$VER" >> $GITHUB_OUTPUT
+          echo "week=$(date +%G-%V)" >> $GITHUB_OUTPUT
+
       - name: Cache Grype DB
         uses: actions/cache@v4
         with:
           path: ~/.cache/grype
-          key: grype-db-${{ runner.os }}-${{ runner.arch }}-week-${{ github.run_id }}
+          key: grype-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.ver }}-${{ steps.cache-key.outputs.week }}
+          restore-keys: |
+            grype-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.ver }}-
+            grype-db-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Syft
         run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
@@ -97,8 +123,17 @@ jobs:
         if: env.GRYPE_DB_AUTO_UPDATE == 'true'
         run: grype db update
 
+      - name: Show Grype DB status
+        run: grype db status
+
       - name: Generate SBOM
         run: syft "${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json
+
+      - name: SBOM sanity check
+        run: |
+          test -s sbom-cyclonedx.json
+          wc -c sbom-cyclonedx.json
+          grep -q '"components"' sbom-cyclonedx.json || { echo 'SBOM missing components key'; exit 1; }
 
       - name: Scan with Grype (fail on high/critical)
         run: |
