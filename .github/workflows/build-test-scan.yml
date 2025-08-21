@@ -130,15 +130,27 @@ jobs:
 
       - name: Verify image digest matches Syft source
         run: |
-          D1=$(docker image inspect "${{ needs.build.outputs.image_ref }}" -f '{{.Id}}')
-          D2=$(syft "docker:${{ needs.build.outputs.image_ref }}" -o json | jq -r '.source.target.id')
-          echo "docker: $D1"
-          echo "syft:   $D2"
-          test "$D1" = "$D2" || { echo "Digest mismatch"; exit 1; }
-
+          set -e
+          IMG="${{ needs.build.outputs.image_ref }}"
+          DOCKER_CONFIG=$(docker image inspect "$IMG" -f '{{.Id}}' | sed 's/^sha256://')
+          DOCKER_MANIFEST=$(docker image inspect "$IMG" -f '{{index .RepoDigests 0}}' | awk -F@ '{print $2}' | sed 's/^sha256://')
+          read -r SYFT_CONFIG SYFT_MANIFEST <<EOF
+          $(syft "docker:$IMG" -o json | jq -r '[.source.target.imageID, .source.target.manifestDigest] | map(gsub("^sha256:";"")) | @tsv')
+          EOF
+          echo "docker config:   $DOCKER_CONFIG"
+          echo "syft   config:   ${SYFT_CONFIG:-<none>}"
+          echo "docker manifest: $DOCKER_MANIFEST"
+          echo "syft   manifest: ${SYFT_MANIFEST:-<none>}"
+          if [ -n "$SYFT_CONFIG" ]; then
+            test "$DOCKER_CONFIG" = "$SYFT_CONFIG" || { echo "Digest mismatch (config)"; exit 1; }
+          elif [ -n "$SYFT_MANIFEST" ]; then
+            test "$DOCKER_MANIFEST" = "$SYFT_MANIFEST" || { echo "Digest mismatch (manifest)"; exit 1; }
+          else
+            echo "Syft did not report image digests"; exit 1
+          fi
 
       - name: Generate SBOM
-        run: syft "${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json
+        run: syft "docker:${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json
 
       - name: SBOM sanity check
         run: |
