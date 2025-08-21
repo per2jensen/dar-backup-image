@@ -1,6 +1,6 @@
 # 📦 dar-backup image for container backups and more
 
-![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/test.yml/badge.svg)
+![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
 [![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)](https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/weekly_clones.png)
 [![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/weekly_clones.png)  <sub>🎯 Stats powered by [ClonePulse](https://github.com/per2jensen/clonepulse)</sub>
 
@@ -83,6 +83,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [Restore](#restore)
   - [Using the Makefile](#using-the-makefile)
     - [Common Targets](#common-targets)
+    - [dar and dar-backup versions](#dar-and-dar-backup-versions)
     - [Testing Locally Built Images](#testing-locally-built-images)
     - [Testing Released Images from Docker Hub](#testing-released-images-from-docker-hub)
     - [Releasing a New Version](#releasing-a-new-version)
@@ -733,6 +734,17 @@ It supports **local development builds**, **final version tagging**, and **relea
 | `make size-report`            | Displays a normalized report of image layer sizes (for auditing image size).                       |
 | `make dev-nuke`               | Cleans all cached layers and build artifacts (forces a full fresh build next time).                 |
 
+### dar and dar-backup versions
+
+The versions of `dar` and `dar-backup` used in the image is controlled by the values in the two files
+
+| File | Note |
+|------|------|
+|DAR_VERSION|For example `2.7.19`|
+|DAR_BACKUP_VERSION|For example `0.8.2`|
+
+The values are read by the Makefile and by the `build-test-scan.yml`action.
+
 ---
 
 ### Testing Locally Built Images
@@ -769,7 +781,7 @@ This:
     Dry-run the release (build & test only, no push):
 
 ```bash
-make FINAL_VERSION=0.5.15 DAR_BACKUP_VERSION=0.8.2 dry-run-release
+make FINAL_VERSION=0.5.15 dry-run-release
 ```
 
 This validates:
@@ -785,7 +797,7 @@ Perform the actual release (push to Docker Hub):
 ```bash
 export DOCKER_USER=your-username
   export DOCKER_TOKEN=your-access-token  # do not put token in bash_history
-make FINAL_VERSION=0.5.15 DAR_BACKUP_VERSION=0.8.2 release
+make FINAL_VERSION=0.5.15 release
 ```
 
 The release target will:
@@ -810,10 +822,10 @@ The release target will:
     make FINAL_VERSION=x.y.z test (validate your local final image)
 
     Dry-run release:
-    make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c dry-run-release
+    make FINAL_VERSION=x.y.z dry-run-release
 
     Push the final image:
-    make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c release
+    make FINAL_VERSION=x.y.z release
 
     Verify the published image:
     make IMAGE=per2jensen/dar-backup:x.y.z test-pulled

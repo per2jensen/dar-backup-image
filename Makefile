@@ -19,7 +19,8 @@ DOCKER ?= docker
 FINAL_VERSION ?= dev
 
 UBUNTU_VERSION ?= 24.04
-DAR_BACKUP_VERSION ?= 0.8.2
+DAR_BACKUP_VERSION ?= $(shell cat DAR_BACKUP_VERSION)
+DAR_VERSION ?= $(shell cat DAR_VERSION)
 
 FINAL_IMAGE_NAME = dar-backup
 DOCKERHUB_REPO = per2jensen/dar-backup
@@ -43,7 +44,8 @@ LABEL_ARGS = \
   --label org.opencontainers.image.licenses="GPL-3.0-or-later" \
   --label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" \
   --label org.opencontainers.image.ref.name="$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
-  --label org.dar-backup.version="$(DAR_BACKUP_VERSION)"
+  --label org.dar-backup.version="$(DAR_BACKUP_VERSION)" \
+  --label org.dar.version="$(DAR_VERSION)"
 
 
 
@@ -63,6 +65,11 @@ check_version:
 	@if [ -z "$(DAR_BACKUP_VERSION)" ]; then \
 		echo "❌ ERROR: You must set DAR_BACKUP_VERSION explicitly."; \
 		echo "   Example: make DAR_BACKUP_VERSION=1.0.0 final"; \
+		exit 1; \
+	fi
+	@if [ -z "$(DAR_VERSION)" ]; then \
+		echo "❌ ERROR: You must set DAR_VERSION explicitly."; \
+		echo "   Example: make DAR_VERSION=2.7.19 final"; \
 		exit 1; \
 	fi
 
@@ -99,7 +106,8 @@ dev-clean: check_version
 	@echo "Rebuilding image (via 'make dev' to preserve labels)..."
 	$(MAKE) dev \
 		FINAL_VERSION=$(FINAL_VERSION) \
-		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION)
+		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		DAR_VERSION=$(DAR_VERSION) 
 
 # Full nuke: deletes *all* caches and forces a completely fresh build
 dev-nuke:
@@ -110,7 +118,9 @@ dev-nuke:
 	$(DOCKER) build --no-cache -f Dockerfile \
 		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		--build-arg DAR_VERSION=$(DAR_VERSION) \
 		-t dar-backup:$(FINAL_VERSION) .
+
 
 dev-rebuild: dev-nuke dev
 
@@ -120,11 +130,11 @@ dev: validate
 	@echo "Building development image (cached & labeled): $(FINAL_VERSION)"
 	$(DOCKER) build -f Dockerfile \
 	  --build-arg VERSION=$(FINAL_VERSION) \
+	  --build-arg DAR_VERSION=$(DAR_VERSION) \
 	  --build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 	  $(LABEL_ARGS) \
 	  -t dar-backup:dev \
 	  .
-
 
 
 # Final simply retags the freshest :dev, then runs your checks
@@ -133,13 +143,6 @@ final: check_version
 	@if ! docker image inspect dar-backup:dev >/dev/null 2>&1; then \
 	  echo "❌ dar-backup:dev not found — please run 'make dev' first"; exit 1; \
 	fi
-
-#	@created="$$(docker inspect --format '{{.Created}}' dar-backup:dev)"; \
-#	  age_sec="$$(($(shell date +%s) - $$(date -d "$$created" +%s)))"; \
-#	  if [ $$age_sec -gt 300 ]; then \
-#	    echo "❌ dar-backup:dev is too old ($$((age_sec/60))m$$((age_sec%60))s) — rebuild it"; exit 1; \
-#	  fi
-#	@echo "✅ dar-backup:dev is fresh (age $$((age_sec/60))m$$((age_sec%60))s)"
 
 	@echo "🛠️  Tagging final image as $(FINAL_VERSION)…"
 	@docker tag dar-backup:dev dar-backup:$(FINAL_VERSION)
@@ -174,7 +177,9 @@ verify-labels:
 	                  org.opencontainers.image.source \
 	                  org.opencontainers.image.title \
 	                  org.opencontainers.image.url \
-	                  org.opencontainers.image.version)
+	                  org.opencontainers.image.version \
+					  org.dar-backup.version \
+					  org.dar.version
 
 	@for label in $(LABELS); do \
 	  value=$$(docker inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null | cut -d= -f2-); \

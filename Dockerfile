@@ -7,7 +7,7 @@
 FROM ubuntu:24.04 AS builder
 
 ARG DAR_BACKUP_VERSION
-ARG DAR_VERSION=2.7.19
+ARG DAR_VERSION
 ENV DEBIAN_FRONTEND=noninteractive PATH="/opt/venv/bin:$PATH" DAR_DIR=/usr/local
 
 # Install build deps (Python for dar-backup, toolchain for DAR)
@@ -33,7 +33,7 @@ COPY src/dar/dar-${DAR_VERSION}.tar.gz.sig /tmp/
 COPY doc/denis-corbin.gpg /tmp/
 
 # Verify dar tarball signature (fail hard if invalid)
-# Denis Corbin's dar-backup GPG key is used to verify the signature
+# Denis Corbin's DAR signing key is used to verify the signature
 RUN gpg --batch --import /tmp/denis-corbin.gpg \
   && gpg --batch --verify /tmp/dar-${DAR_VERSION}.tar.gz.sig /tmp/dar-${DAR_VERSION}.tar.gz \
   || (echo "❌ GPG signature verification failed for DAR ${DAR_VERSION}" && exit 1)  \
@@ -48,7 +48,7 @@ RUN cd /tmp/dar-${DAR_VERSION} \
   && make install-strip \
   && echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf \
   && ldconfig \
-  && ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}, Copyright (C) 2002-2025 Denis Corbin" \
+  && ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
        || (echo "❌ DAR ${DAR_VERSION} build failed version check" && exit 1) ) \
   && rm -f /tmp/dar-${DAR_VERSION}.tar.gz
 
@@ -94,6 +94,8 @@ RUN pip uninstall -y pip setuptools wheel || true \
 
 # === Final Runtime Stage ===
 FROM ubuntu:24.04
+ARG DAR_VERSION
+ARG DAR_BACKUP_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive PATH="/opt/venv/bin:$PATH" \
     DAR_BACKUP_CONFIG=/etc/dar-backup/dar-backup.conf \
@@ -131,8 +133,14 @@ RUN apt-get update && apt-get dist-upgrade -y \
 # Refresh linker cache so libdar64 is found
 RUN ldconfig \
   # Sanity check DAR after copy
-  && echo "Checking DAR version...\"${DAR_VERSION}\"  " \
-  && /usr/local/bin/dar -Q --version | grep -q "dar version ${DAR_VERSION}"
+  && echo "Checking DAR version...\"${DAR_VERSION}\"  " 
+
+RUN ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
+       || (echo "❌ DAR ${DAR_VERSION} build failed version check" && exit 1) )
+
+
+#RUN set -e; V=$(/usr/local/bin/dar -Q --version | sed -n 's/^dar version \([0-9.]\+\).*/\1/p'); \
+#    [ "$V" = "$DAR_VERSION" ]
 
 # Final cleanup of venv (tests, pip, setuptools, wheel)
 RUN find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
@@ -142,6 +150,10 @@ RUN find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
             /opt/venv/lib/python*/site-packages/setuptools \
             /opt/venv/lib/python*/site-packages/wheel
 
+LABEL com.per2jensen.dar.version="${DAR_VERSION}" \
+      com.per2jensen.dar_backup.version="${DAR_BACKUP_VERSION}"
+
+            
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
