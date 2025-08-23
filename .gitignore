@@ -46,6 +46,7 @@ test/
 .eggs/
 *.egg
 .env
+.e2e/
 
 # CI artifacts (if any)
 coverage.xml
