@@ -2,8 +2,10 @@ import os
 import shutil
 import tempfile
 import pytest
-from pathlib import Path
 import subprocess
+import uuid
+
+from pathlib import Path
 
 DEFAULT_BACKUP_DEFINITION = """\
 -am
@@ -50,18 +52,20 @@ def test_env(tmp_path_factory, request):
     yield env
     shutil.rmtree(str(base_dir), ignore_errors=True)
 
+
 @pytest.fixture
 def dataset(test_env):
     """Prepares a default dataset for stateless tests."""
     data_dir = Path(test_env["DAR_BACKUP_DATA_DIR"])
+    unique_id = uuid.uuid4().hex[:6]
     # Fresh dataset
     for f in data_dir.glob("*"):
         if f.is_file():
             f.unlink()
-    (data_dir / "hello.txt").write_text(f"Hello World, created at pytest\n")
-    (data_dir / "test.txt").write_text(f"Test file generated at pytest\n")
+    (data_dir / f"hello-{unique_id}.txt").write_text(f"Hello World, created at pytest\n")
+    (data_dir / f"test-{unique_id}.txt").write_text(f"Test file generated at pytest\n")
     subprocess.run(
-        ["dd", "if=/dev/urandom", f"of={data_dir}/verify_test.bin", "bs=1M", "count=2"],
+        ["dd", "if=/dev/urandom", f"of={data_dir}/verify_test-{unique_id}.bin", "bs=1M", "count=2"],
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

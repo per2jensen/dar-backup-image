@@ -2,7 +2,7 @@
 ##   default backup definition
 ########################################
 #
-#  Default is to backup everything in and below /data
+#  Default is to backup everything in and below /data when using `scripts/run-backup.sh`
 #
 #  Use multiple -g to include various directories
 #  Use multiple -P to exclude other directoreis
@@ -22,10 +22,9 @@
 #  
  -g data/
 
-
 # Directories to exclude below the Root dir
-# -P data/some/dir/to/exlude
-# -P data/exlude/another/dir
+# -P data/some/dir/to/exclude
+# -P data/exclude/another/dir
 
 
 # compression level
