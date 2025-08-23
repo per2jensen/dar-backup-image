@@ -179,7 +179,7 @@ verify-labels:
 	                  org.opencontainers.image.url \
 	                  org.opencontainers.image.version \
 					  org.dar-backup.version \
-					  org.dar.version
+					  org.dar.version)
 
 	@for label in $(LABELS); do \
 	  value=$$(docker inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null | cut -d= -f2-); \
