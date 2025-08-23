@@ -1,15 +1,16 @@
 #! /bin/bash
 #SPFX-License-Identifier: GPL-3.0-or-later
 
-# This script is part of the dar-backup-image project, which provides a Docker
-# image for running `dar` backups using the dar-backup wrapperwith sensible
-# defaults and easy configuration.
-# See more at the project's GitHub repository: https://github.com/per2jensen/dar-backup-image
+# This script is part of the dar-backup-image project, which 
+# poovides a Docker image for running `dar` backups using the
+# dar-backup wrapperwith sensible defaults and easy configuration.
+# See more at the project's GitHub repository:
+# https://github.com/per2jensen/dar-backup-image
 
 # this script is part of the e2e testsuite used in a GitHub Actions workflow
-# it creates a sample dataset, runs a FULL, DIFF and INCR backup, mutates the dataset
-# between each backup, restores each backup set to a separate location and compares
-# the restored data with the original data
+# it creates a sample dataset, runs a FULL, DIFF and INCR backup, mutates
+# the dataset between each backup, restores each backup and compares the
+# restored data with the original data
 
 set -euo pipefail
 
