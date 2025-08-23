@@ -1,6 +1,7 @@
 # 📦 dar-backup image for container backups and more
 
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
+<img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/per2jensen/dar-backup"/>
 [![# clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/badge_clones.json)](https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/weekly_clones.png)
 [![Milestone](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/badges/milestone_badge.json)](https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/weekly_clones.png)  <sub>🎯 Stats powered by [ClonePulse](https://github.com/per2jensen/clonepulse)</sub>
 
@@ -99,9 +100,10 @@ Starting with `dar-backup-image` **0.5.15**, `dar` (v2.7.18) is compiled from so
 Table of `dar` version in `dar-backup-image` tagged images:
 | Tag | `dar` | Note |
 |---|-------------------|------------|
-| 0.5.16| 2.17.19| [Release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/)
-| 0.5.15| 2.17.18| [Release note 2.7.18](https://sourceforge.net/p/dar/mailman/message/59186067/) |
-| ... - 0.5.14| 2.17.13| Ubuntu 24.04 standard |
+| 0.5.17| 2.7.19| |
+| 0.5.16| 2.7.19| [Release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/)
+| 0.5.15| 2.7.18| [Release note 2.7.18](https://sourceforge.net/p/dar/mailman/message/59186067/) |
+| ... - 0.5.14| 2.7.13| Ubuntu 24.04 standard |
 
 `dar` is compiled to provide the **latest features, performance optimizations, and bug fixes** (including full zstd, lz4, Argon2, GPGME, and remote repository support).
 
