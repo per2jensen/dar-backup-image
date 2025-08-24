@@ -1,0 +1,64 @@
+name: Bug Report
+description: Report something not working as expected in `dar-backup-image`
+title: "[Bug] <short description>"
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to help improve `dar-backup-image`!
+        Please provide as much detail as possible.
+
+  - type: input
+    id: version
+    attributes:
+      label: Image Version
+      description: Docker Hub image tag.
+      placeholder: E.g., per2jensen/dar-backup:0.5.17
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the issue and the expected behavior.
+      placeholder: Tell us what you saw vs. what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Help us reproduce the issue step by step.
+      placeholder: |
+        1. Run the image this way...
+        2. Use this config file...
+        3. Use this backup definition...
+        4. Use these directories for volume binds...
+        5. Observe this output...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Output
+      description: Paste logs or command output (redact sensitive info).
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: Which OS are you running on?
+      options:
+        - Linux (Debian/Ubuntu)
+        - Linux (Arch/Fedora)
+        - macOS
+        - Other (please describe)
+    validations:
+      required: true

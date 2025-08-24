@@ -1,0 +1,59 @@
+name: Feature Request
+description: Suggest a new idea or enhancement for `dar-backup-image`
+title: "[Feature] <short description>"
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve `dar-backup-image`!
+        Please explain your idea clearly so we can evaluate it.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Short description of the feature or enhancement.
+      placeholder: E.g., Add support for custom backup labels
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this solve, or why is it useful?
+      placeholder: |
+        Describe the pain point, missing functionality, or scenario.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe how you would like this feature to work.
+      placeholder: |
+        Explain how it should behave, examples of usage, or configuration.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered other solutions or workarounds?
+      placeholder: |
+        1. Use feature X in a different way
+        2. External tool workaround
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any context, references, or screenshots that help explain the request.
+      placeholder: Links to related issues, external docs, or comparisons
+    validations:
+      required: false
