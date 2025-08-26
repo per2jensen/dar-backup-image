@@ -89,12 +89,13 @@ jobs:
   # using a temporary dataset created in the workflow
   # This is a more realistic test of the actual backup/restore process
   # than the unit tests in `test` job. 
-  e2e:
+  backup-restore-compare:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
+      - uses: actions/checkout@v4
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
