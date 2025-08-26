@@ -98,6 +98,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull CI image
+        run: docker pull "${{ needs.build.outputs.image_ref }}"
+
+      - name: Ensure image exists
+        run: docker image inspect "${{ needs.build.outputs.image_ref }}" > /dev/null
+
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
