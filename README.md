@@ -97,14 +97,6 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 
 Starting with `dar-backup-image` **0.5.15**, `dar` (v2.7.18) is compiled from source rather than using Ubuntu 24.04’s older package.
 
-Table of `dar` version in `dar-backup-image` tagged images:
-| Tag | `dar` | Note |
-|---|-------------------|------------|
-| 0.5.17| 2.7.19| |
-| 0.5.16| 2.7.19| [Release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/)
-| 0.5.15| 2.7.18| [Release note 2.7.18](https://sourceforge.net/p/dar/mailman/message/59186067/) |
-| ... - 0.5.14| 2.7.13| Ubuntu 24.04 standard |
-
 `dar` is compiled to provide the **latest features, performance optimizations, and bug fixes** (including full zstd, lz4, Argon2, GPGME, and remote repository support).
 
 The [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile) verifies the source tarball using **Denis Corbin’s GPG key**, checks all critical features, and only includes the built binary if everything passes.
@@ -131,13 +123,13 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 <a name="dockerhub-builds"></a>
 ## Builds uploaded to Docker Hub
 
-|Tag|`dar-backup`version|Git Revision|Docker Hub|
-|---|-------------------|------------|----------|
-| 0.5.17| 0.8.4| 02822f5|[tag:0.5.17](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.17/images/sha256:a0f4dfec55005c1b07f69d1af6bc750a0c56a38cc04c536a8390347d02a3fdae)|
-| 0.5.16| 0.8.2| 9b6dc45|[tag:0.5.16](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.16/images/sha256:462d35c545b2d516bfa402374b2ef1566f1f68298280dcdbefe5a1a9e45130af)|
-| 0.5.15| 0.8.2| 3a40112|[tag:0.5.15](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.15/images/sha256:386e095482e6cdcff0a0ec23924bae196ea5da31cdd4f6f7a1d62b89786f517f)|
-| 0.5.14| 0.8.2| eba3646|[tag:0.5.14](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.14/images/sha256:0ba8c08ef240728693b200c102dc78d1f39510da66e0581262d720c81c0ad015)|
-| 0.5.13| 0.8.2| ba12177|[tag:0.5.13](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.13/images/sha256:69bd96f894ff4708b1377cb61cac55d4269f6ea5de5a09d7d6885f4181fdcd1c)|
+|Tag|`dar-backup`|`dar`|Git Revision|Docker Hub|Note|
+|---|-------------------|---|---------|----------|--|
+| 0.5.17| 0.8.4| 2.7.19 |02822f5|[tag:0.5.17](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.17/images/sha256:a0f4dfec55005c1b07f69d1af6bc750a0c56a38cc04c536a8390347d02a3fdae)| - |
+| 0.5.16| 0.8.2| 2.7.19 |9b6dc45|[tag:0.5.16](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.16/images/sha256:462d35c545b2d516bfa402374b2ef1566f1f68298280dcdbefe5a1a9e45130af)| [Dar release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/) |
+| 0.5.15| 0.8.2| 2.7.18 |3a40112|[tag:0.5.15](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.15/images/sha256:386e095482e6cdcff0a0ec23924bae196ea5da31cdd4f6f7a1d62b89786f517f)| [Dar release note 2.7.18](https://sourceforge.net/p/dar/mailman/message/59186067/) |
+| 0.5.14| 0.8.2| 2.7.13 |eba3646|[tag:0.5.14](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.14/images/sha256:0ba8c08ef240728693b200c102dc78d1f39510da66e0581262d720c81c0ad015)| - |
+| 0.5.13| 0.8.2| 2.7.13 |cba12177|[tag:0.5.13](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.13/images/sha256:69bd96f894ff4708b1377cb61cac55d4269f6ea5de5a09d7d6885f4181fdcd1c)| - |
 
 ---
 
@@ -516,17 +508,17 @@ and is automatically mounted into the container at `/backup.d`.
 To specify a backup definition, use the `-d` or `--backup-definition` option:
 
 ```bash
-WORKDIR=/path/to/workdir ./run-backup.sh -t FULL -d my-dataset
+WORKDIR=/path/to/workdir ./run-backup.sh -t FULL -d my-backup-definition
 ```
 
 This instructs `dar-backup` to load:
 
-$DAR_BACKUP_D_DIR/my-dataset
+$DAR_BACKUP_D_DIR/my-backup-definition
 
 instead of the default definition (`default`).
 
 If no `-d` option is supplied, the script falls back to the default definition.  
-The `run-backup.sh` script also generates a minimal default definition file at:
+The `run-backup.sh` script generates a minimal default definition file at:
 
 $DAR_BACKUP_D_DIR/default
 
@@ -558,7 +550,12 @@ in the `docker run` command, which:
 1. Create a new definition file:
 
 ```bash
-echo "-R /data/projects -z5 -am --slice 5G" > $HOME/dar-backup/backup.d/projects
+cat > $HOME/dar-backup/backup.d/projects << 'EOF'
+-R /data/projects
+-z5
+-am
+--slice 5G
+EOF
 ```
 
 2. Run a differential backup using it:
@@ -653,7 +650,7 @@ Here's a minimal example of how to use dar directly:
 ```bash
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=tmp/test-backups
-VERSION=0.5.17; export IMAGE=per2jensen/dar-backup:${VERSION}
+export VERSION=0.5.17; export IMAGE=per2jensen/dar-backup:${VERSION}
 touch /tmp/test-data/TEST.txt
 
 docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
@@ -745,7 +742,7 @@ The versions of `dar` and `dar-backup` used in the image is controlled by the va
 |DAR_VERSION|For example `2.7.19`|
 |DAR_BACKUP_VERSION|For example `0.8.2`|
 
-The values are read by the Makefile and by the `build-test-scan.yml`action.
+The values are read by the Makefile and by for example the `build-test-scan.yml`action.
 
 ---
 

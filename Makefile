@@ -261,9 +261,11 @@ log-pushed-build-json: check_version
 	@echo "📘 Updating README.md with latest build row..."
 	@FINAL_VERSION="$(FINAL_VERSION)" \
 	 DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
+	 DAR_VERSION="$(DAR_VERSION)" \
 	 GIT_REV="$(GIT_REV)" \
 	 DOCKERHUB_REPO="$(DOCKERHUB_REPO)" \
 	 DIGEST_ONLY="$(DIGEST_ONLY)" \
+	 NOTE=" - " \
 	 ./scripts/patch-readme-build.sh
 
 	@echo "🔄 Updating version examples in README.md to VERSION=$(FINAL_VERSION)"

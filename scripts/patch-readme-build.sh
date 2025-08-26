@@ -21,7 +21,7 @@ TMP_FILE="README.md.tmp"
 TABLE_ANCHOR='<a name="dockerhub-builds">'
 
 # Build new row
-NEW_ROW="| $FINAL_VERSION| $DAR_BACKUP_VERSION| $GIT_REV|[tag:$FINAL_VERSION](https://hub.docker.com/layers/$DOCKERHUB_REPO/$FINAL_VERSION/images/$DIGEST_ONLY)|"
+NEW_ROW="| $FINAL_VERSION| $DAR_BACKUP_VERSION| $DAR_VERSION| $GIT_REV|[tag:$FINAL_VERSION](https://hub.docker.com/layers/$DOCKERHUB_REPO/$FINAL_VERSION/images/$DIGEST_ONLY)| $NOTE|"
 
 TABLE_HEADER="## Builds uploaded to Docker Hub"
 TMP_FILE="README.md.tmp"
