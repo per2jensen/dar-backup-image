@@ -107,13 +107,13 @@ jobs:
           set -euo pipefail
 
           export WORKDIR="$(pwd)/.e2e"
-          DATA_DIR="$WORKDIR/data"
-          BACKUP_DIR="$WORKDIR/backups"
-          BACKUP_D_DIR="$WORKDIR/backup.d"
-          RESTORE_DIR="$WORKDIR/restore"
-          DATE="$(date +%Y-%m-%d)"
+          export DATA_DIR="$WORKDIR/data"
+          export BACKUP_DIR="$WORKDIR/backups"
+          export BACKUP_D_DIR="$WORKDIR/backup.d"
+          export RESTORE_DIR="$WORKDIR/restore"
+          export DATE="$(date +%Y-%m-%d)"
           echo "Using 'DATE': $DATE"
-          IMAGE="${{ needs.build.outputs.image_ref }}"
+          export IMAGE="${{ needs.build.outputs.image_ref }}"
 
           rm -fr "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR"
           mkdir -p "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR"
