@@ -581,16 +581,10 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [test, backup-restore-compare, sbom_vuln_scan]
 
-    env:
-      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Merge summaries
-        run: |
-          mkdir -p ci-summary
-          jq -s 'reduce .[] as $item ({}; . * $item)' ci-summary/*.json > ci-summary/ci-summary.json
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Download all summaries
         uses: actions/download-artifact@v4
