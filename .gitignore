@@ -1,5 +1,6 @@
 
 # Python artifacts
+venv/
 __pycache__/
 src/clonepulse/__pycache__/
 *.py[cod]
