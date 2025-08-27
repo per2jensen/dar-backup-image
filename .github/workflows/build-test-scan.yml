@@ -25,9 +25,13 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
     outputs:
       image_ref: ${{ steps.meta.outputs.image_ref }}
     steps:
+      - name: Prepare summary directory
+        run: mkdir -p "$SUMMARY_DIR"
       - uses: actions/checkout@v4
 
       - name: Read DAR_BACKUP_VERSION
@@ -56,7 +60,12 @@ jobs:
   test:
     needs: build
     runs-on: ubuntu-24.04
+    env:
+      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
+
     steps:
+      - name: Prepare summary directory
+        run: mkdir -p "$SUMMARY_DIR"
       - uses: actions/checkout@v4
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
@@ -64,7 +73,18 @@ jobs:
       - name: Install required system packages
         run: |
           sudo apt update
-          sudo apt install -y python3 python3-pytest
+          sudo apt install -y python3
+
+      - name: Create and prepare Python virtual environment
+        run: |
+          cd $GITHUB_WORKSPACE/v2
+          if [[ -d venv* ]]; then
+            rm -rf venv*
+          fi
+          python3 -m venv venv
+          . venv/bin/activate
+          pip install --upgrade pip
+          pip install pytest pytest-json-report
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -81,7 +101,36 @@ jobs:
       - name: Show image digest
         run: docker image inspect "${{ needs.build.outputs.image_ref }}" --format '{{.RepoTags}} {{.Id}} {{.Size}}'
       - name: Run FULL, DIFF & INCR tests
-        run: make IMAGE="${{ needs.build.outputs.image_ref }}" test-nobuild
+        run: |
+          . venv/bin/activate
+          make IMAGE="${{ needs.build.outputs.image_ref }}" test-nobuild
+
+      - name: Summarize unit test results
+        if: always()
+        run: |
+          if [ -f pytest-report.json ]; then
+            total=$(jq '.summary.total' pytest-report.json)
+            passed=$(jq '.summary.passed' pytest-report.json)
+            failed=$(jq '.summary.failed' pytest-report.json)
+            skipped=$(jq '.summary.skipped' pytest-report.json)
+            rate=$(jq -n "100 * $passed / $total" | xargs printf "%.1f")
+
+            jq -n --argjson total "$total" \
+                  --argjson passed "$passed" \
+                  --argjson failed "$failed" \
+                  --argjson skipped "$skipped" \
+                  --arg rate "$rate" \
+                  '{
+                    test: {
+                      total: $total,
+                      passed: $passed,
+                      failed: $failed,
+                      skipped: $skipped,
+                      pass_rate: $rate
+                    }
+                  }' > "$SUMMARY_DIR/test.json"
+          fi
+
 
 
   # Run end-to-end backup/restore/compare tests in a container
@@ -95,8 +144,13 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
 
     steps:
+      - name: Prepare summary directory
+        run: mkdir -p "$SUMMARY_DIR"
+
       - uses: actions/checkout@v4
 
       - name: Login to GHCR
@@ -114,6 +168,14 @@ jobs:
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Compute artifact naming components
+        id: naming
+        run: |
+          DATE=$(date +%Y%m%d)
+          SHA=$(sha256sum grype-report.txt | cut -c1-12)
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
 
       - name: Run E2E backup/restore/compare
         run: |
@@ -321,6 +383,48 @@ jobs:
             echo "hardlink incorrectly preserved after round2 change"; exit 1
           fi
 
+      - name: Summarize E2E backup/restore results
+        if: always()
+        run: |
+          summary='{}'
+          DATE="$(date +%Y-%m-%d)"
+          WORKDIR="$(pwd)/.e2e"
+          overall_status="success"
+
+          for phase in FULL DIFF INCR; do
+            archive="default_${phase}_${DATE}"
+            diff_file="$WORKDIR/diff-${archive}.txt"
+
+            if [[ -s "$diff_file" ]]; then
+              status="mismatch"
+              notes="Differences found in ${phase} restore"
+              diff_lines=$(wc -l < "$diff_file")
+              overall_status="failure"
+            else
+              status="ok"
+              notes="Restore matches source"
+              diff_lines=0
+            fi
+
+            summary=$(echo "$summary" | jq --arg phase "$phase" \
+                                          --arg status "$status" \
+                                          --argjson diff "$diff_lines" \
+                                          --arg notes "$notes" \
+              '. + {($phase): {status: $status, diff_lines: $diff, notes: $notes}}')
+          done
+
+          jq -n --argjson phases "$summary" \
+                --arg status "$overall_status" \
+                '{
+                  backup_restore_compare: {
+                    phases: $phases,
+                    overall_status: $status
+                  }
+                }' > "$SUMMARY_DIR/e2e.json"
+
+
+
+
   sbom_vuln_scan:
     needs: build
     runs-on: ubuntu-latest
@@ -414,3 +518,129 @@ jobs:
             echo "- Components: $comps"
             echo "- Vulnerabilities (all severities): $vulns"
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+      - name: Summarize SBOM and vulnerabilities by severity
+        if: always()
+        run: |
+          comps=$(jq '.components|length' sbom-cyclonedx.json || echo 0)
+
+          grype "sbom:sbom-cyclonedx.json" -o json > grype-results.json
+
+          total=$(jq '.matches | length' grype-results.json)
+          critical=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-results.json)
+          high=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' grype-results.json)
+          medium=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' grype-results.json)
+          low=$(jq '[.matches[] | select(.vulnerability.severity == "Low")] | length' grype-results.json)
+          negligible=$(jq '[.matches[] | select(.vulnerability.severity == "Negligible")] | length' grype-results.json)
+          unknown=$(jq '[.matches[] | select(.vulnerability.severity == "Unknown")] | length' grype-results.json)
+
+          jq -n --arg image "${{ needs.build.outputs.image_ref }}" \
+                --argjson comps "$comps" \
+                --argjson total "$total" \
+                --argjson critical "$critical" \
+                --argjson high "$high" \
+                --argjson medium "$medium" \
+                --argjson low "$low" \
+                --argjson negligible "$negligible" \
+                --argjson unknown "$unknown" \
+                '{
+                  sbom_vuln_scan: {
+                    image: $image,
+                    components: $comps,
+                    vulnerabilities: {
+                      total: $total,
+                      by_severity: {
+                        critical: $critical,
+                        high: $high,
+                        medium: $medium,
+                        low: $low,
+                        negligible: $negligible,
+                        unknown: $unknown
+                      }
+                    }
+                  }
+                }' > "$SUMMARY_DIR/sbom.json"
+
+  summarize:
+    runs-on: ubuntu-24.04
+    needs: [test, backup-restore-compare, sbom_vuln_scan]
+
+    env:
+      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
+
+    steps:
+      - name: Prepare summary directory
+        run: mkdir -p "$SUMMARY_DIR"
+
+      - uses: actions/checkout@v4
+
+      - name: Merge summaries
+        run: |
+          mkdir -p ci-summary
+          jq -s 'reduce .[] as $item ({}; . * $item)' ci-summary/*.json > ci-summary/ci-summary.json
+          cat ci-summary/ci-summary.json  # print to Workflow log
+
+      - name: Upload combined summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary
+          path: ci-summary/ci-summary.json
+
+
+      - name: Create metadata-wrapped summary
+        run: |
+          mkdir -p data
+          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq -n \
+            --arg ts "$timestamp" \
+            --arg workflow "${{ github.workflow }}" \
+            --arg commit "${{ github.sha }}" \
+            --arg branch "${{ github.ref }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg run_url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --slurpfile summary ci-summary/ci-summary.json \
+            '{
+              timestamp: $ts,
+              workflow_name: $workflow,
+              git_commit: $commit,
+              branch: $branch,
+              actor: $actor,
+              run_id: $run_id,
+              run_url: $run_url,
+              summary: $summary[0]
+            }' > data/new-entry.json
+
+
+
+      - name: Append to build-test-scan-report.json
+        run: |
+          if [ ! -f data/build-test-scan-report.json ]; then
+            echo "[]" > data/build-test-scan-report.json
+          fi
+
+          jq -s '.[0] + [.[1]]' \
+            data/build-test-scan-report.json data/new-entry.json > data/tmp.json && \
+          mv data/tmp.json data/build-test-scan-report.json
+
+
+
+      - name: Commit and push updated build-test-scan-report.json
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+          git fetch origin
+          git checkout main
+
+          # Check if the file has changed before staging
+          if ! git diff --quiet data/build-test-scan-report.json; then
+            git add data/build-test-scan-report.json
+            git commit -m "Update build-test-scan-report.json with latest CI summary"
+            git push origin main
+          else
+            echo "No changes detected in build-test-scan-report.json. Skipping commit."
+          fi
+

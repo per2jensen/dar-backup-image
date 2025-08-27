@@ -25,6 +25,17 @@ DAR_VERSION ?= $(shell cat DAR_VERSION)
 FINAL_IMAGE_NAME = dar-backup
 DOCKERHUB_REPO = per2jensen/dar-backup
 
+
+IMAGE_REF        ?= $(FINAL_IMAGE_NAME):$(FINAL_VERSION)
+GRYPE_FAIL_ON    ?= High
+GRYPE_DB_AUTO_UPDATE ?= false
+GRYPE_CACHE_DIR  ?= $(HOME)/.cache/grype
+
+SBOM_FILE := sbom-$(FINAL_IMAGE_NAME)-$(FINAL_VERSION).cyclonedx.json
+GRYPE_TXT := grype-report-$(FINAL_IMAGE_NAME)-$(FINAL_VERSION).txt
+GRYPE_SARIF := grype-$(FINAL_IMAGE_NAME)-$(FINAL_VERSION).sarif
+
+
 # === Build log configuration ===
 BUILD_LOG_DIR ?= doc
 BUILD_LOG_FILE ?= build-history.json
@@ -54,7 +65,8 @@ LABEL_ARGS = \
 # ================================
 
 .PHONY: all all-dev dev-rebuild final release clean clean-all push tag login dev dev-clean labels help \
-	check_version test test-integration all-dev dry-run-release-internal check-docker-creds test-log-pushed-build-json
+	check_version test test-integration all-dev dry-run-release-internal check-docker-creds \
+	est-log-pushed-build-json sbom-sarif install-tools grype-db-status grype-db-update
 
 check_version:
 	@if [ -z "$(FINAL_VERSION)" ]; then \
@@ -72,6 +84,52 @@ check_version:
 		echo "   Example: make DAR_VERSION=2.7.19 final"; \
 		exit 1; \
 	fi
+
+
+sbom-sarif: install-tools
+	@echo "🔍 SBOM + scan for $(IMAGE_REF)"
+	@mkdir -p "$(GRYPE_CACHE_DIR)"
+	# Optional DB update
+	@if [ "$(GRYPE_DB_AUTO_UPDATE)" = "true" ]; then \
+	  GRYPE_DB_AUTO_UPDATE=true grype db update; \
+	fi
+	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db status || true
+
+	# Generate SBOM (CycloneDX JSON)
+	@SYFT_CHECK_FOR_APP_UPDATE=false syft "docker:$(IMAGE_REF)" -o cyclonedx-json > "$(SBOM_FILE)"
+
+	# Sanity checks on SBOM
+	@test -s "$(SBOM_FILE)"
+	@wc -c "$(SBOM_FILE)"
+	@grep -q '"components"' "$(SBOM_FILE)" || { echo 'SBOM missing "components"'; exit 1; }
+
+	# Grype scan from SBOM: table (fail on High/Critical) + SARIF
+	@set -e; \
+	GRYPE_CHECK_FOR_APP_UPDATE=false \
+	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
+	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
+	grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)"
+	@GRYPE_CHECK_FOR_APP_UPDATE=false \
+	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
+	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
+	grype "sbom:$(SBOM_FILE)" -o sarif > "$(GRYPE_SARIF)"
+
+	@echo "✅ Outputs:"
+	@ls -lh "$(SBOM_FILE)" "$(GRYPE_TXT)" "$(GRYPE_SARIF)"
+
+install-tools:
+	@command mkdir -p "$(HOME)"/.local/bin
+	@command -v syft >/dev/null 2>&1 || { echo "Installing syft"; \
+	  curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b  "$(HOME)"/.local/bin; }
+	@command -v grype >/dev/null 2>&1 || { echo "Installing grype"; \
+	  curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "$(HOME)"/.local/bin; }
+
+grype-db-status:
+	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db status
+
+grype-db-update:
+	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db update
+
 
 
 # Base image target is now a no-op (we only have one Dockerfile now)
@@ -192,6 +250,35 @@ verify-labels:
 	done
 
 	@echo "🎉 All required OCI labels are present."
+
+
+# SBOM (Syft) + SARIF (Grype)
+SBOM := $(FINAL_IMAGE_NAME)-$(FINAL_VERSION)-sbom.cyclonedx.json
+SARIF := $(FINAL_IMAGE_NAME)-$(FINAL_VERSION)-grype.sarif
+GRYPE_CACHE := .cache/grype
+
+sbom-sarif: check_version
+	@echo "🔍 Generating SBOM and SARIF for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+	@mkdir -p $(GRYPE_CACHE)
+
+	# SBOM via Syft (no network version-check)
+	@docker run --rm \
+	  -e SYFT_CHECK_FOR_APP_UPDATE=false \
+	  -v /var/run/docker.sock:/var/run/docker.sock \
+	  anchore/syft:latest \
+	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o cyclonedx-json > $(SBOM)
+
+	# Vulnerability scan via Grype
+	# - Disable app-update ping; persist DB cache to avoid re-downloads
+	@docker run --rm \
+	  -e GRYPE_CHECK_FOR_APP_UPDATE=false \
+	  -v /var/run/docker.sock:/var/run/docker.sock \
+	  -v $(PWD)/$(GRYPE_CACHE):/home/anchore/.cache \
+	  anchore/grype:latest \
+	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o sarif > $(SARIF)
+
+	@echo "✅ Generated files:"
+	@ls -lh $(SBOM) $(SARIF)
 
 
 verify-cli-version:
@@ -355,8 +442,8 @@ test-nobuild:
 	@echo "Running pytest (full suite)..."
 	@FINAL_VERSION=$${FINAL_VERSION:-dev}; \
 	IMAGE=$${IMAGE:-dar-backup:$${FINAL_VERSION}}; \
-	pytest -s -v $(PYTEST_ARGS) tests/
-
+#	pytest -s -v $(PYTEST_ARGS) tests/
+	pytest --json-report --json-report-file=pytest-report.json
 
 # Test using a pulled image (skips local build)
 test-pulled:
