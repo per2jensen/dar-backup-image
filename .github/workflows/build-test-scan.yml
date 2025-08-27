@@ -25,16 +25,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    env:
-      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
     outputs:
       image_ref: ${{ steps.meta.outputs.image_ref }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Prepare summary directory
-        run: mkdir -p "$SUMMARY_DIR"
-
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
@@ -61,13 +55,10 @@ jobs:
   test:
     needs: build
     runs-on: ubuntu-24.04
-    env:
-      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
-
     steps:
       - uses: actions/checkout@v4
       - name: Prepare summary directory
-        run: mkdir -p "$SUMMARY_DIR"
+        run: mkdir -p "ci-summary"
 
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
@@ -130,8 +121,15 @@ jobs:
                       skipped: $skipped,
                       pass_rate: $rate
                     }
-                  }' > "$SUMMARY_DIR/test.json"
+                  }' > ci-summary/test.json
           fi
+      - name: Upload ci-summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary-${{ github.job }}
+          path: ci-summary
+
 
 
 
@@ -146,15 +144,11 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
-
     steps:
-
       - uses: actions/checkout@v4
 
       - name: Prepare summary directory
-        run: mkdir -p "$SUMMARY_DIR"
+        run: mkdir -p ci-summar
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -423,9 +417,14 @@ jobs:
                     phases: $phases,
                     overall_status: $status
                   }
-                }' > "$SUMMARY_DIR/e2e.json"
+                }' > ci-summary/e2e.json"
 
-
+      - name: Upload ci-summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary-${{ github.job }}
+          path: ci-summary
 
 
   sbom_vuln_scan:
@@ -434,14 +433,13 @@ jobs:
     timeout-minutes: 25
     env:
       GRYPE_DB_AUTO_UPDATE: "true"
-      SUMMARY_DIR: ${{ github.workspace }}/ci-summary
     steps:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: actions/checkout@v4
 
       - name: Prepare summary directory
-        run: mkdir -p "$SUMMARY_DIR"
+        run: mkdir -p ci-summary
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -568,7 +566,16 @@ jobs:
                       }
                     }
                   }
-                }' > "$SUMMARY_DIR/sbom.json"
+                }' > ci-summary/sbom.json
+
+
+      - name: Upload ci-summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary-${{ github.job }}
+          path: ci-summary
+
 
   summarize:
     runs-on: ubuntu-24.04
@@ -578,16 +585,30 @@ jobs:
       SUMMARY_DIR: ${{ github.workspace }}/ci-summary
 
     steps:
-
       - uses: actions/checkout@v4
-
-      - name: Prepare summary directory
-        run: mkdir -p "$SUMMARY_DIR"
 
       - name: Merge summaries
         run: |
           mkdir -p ci-summary
           jq -s 'reduce .[] as $item ({}; . * $item)' ci-summary/*.json > ci-summary/ci-summary.json
+
+      - name: Download all summaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-summary-*
+          merge-multiple: true
+          path: ci-summary
+      - name: Merge summaries
+        run: |
+          shopt -s nullglob
+          mkdir -p ci-summary
+          files=(ci-summary/*.json)
+          if (( ${#files[@]} == 0 )); then
+            echo '{}' > ci-summary/ci-summary.json
+          else
+            jq -s 'reduce .[] as $item ({}; . * $item)' "${files[@]}" > ci-summary/ci-summary.json
+          fi
+
           cat ci-summary/ci-summary.json  # print to Workflow log
 
       - name: Upload combined summary
