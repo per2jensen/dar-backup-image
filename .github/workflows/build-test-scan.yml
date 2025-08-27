@@ -630,8 +630,15 @@ jobs:
           mkdir -p doc
           [[ -f doc/build-test-scan-report.json ]] || echo "[]" > doc/build-test-scan-report.json
 
-          jq -S -s '.[0] + [.[1]] | (length>500 ? .[-500:] : .)' \
-            doc/build-test-scan-report.json "$T/new-entry.json" > "$T/report.json"
+          RETAIN="${RETAIN:-500}"
+
+          jq -S --argjson r "$RETAIN" --slurpfile entry "$T/new-entry.json" '
+            (. + $entry) as $a
+            | if ($a|length) > $r
+              then $a[(($a|length)-$r):]
+              else $a
+              end
+          ' doc/build-test-scan-report.json > "$T/report.json"
 
           if cmp -s "$T/report.json" doc/build-test-scan-report.json; then
             echo "UNCHANGED=1" >> $GITHUB_ENV
