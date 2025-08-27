@@ -9,7 +9,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
   packages: write         # for GHCR push/pull
   security-events: write  # for SARIF upload
 
@@ -614,7 +614,6 @@ jobs:
 
       - name: Create metadata-wrapped summary
         run: |
-          mkdir -p data
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           jq -n \
             --arg ts "$timestamp" \
@@ -634,20 +633,18 @@ jobs:
               run_id: $run_id,
               run_url: $run_url,
               summary: $summary[0]
-            }' > data/new-entry.json
-
+            }' > new-entry.json
 
 
       - name: Append to build-test-scan-report.json
         run: |
-          if [ ! -f data/build-test-scan-report.json ]; then
-            echo "[]" > data/build-test-scan-report.json
+          if [ ! -f doc/build-test-scan-report.json ]; then
+            echo "[]" > doc/build-test-scan-report.json
           fi
 
           jq -s '.[0] + [.[1]]' \
-            data/build-test-scan-report.json data/new-entry.json > data/tmp.json && \
-          mv data/tmp.json data/build-test-scan-report.json
-
+            doc/build-test-scan-report.json new-entry.json > tmp.json && \
+          mv tmp.json doc/build-test-scan-report.json
 
 
       - name: Commit and push updated build-test-scan-report.json
@@ -658,13 +655,13 @@ jobs:
 
           git fetch origin
           git checkout main
+          git pull --rebase origin main
 
-          # Check if the file has changed before staging
-          if ! git diff --quiet data/build-test-scan-report.json; then
-            git add data/build-test-scan-report.json
-            git commit -m "Update build-test-scan-report.json with latest CI summary"
-            git push origin main
-          else
+          # Stage first (handles new/untracked files), then test staged diff
+          git add -f doc/build-test-scan-report.json
+          if git diff --cached --quiet; then
             echo "No changes detected in build-test-scan-report.json. Skipping commit."
+          else
+            git commit -m "Update build-test-scan-report.json [run ${{ github.run_id }}]"
+            git push origin main
           fi
-
