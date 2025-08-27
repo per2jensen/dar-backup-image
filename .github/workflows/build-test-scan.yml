@@ -576,15 +576,24 @@ jobs:
           name: ci-summary-${{ github.job }}
           path: ci-summary
 
-
   summarize:
     runs-on: ubuntu-24.04
     needs: [test, backup-restore-compare, sbom_vuln_scan]
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
+
+
+      - name: Sync main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
 
       - name: Download all summaries
         uses: actions/download-artifact@v4
@@ -593,57 +602,43 @@ jobs:
           merge-multiple: true
           path: ci-summary
 
-      - name: Merge summaries
+      - name: Merge and wrap (tmp only)
         shell: bash
         run: |
           set -euo pipefail
+          T="$(mktemp -d)"
           shopt -s nullglob
-          mkdir -p ci-summary doc
           files=(ci-summary/*.json)
           if (( ${#files[@]} == 0 )); then
-            echo '{}' > ci-summary/ci-summary.json
+            echo '{}' > "$T/ci-summary.json"
           else
-            jq -s 'reduce .[] as $item ({}; . * $item)' "${files[@]}" > ci-summary/ci-summary.json
+            jq -s 'reduce .[] as $i ({}; . * $i)' "${files[@]}" > "$T/ci-summary.json"
           fi
-          cat ci-summary/ci-summary.json
 
-      - name: Create metadata-wrapped summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p doc
           ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          jq -n \
-            --arg ts "$ts" \
-            --arg workflow "${{ github.workflow }}" \
-            --arg commit   "${{ github.sha }}" \
-            --arg branch   "${{ github.ref }}" \
-            --arg actor    "${{ github.actor }}" \
-            --arg run_id   "${{ github.run_id }}" \
-            --arg run_url  "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --slurpfile summary ci-summary/ci-summary.json \
-            '{
-              timestamp: $ts,
-              workflow_name: $workflow,
-              git_commit: $commit,
-              branch: $branch,
-              actor: $actor,
-              run_id: $run_id,
-              run_url: $run_url,
-              summary: $summary[0]
-            }' > doc/new-entry.json
+          jq -n --arg ts "$ts" \
+                --arg workflow "${{ github.workflow }}" \
+                --arg commit   "${{ github.sha }}" \
+                --arg branch   "${{ github.ref }}" \
+                --arg actor    "${{ github.actor }}" \
+                --arg run_id   "${{ github.run_id }}" \
+                --arg run_url  "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+                --slurpfile s "$T/ci-summary.json" \
+                '{timestamp:$ts,workflow_name:$workflow,git_commit:$commit,branch:$branch,actor:$actor,run_id:$run_id,run_url:$run_url,summary:$s[0]}' \
+                > "$T/new-entry.json"
 
-      - name: Append to build-test-scan-report.json (rotate last 500)
-        shell: bash
-        run: |
-          set -euo pipefail
           mkdir -p doc
           [[ -f doc/build-test-scan-report.json ]] || echo "[]" > doc/build-test-scan-report.json
-          jq -s '.[0] + [.[1]] | (if length>500 then .[-500:] else . end)' \
-            doc/build-test-scan-report.json doc/new-entry.json > doc/tmp.json
-          mv doc/tmp.json doc/build-test-scan-report.json
-          # basic sanity
-          jq -e 'type=="array" and (.[-1]|has("timestamp") and has("summary"))' doc/build-test-scan-report.json > /dev/null
+
+          jq -S -s '.[0] + [.[1]] | (length>500 ? .[-500:] : .)' \
+            doc/build-test-scan-report.json "$T/new-entry.json" > "$T/report.json"
+
+          if cmp -s "$T/report.json" doc/build-test-scan-report.json; then
+            echo "UNCHANGED=1" >> $GITHUB_ENV
+          else
+            mv "$T/report.json" doc/build-test-scan-report.json
+            echo "UNCHANGED=0" >> $GITHUB_ENV
+          fi
 
       - name: Gate on results (optional but recommended)
         if: always()
@@ -678,19 +673,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit and push updated report
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.UNCHANGED != '1'
         shell: bash
         run: |
           set -euo pipefail
           git config --global user.name  "github-actions"
           git config --global user.email "github-actions@github.com"
-          git fetch origin
-          git checkout main
-          git pull --rebase origin main
           git add -f doc/build-test-scan-report.json
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "CI summary: run ${{ github.run_id }}"
-            git push origin main
-          fi
+          git commit -m "CI summary: run ${{ github.run_id }}" || exit 0
+          git push origin HEAD:main
+
