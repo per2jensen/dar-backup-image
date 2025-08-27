@@ -592,37 +592,35 @@ jobs:
           pattern: ci-summary-*
           merge-multiple: true
           path: ci-summary
+
       - name: Merge summaries
+        shell: bash
         run: |
+          set -euo pipefail
           shopt -s nullglob
-          mkdir -p ci-summary
+          mkdir -p ci-summary doc
           files=(ci-summary/*.json)
           if (( ${#files[@]} == 0 )); then
             echo '{}' > ci-summary/ci-summary.json
           else
             jq -s 'reduce .[] as $item ({}; . * $item)' "${files[@]}" > ci-summary/ci-summary.json
           fi
-
-          cat ci-summary/ci-summary.json  # print to Workflow log
-
-      - name: Upload combined summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-summary
-          path: ci-summary/ci-summary.json
-
+          cat ci-summary/ci-summary.json
 
       - name: Create metadata-wrapped summary
+        shell: bash
         run: |
-          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          set -euo pipefail
+          mkdir -p doc
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           jq -n \
-            --arg ts "$timestamp" \
+            --arg ts "$ts" \
             --arg workflow "${{ github.workflow }}" \
-            --arg commit "${{ github.sha }}" \
-            --arg branch "${{ github.ref }}" \
-            --arg actor "${{ github.actor }}" \
-            --arg run_id "${{ github.run_id }}" \
-            --arg run_url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg commit   "${{ github.sha }}" \
+            --arg branch   "${{ github.ref }}" \
+            --arg actor    "${{ github.actor }}" \
+            --arg run_id   "${{ github.run_id }}" \
+            --arg run_url  "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --slurpfile summary ci-summary/ci-summary.json \
             '{
               timestamp: $ts,
@@ -633,35 +631,66 @@ jobs:
               run_id: $run_id,
               run_url: $run_url,
               summary: $summary[0]
-            }' > new-entry.json
+            }' > doc/new-entry.json
 
-
-      - name: Append to build-test-scan-report.json
+      - name: Append to build-test-scan-report.json (rotate last 500)
+        shell: bash
         run: |
-          if [ ! -f doc/build-test-scan-report.json ]; then
-            echo "[]" > doc/build-test-scan-report.json
-          fi
+          set -euo pipefail
+          mkdir -p doc
+          [[ -f doc/build-test-scan-report.json ]] || echo "[]" > doc/build-test-scan-report.json
+          jq -s '.[0] + [.[1]] | (if length>500 then .[-500:] else . end)' \
+            doc/build-test-scan-report.json doc/new-entry.json > doc/tmp.json
+          mv doc/tmp.json doc/build-test-scan-report.json
+          # basic sanity
+          jq -e 'type=="array" and (.[-1]|has("timestamp") and has("summary"))' doc/build-test-scan-report.json > /dev/null
 
-          jq -s '.[0] + [.[1]]' \
-            doc/build-test-scan-report.json new-entry.json > tmp.json && \
-          mv tmp.json doc/build-test-scan-report.json
+      - name: Gate on results (optional but recommended)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          overall=$(jq -r '.[-1].summary.backup_restore_compare.overall_status' doc/build-test-scan-report.json)
+          highs=$(jq '.[-1].summary.sbom_vuln_scan.vulnerabilities.by_severity.high // 0' doc/build-test-scan-report.json)
+          crits=$(jq '.[-1].summary.sbom_vuln_scan.vulnerabilities.by_severity.critical // 0' doc/build-test-scan-report.json)
+          rate=$(jq -r '.[-1].summary.test.pass_rate // "0"' doc/build-test-scan-report.json)
+          echo "overall=$overall high=$highs critical=$crits pass_rate=$rate"
+          [[ "$overall" == "success" ]] || { echo "E2E failed"; exit 1; }
+          [[ "$highs" -eq 0 && "$crits" -eq 0 ]] || { echo "High/Critical vulns present"; exit 1; }
 
+      - name: Write job summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          last='.[-1]'
+          {
+            echo "### CI Summary"
+            echo "- Commit: \`$(jq -r "$last.git_commit" doc/build-test-scan-report.json)\`"
+            echo "- Run: $(jq -r "$last.run_url" doc/build-test-scan-report.json)"
+            echo ""
+            echo "**E2E:** $(jq -r "$last.summary.backup_restore_compare.overall_status" doc/build-test-scan-report.json)"
+            echo ""
+            echo "**Tests:** $(jq -r "$last.summary.test.passed" doc/build-test-scan-report.json)/$(jq -r "$last.summary.test.total" doc/build-test-scan-report.json) passed"
+            echo ""
+            echo "**Vulns:** total $(jq -r "$last.summary.sbom_vuln_scan.vulnerabilities.total" doc/build-test-scan-report.json)  " \
+                "H:$(jq -r "$last.summary.sbom_vuln_scan.vulnerabilities.by_severity.high" doc/build-test-scan-report.json) " \
+                "C:$(jq -r "$last.summary.sbom_vuln_scan.vulnerabilities.by_severity.critical" doc/build-test-scan-report.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit and push updated build-test-scan-report.json
+      - name: Commit and push updated report
         if: github.ref == 'refs/heads/main'
+        shell: bash
         run: |
-          git config --global user.name "github-actions"
+          set -euo pipefail
+          git config --global user.name  "github-actions"
           git config --global user.email "github-actions@github.com"
-
           git fetch origin
           git checkout main
           git pull --rebase origin main
-
-          # Stage first (handles new/untracked files), then test staged diff
           git add -f doc/build-test-scan-report.json
           if git diff --cached --quiet; then
-            echo "No changes detected in build-test-scan-report.json. Skipping commit."
+            echo "No changes to commit."
           else
-            git commit -m "Update build-test-scan-report.json [run ${{ github.run_id }}]"
+            git commit -m "CI summary: run ${{ github.run_id }}"
             git push origin main
           fi
