@@ -79,7 +79,7 @@ jobs:
 
       - name: Create and prepare Python virtual environment
         run: |
-          cd $GITHUB_WORKSPACE/v2
+          cd $GITHUB_WORKSPACE
           if [[ -d venv* ]]; then
             rm -rf venv*
           fi
