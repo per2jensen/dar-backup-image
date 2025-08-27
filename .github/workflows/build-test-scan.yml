@@ -417,7 +417,7 @@ jobs:
                     phases: $phases,
                     overall_status: $status
                   }
-                }' > ci-summary/e2e.json"
+                }' > ci-summary/e2e.json
 
       - name: Upload ci-summary
         if: always()
