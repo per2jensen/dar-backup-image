@@ -5,12 +5,12 @@
       "label": "GH stats failing ..."
     },
     {
-      "date": "2025-06-15",
-      "label": "Daily max: 66"
+      "date": "2025-08-27",
+      "label": "Daily max: 69"
     }
   ],
-  "total_clones": 554,
-  "unique_clones": 385,
+  "total_clones": 623,
+  "unique_clones": 402,
   "daily": [
     {
       "timestamp": "2025-06-12T00:00:00Z",
@@ -391,6 +391,11 @@
       "timestamp": "2025-08-26T00:00:00Z",
       "count": 30,
       "uniques": 11
+    },
+    {
+      "timestamp": "2025-08-27T00:00:00Z",
+      "count": 69,
+      "uniques": 17
     }
   ]
 }
