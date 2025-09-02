@@ -190,10 +190,10 @@ This image includes:
 - dar
 - par2
 - python3
-- gosu
+- setpriv
 - [dar-backup](https://github.com/per2jensen/dar-backup) (my `dar` Python based wrapper)
 - Clean, minimal Ubuntu 24.04 base (~170 MB)
-- CIS-aligned permissions and user-drop via gosu
+- CIS-aligned permissions and user-drop via setpriv
 
 ---
 
