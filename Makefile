@@ -332,18 +332,27 @@ GRYPE_CACHE := .cache/grype
 # SBOM + Grype scan for FINAL image (pre-push gate)
 # ================================
 scan-final: install-tools
+	@if [ -z "$(FINAL_VERSION)" ]; then echo "❌ FINAL_VERSION not set"; exit 1; fi
+	@if [ -z "$(FINAL_IMAGE_NAME)" ]; then echo "❌ FINAL_IMAGE_NAME not set"; exit 1; fi
 	@if ! $(DOCKER) image inspect $(FINAL_IMAGE_NAME):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "❌ Image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) not found. Run 'make final' first."; exit 1; \
 	fi
-	@: $${FINAL_VERSION:?❌ FINAL_VERSION not set}
-	@: $${FINAL_IMAGE_NAME:?❌ FINAL_IMAGE_NAME not set}
 	@echo "🔍 SBOM + scan for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
 	@mkdir -p "$(GRYPE_CACHE_DIR)"
-	# Optional DB update
-	@if [ "$(GRYPE_DB_AUTO_UPDATE)" = "true" ]; then \
-	  GRYPE_DB_AUTO_UPDATE=true grype db update; \
-	fi
-	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db status || true
+	@{ \
+	  set -e; \
+	  export GRYPE_CHECK_FOR_APP_UPDATE=false; \
+	  export GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)"; \
+	  DBSTAT="$$( grype db status 2>&1 || true )"; \
+	  echo "$$DBSTAT"; \
+	  if [ "$(GRYPE_DB_AUTO_UPDATE)" = "true" ] || echo "$$DBSTAT" | grep -Eq 'Status:\s*invalid|does not exist|no vulnerability database|failed to load|max allowed age'; then \
+	    echo "🔄 Updating Grype DB…"; \
+	    grype db update; \
+	  fi; \
+	  grype db status || true; \
+	}
+
+
 
 	# Generate SBOM (CycloneDX JSON) against the *local* final image
 	@SYFT_CHECK_FOR_APP_UPDATE=false syft "docker:$(FINAL_IMAGE_NAME):$(FINAL_VERSION)" -o cyclonedx-json > "$(SBOM_FILE)"
@@ -354,15 +363,17 @@ scan-final: install-tools
 	@grep -q '"components"' "$(SBOM_FILE)" || { echo 'SBOM missing "components"'; exit 1; }
 
 	# Grype scan from SBOM: table (fail on High/Critical) + SARIF artifact
-	@set -e; \
-	GRYPE_CHECK_FOR_APP_UPDATE=false \
-	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
-	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
-	grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)"
-	@GRYPE_CHECK_FOR_APP_UPDATE=false \
-	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
-	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
+	@set -euo pipefail; \
+	export GRYPE_CHECK_FOR_APP_UPDATE=false; \
+	export GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE); \
+	export GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)"; \
+	grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)" || { \
+	  echo "⚠️  Grype scan failed. Forcing DB update and retrying once…"; \
+	  grype db update; \
+	  grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)"; \
+	}; \
 	grype "sbom:$(SBOM_FILE)" -o sarif > "$(GRYPE_SARIF)"
+
 
 	@echo "✅ Outputs:"
 	@ls -lh "$(SBOM_FILE)" "$(GRYPE_TXT)" "$(GRYPE_SARIF)"
