@@ -66,7 +66,9 @@ LABEL_ARGS = \
 
 .PHONY: all all-dev dev-rebuild final release clean clean-all push tag login dev dev-clean labels help \
 	check_version test test-integration all-dev dry-run-release-internal check-docker-creds \
-	est-log-pushed-build-json sbom-sarif install-tools grype-db-status grype-db-update
+	test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools grype-db-status grype-db-update scan-final \
+	verify-labels
+
 
 check_version:
 	@if [ -z "$(FINAL_VERSION)" ]; then \
@@ -89,11 +91,15 @@ check_version:
 sbom-sarif: install-tools
 	@echo "🔍 SBOM + scan for $(IMAGE_REF)"
 	@mkdir -p "$(GRYPE_CACHE_DIR)"
-	# Optional DB update
-	@if [ "$(GRYPE_DB_AUTO_UPDATE)" = "true" ]; then \
-	  GRYPE_DB_AUTO_UPDATE=true grype db update; \
-	fi
-	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db status || true
+	@set -e; \
+	# Check DB status and force update if missing/invalid/expired
+	DBSTAT="$$( GRYPE_CHECK_FOR_APP_UPDATE=false GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" grype db status 2>&1 || true )"; \
+	echo "$$DBSTAT"; \
+	if [ "$(GRYPE_DB_AUTO_UPDATE)" = "true" ] || echo "$$DBSTAT" | grep -Eq 'Status:\s*invalid|does not exist|no vulnerability database|failed to load|max allowed age'; then \
+	  echo "🔄 Updating Grype DB…"; \
+	  GRYPE_CHECK_FOR_APP_UPDATE=false GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" grype db update; \
+	fi; \
+	GRYPE_CHECK_FOR_APP_UPDATE=false GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" grype db status || true
 
 	# Generate SBOM (CycloneDX JSON)
 	@SYFT_CHECK_FOR_APP_UPDATE=false syft "docker:$(IMAGE_REF)" -o cyclonedx-json > "$(SBOM_FILE)"
@@ -103,19 +109,48 @@ sbom-sarif: install-tools
 	@wc -c "$(SBOM_FILE)"
 	@grep -q '"components"' "$(SBOM_FILE)" || { echo 'SBOM missing "components"'; exit 1; }
 
-	# Grype scan from SBOM: table (fail on High/Critical) + SARIF
-	@set -e; \
-	GRYPE_CHECK_FOR_APP_UPDATE=false \
-	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
-	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
-	grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)"
-	@GRYPE_CHECK_FOR_APP_UPDATE=false \
-	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
-	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
+	# Grype scan from SBOM: table (fail on High/Critical) + SARIF, retry once if DB error
+	@set -euo pipefail; \
+	export GRYPE_CHECK_FOR_APP_UPDATE=false; \
+	export GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE); \
+	export GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)"; \
+	grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)" || { \
+	  echo "⚠️  Grype scan failed. Forcing DB update and retrying once…"; \
+	  grype db update; \
+	  grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)"; \
+	}; \
 	grype "sbom:$(SBOM_FILE)" -o sarif > "$(GRYPE_SARIF)"
 
 	@echo "✅ Outputs:"
 	@ls -lh "$(SBOM_FILE)" "$(GRYPE_TXT)" "$(GRYPE_SARIF)"
+
+
+
+
+sbom-sarif-docker: check_version
+	@echo "🔍 Generating SBOM and SARIF for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+	@mkdir -p $(GRYPE_CACHE)
+
+	# SBOM via Syft (no network version-check)
+	@$(DOCKER) run --rm \
+	  -e SYFT_CHECK_FOR_APP_UPDATE=false \
+	  -v /var/run/docker.sock:/var/run/docker.sock \
+	  anchore/syft:latest \
+	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o cyclonedx-json > $(SBOM)
+
+	# Vulnerability scan via Grype
+	# - Disable app-update ping; persist DB cache to avoid re-downloads
+	@$(DOCKER) run --rm \
+	  -e GRYPE_CHECK_FOR_APP_UPDATE=false \
+	  -v /var/run/docker.sock:/var/run/docker.sock \
+	  -v $(PWD)/$(GRYPE_CACHE):/home/anchore/.cache \
+	  anchore/grype:latest \
+	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o sarif > $(SARIF)
+
+	@echo "✅ Generated files:"
+	@ls -lh $(SBOM) $(SARIF)
+
+
 
 install-tools:
 	@command mkdir -p "$(HOME)"/.local/bin
@@ -129,6 +164,10 @@ grype-db-status:
 
 grype-db-update:
 	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db update
+
+
+
+
 
 
 
@@ -195,16 +234,23 @@ dev: validate
 	  .
 
 
-# Final simply retags the freshest :dev, then runs your checks
+
 final: check_version
 	@echo "🔎 Ensuring dar-backup:dev exists and is fresh…"
-	@if ! docker image inspect dar-backup:dev >/dev/null 2>&1; then \
-	  echo "❌ dar-backup:dev not found — please run 'make dev' first"; exit 1; \
+	@if ! $(DOCKER) image inspect dar-backup:dev >/dev/null 2>&1; then \
+	  echo "❌ dar-backup:dev not found — run 'make dev' first"; exit 1; \
 	fi
 
-	@echo "🛠️  Tagging final image as $(FINAL_VERSION)…"
-	@docker tag dar-backup:dev dar-backup:$(FINAL_VERSION)
-	@docker tag dar-backup:dev $(DOCKERHUB_REPO):$(FINAL_VERSION)
+	@echo "🧩 Creating release image with corrected labels (no rebuild)…"
+	@set -e; \
+	CID="$$( $(DOCKER) create dar-backup:dev )"; \
+	$(DOCKER) commit \
+	  --change 'LABEL org.opencontainers.image.version=$(FINAL_VERSION)' \
+	  --change 'LABEL org.opencontainers.image.ref.name=$(DOCKERHUB_REPO):$(FINAL_VERSION)' \
+	  $$CID dar-backup:$(FINAL_VERSION) >/dev/null; \
+	$(DOCKER) rm $$CID >/dev/null
+
+	@$(DOCKER) tag dar-backup:$(FINAL_VERSION) $(DOCKERHUB_REPO):$(FINAL_VERSION)
 
 	@echo
 	@echo "🔎 Verifying CLI version…"
@@ -215,10 +261,12 @@ final: check_version
 	@$(MAKE) verify-labels
 
 	@echo
+	@echo "🔍 Running scans…"
+	@$(MAKE) scan-final
+
+	@echo
 	@echo "📊 Image layer size report (for audit):"
 	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
-
-
 
 
 verify-labels:
@@ -236,11 +284,11 @@ verify-labels:
 	                  org.opencontainers.image.title \
 	                  org.opencontainers.image.url \
 	                  org.opencontainers.image.version \
-					  org.dar-backup.version \
-					  org.dar.version)
+	                  org.dar-backup.version \
+	                  org.dar.version)
 
 	@for label in $(LABELS); do \
-	  value=$$(docker inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null | cut -d= -f2-); \
+	  value=$$($(DOCKER) inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null | cut -d= -f2-); \
 	  if [ -z "$$value" ]; then \
 	    echo "❌ Missing or empty label: $$label"; \
 	    exit 1; \
@@ -249,7 +297,29 @@ verify-labels:
 	  fi; \
 	done
 
-	@echo "🎉 All required OCI labels are present."
+	@echo "🔎 Checking exact matches for version and ref.name…"
+	@set -e; \
+	exp_version="$(FINAL_VERSION)"; \
+	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
+	if [ "$$act_version" != "$$exp_version" ]; then \
+	  echo "❌ org.opencontainers.image.version mismatch"; \
+	  echo "   expected: '$$exp_version'"; \
+	  echo "   actual:   '$$act_version'"; \
+	  exit 1; \
+	fi; \
+	exp_ref="$(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
+	act_ref="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.ref.name" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
+	if [ "$$act_ref" != "$$exp_ref" ]; then \
+	  echo "❌ org.opencontainers.image.ref.name mismatch"; \
+	  echo "   expected: '$$exp_ref'"; \
+	  echo "   actual:   '$$act_ref'"; \
+	  exit 1; \
+	fi; \
+	echo "✅ Labels match expected values."
+
+	@echo "🎉 All required OCI labels are present and correct."
+
+
 
 
 # SBOM (Syft) + SARIF (Grype)
@@ -257,33 +327,54 @@ SBOM := $(FINAL_IMAGE_NAME)-$(FINAL_VERSION)-sbom.cyclonedx.json
 SARIF := $(FINAL_IMAGE_NAME)-$(FINAL_VERSION)-grype.sarif
 GRYPE_CACHE := .cache/grype
 
-sbom-sarif: check_version
-	@echo "🔍 Generating SBOM and SARIF for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
-	@mkdir -p $(GRYPE_CACHE)
 
-	# SBOM via Syft (no network version-check)
-	@docker run --rm \
-	  -e SYFT_CHECK_FOR_APP_UPDATE=false \
-	  -v /var/run/docker.sock:/var/run/docker.sock \
-	  anchore/syft:latest \
-	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o cyclonedx-json > $(SBOM)
+# ================================
+# SBOM + Grype scan for FINAL image (pre-push gate)
+# ================================
+scan-final: install-tools
+	@if ! $(DOCKER) image inspect $(FINAL_IMAGE_NAME):$(FINAL_VERSION) >/dev/null 2>&1; then \
+	  echo "❌ Image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) not found. Run 'make final' first."; exit 1; \
+	fi
+	@: $${FINAL_VERSION:?❌ FINAL_VERSION not set}
+	@: $${FINAL_IMAGE_NAME:?❌ FINAL_IMAGE_NAME not set}
+	@echo "🔍 SBOM + scan for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+	@mkdir -p "$(GRYPE_CACHE_DIR)"
+	# Optional DB update
+	@if [ "$(GRYPE_DB_AUTO_UPDATE)" = "true" ]; then \
+	  GRYPE_DB_AUTO_UPDATE=true grype db update; \
+	fi
+	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db status || true
 
-	# Vulnerability scan via Grype
-	# - Disable app-update ping; persist DB cache to avoid re-downloads
-	@docker run --rm \
-	  -e GRYPE_CHECK_FOR_APP_UPDATE=false \
-	  -v /var/run/docker.sock:/var/run/docker.sock \
-	  -v $(PWD)/$(GRYPE_CACHE):/home/anchore/.cache \
-	  anchore/grype:latest \
-	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o sarif > $(SARIF)
+	# Generate SBOM (CycloneDX JSON) against the *local* final image
+	@SYFT_CHECK_FOR_APP_UPDATE=false syft "docker:$(FINAL_IMAGE_NAME):$(FINAL_VERSION)" -o cyclonedx-json > "$(SBOM_FILE)"
 
-	@echo "✅ Generated files:"
-	@ls -lh $(SBOM) $(SARIF)
+	# Sanity checks on SBOM
+	@test -s "$(SBOM_FILE)"
+	@wc -c "$(SBOM_FILE)"
+	@grep -q '"components"' "$(SBOM_FILE)" || { echo 'SBOM missing "components"'; exit 1; }
+
+	# Grype scan from SBOM: table (fail on High/Critical) + SARIF artifact
+	@set -e; \
+	GRYPE_CHECK_FOR_APP_UPDATE=false \
+	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
+	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
+	grype "sbom:$(SBOM_FILE)" -o table --fail-on "$(GRYPE_FAIL_ON)" | tee "$(GRYPE_TXT)"
+	@GRYPE_CHECK_FOR_APP_UPDATE=false \
+	GRYPE_DB_AUTO_UPDATE=$(GRYPE_DB_AUTO_UPDATE) \
+	GRYPE_DB_CACHE_DIR="$(GRYPE_CACHE_DIR)" \
+	grype "sbom:$(SBOM_FILE)" -o sarif > "$(GRYPE_SARIF)"
+
+	@echo "✅ Outputs:"
+	@ls -lh "$(SBOM_FILE)" "$(GRYPE_TXT)" "$(GRYPE_SARIF)"
+
+	@echo "🛡️  Vulnerability gate passed for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+
+
 
 
 verify-cli-version:
 	@echo "🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION ($(DAR_BACKUP_VERSION) )"
-	@actual_version="$$(docker run  --rm --entrypoint dar-backup $(FINAL_IMAGE_NAME):$(FINAL_VERSION) --version | head -n1 | awk '{print $$2}')" && \
+	@actual_version="$$($(DOCKER) run  --rm --entrypoint dar-backup $(FINAL_IMAGE_NAME):$(FINAL_VERSION) --version | head -n1 | awk '{print $$2}')" && \
 	if [ "$$actual_version" != "$(DAR_BACKUP_VERSION)" ]; then \
 	  echo "❌ Version mismatch: CLI reports '$$actual_version', expected '$(DAR_BACKUP_VERSION)'"; \
 	  exit 1; \
@@ -452,7 +543,7 @@ test-pulled:
 		exit 1; \
 	fi
 	@echo "🔄 Pulling latest image from Docker Hub: $(IMAGE)"
-	@docker pull $(IMAGE)
+	@$(DOCKER) pull $(IMAGE)
 	@echo "▶ Running tests using $(IMAGE) (no local build)"
 	@IMAGE=$(IMAGE) pytest -s -v $(PYTEST_ARGS) tests/
 
@@ -499,12 +590,23 @@ check-docker-creds:
 
 
 push: check_version check-docker-creds
-	@if docker manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
+	@if $(DOCKER) manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
 	else \
 	  echo "🚀 Pushing image $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
-	  docker push $(DOCKERHUB_REPO):$(FINAL_VERSION); \
+	  $(DOCKER) push $(DOCKERHUB_REPO):$(FINAL_VERSION); \
+	  echo "🔎 Resolving published digest…"; \
+	  DIGEST="$$( $(DOCKER) inspect --format '{{index .RepoDigests 0}}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null )"; \
+	  if [ -n "$$DIGEST" ]; then \
+	    echo "📦 Published digest: $$DIGEST"; \
+	    echo "$$DIGEST" > .last_digest; \
+	    echo "🔗 Docker Hub URL: https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$${DIGEST#*@}"; \
+	  else \
+	    echo "⚠️  Could not determine digest locally. You can query later with:"; \
+	    echo "    $(DOCKER) inspect --format '{{index .RepoDigests 0}}' $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
+	  fi; \
 	fi
+
 
 
 # Show image version, Git revision, and build timestamp
@@ -542,7 +644,6 @@ dry-run-release:
 
 
 dry-run-release-internal: check_version
-	@$(eval FINAL_VERSION := $($(FINAL_VERSION)))
 	@echo "🔧 Building image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) (dry-run, no push to Docker Hub)"
 	$(MAKE) FINAL_VERSION=$(FINAL_VERSION) final verify-labels verify-cli-version
 	
@@ -551,7 +652,7 @@ dry-run-release-internal: check_version
 size-report:
 	@echo "🔍 Image size report for dar-backup:$(FINAL_VERSION)"
 	@echo "───────────────────────────────────────────────"
-	@docker images dar-backup:$(FINAL_VERSION) --format "Total Size: {{.Size}} (ID: {{.ID}})"
+	@$(DOCKER) images dar-backup:$(FINAL_VERSION) --format "Total Size: {{.Size}} (ID: {{.ID}})"
 	@echo
 	@echo "Largest layers (all sizes in MB):"
 	@scripts/size-report.sh dar-backup:$(FINAL_VERSION)
@@ -569,7 +670,8 @@ show-labels:
 	@if [ -z "$(FINAL_VERSION)" ]; then \
 		echo "❌ ERROR: FINAL_VERSION is not set."; \
 	else \
-		docker inspect $(FINAL_IMAGE_NAME):$(FINAL_VERSION) \
+		echo "🔖 OCI image labels for $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
+		docker inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) \
 		--format '{{ range $$k, $$v := .Config.Labels }}{{ printf "%-40s %s\n" $$k $$v }}{{ end }}'; \
 	fi
 
