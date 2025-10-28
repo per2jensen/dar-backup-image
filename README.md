@@ -740,7 +740,7 @@ The versions of `dar` and `dar-backup` used in the image is controlled by the va
 | File | Note |
 |------|------|
 |DAR_VERSION|For example `2.7.19`|
-|DAR_BACKUP_VERSION|For example `0.8.2`|
+|DAR_BACKUP_VERSION|For example `1.0.0.1`|
 
 The values are read by the Makefile and by for example the `build-test-scan.yml`action.
 
@@ -809,7 +809,9 @@ The release target will:
 
     Push the image to Docker Hub.
 
-    Update doc/build-history.json.
+    Update files:    
+        doc/build-history.json
+        doc/build-test-scan-report.json  (not yet complete supply chain documentation)
 
 ### Recommended Workflow
 
