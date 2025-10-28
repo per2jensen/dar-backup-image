@@ -1,5 +1,14 @@
 # dar-backup-image Changelog
 
+## v0.5.19 - 2025-10-28
+
+Github link: [v0.5.19](https://github.com/per2jensen/dar-backup-image/tree/v0.5.19)
+
+### Changed
+
+- **`dar-backup` now at version 1.0.01**
+- **Image refreshed**
+
 ## v0.5.16 - 2025-08-01
 
 Github link: [v0.5.16](https://github.com/per2jensen/dar-backup-image/tree/v0.5.16)
