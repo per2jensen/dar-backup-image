@@ -6,6 +6,7 @@ Update the files:
 
 - DAR_BACKUP_VERSION
 - DAR_VERSION
+- Changelog
 
 as they are used in the build pipeline.
 
