@@ -125,11 +125,11 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 
 |Tag|`dar-backup`|`dar`|Git Revision|Docker Hub|Note|
 |---|-------------------|---|---------|----------|--|
+| 0.5.19| 1.0.0.1| 2.7.19| b3d277a|[tag:0.5.19](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.19/images/sha256:4a74b36688d756b9700e4e9b9c6834860c99fa73ad4e5ec5b1fe5ced733cfc3e)|  - |
 | 0.5.18| 0.8.4| 2.7.19| 25b602d|[tag:0.5.18](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.18/images/sha256:b76aa81faedf2bf57c690a7642be3a36d04240900e63b113666f1a224b42ff9f)|  - |
 | 0.5.17| 0.8.4| 2.7.19 |02822f5|[tag:0.5.17](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.17/images/sha256:a0f4dfec55005c1b07f69d1af6bc750a0c56a38cc04c536a8390347d02a3fdae)| - |
 | 0.5.16| 0.8.2| 2.7.19 |9b6dc45|[tag:0.5.16](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.16/images/sha256:462d35c545b2d516bfa402374b2ef1566f1f68298280dcdbefe5a1a9e45130af)| [Dar release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/) |
 | 0.5.15| 0.8.2| 2.7.18 |3a40112|[tag:0.5.15](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.15/images/sha256:386e095482e6cdcff0a0ec23924bae196ea5da31cdd4f6f7a1d62b89786f517f)| [Dar release note 2.7.18](https://sourceforge.net/p/dar/mailman/message/59186067/) |
-| 0.5.14| 0.8.2| 2.7.13 |eba3646|[tag:0.5.14](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.14/images/sha256:0ba8c08ef240728693b200c102dc78d1f39510da66e0581262d720c81c0ad015)| - |
 
 ---
 
@@ -387,7 +387,7 @@ dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
 export IMAGE=dar-backup:dev  # your own locally build image
 
 # Or set IMAGE to one of mine on Docker Hub
-VERSION=0.5.18; export IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.5.19; export IMAGE=per2jensen/dar-backup:${VERSION}
 ```
 
 Now run `dar-backup` in the container
@@ -599,7 +599,7 @@ Learn what's inside the `dar-backup` image: program versions, build metadata, an
 Run the image with different entrypoints to check the bundled versions of `dar-backup`, `dar`, and `par2`:
 
 ```bash
-VERSION=0.5.18; IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.5.19; IMAGE=per2jensen/dar-backup:${VERSION}
 
 # dar-backup version
 docker run --rm --entrypoint "dar-backup" "$IMAGE" -v
@@ -618,7 +618,7 @@ docker run --rm --entrypoint "" "$IMAGE" \
 ### 🏷️ 2. Inspect Image Labels
 
 ```bash
-VERSION=0.5.18; docker pull per2jensen/dar-backup:${VERSION}
+VERSION=0.5.19; docker pull per2jensen/dar-backup:${VERSION}
 docker inspect per2jensen/dar-backup:${VERSION} | jq '.[0].Config.Labels'
 
 Example output:
@@ -650,7 +650,7 @@ Here's a minimal example of how to use dar directly:
 ```bash
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=tmp/test-backups
-export VERSION=0.5.18; export IMAGE=per2jensen/dar-backup:${VERSION}
+export VERSION=0.5.19; export IMAGE=per2jensen/dar-backup:${VERSION}
 touch /tmp/test-data/TEST.txt
 
 docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
