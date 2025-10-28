@@ -188,5 +188,17 @@
     "dockerhub_tag_url": "https://hub.docker.com/layers/per2jensen/dar-backup/0.5.18/images/sha256:b76aa81faedf2bf57c690a7642be3a36d04240900e63b113666f1a224b42ff9f",
     "digest": "sha256:b76aa81faedf2bf57c690a7642be3a36d04240900e63b113666f1a224b42ff9f",
     "image_id": "sha256:c661bd44f134778f84f6ee25026e4fba2ea6d01ad30b9dd84c0c3de6e93a58a9"
+  },
+  {
+    "build_number": 16,
+    "tag": "0.5.19",
+    "dar_backup_version": "1.0.0.1",
+    "base_image": ":24.04-0.5.19",
+    "full_image_tag": "per2jensen/dar-backup:0.5.19",
+    "git_revision": "b3d277a",
+    "created": "2025-10-28T19:41:22Z",
+    "dockerhub_tag_url": "https://hub.docker.com/layers/per2jensen/dar-backup/0.5.19/images/sha256:4a74b36688d756b9700e4e9b9c6834860c99fa73ad4e5ec5b1fe5ced733cfc3e",
+    "digest": "sha256:4a74b36688d756b9700e4e9b9c6834860c99fa73ad4e5ec5b1fe5ced733cfc3e",
+    "image_id": "sha256:b487d4126a7650e2ce062862b61e8479865f0c06fddbe0afa2f3c9b2ead8a3aa"
   }
 ]
