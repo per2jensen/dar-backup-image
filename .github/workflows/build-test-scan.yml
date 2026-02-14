@@ -279,7 +279,13 @@ jobs:
         run: grype db status
 
       - name: Generate SBOM
-        run: syft "docker:${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json
+        run: |
+          set -euo pipefail
+          if ! syft "docker:${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json; then
+            echo "⚠️  syft docker source failed, retrying via registry"
+            rm -f sbom-cyclonedx.json
+            syft "registry:${{ needs.build.outputs.image_ref }}" -o cyclonedx-json > sbom-cyclonedx.json
+          fi
 
       - name: SBOM sanity check
         run: |
