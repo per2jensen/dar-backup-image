@@ -1,5 +1,10 @@
 # dar-backup-image Changelog
 
+## v0.5.20 - 2026-02-14
+
+- dar-backup version 1.1.0 included in the image
+- image rebuilt to include Ubuntu 24.04 vuln fixes
+
 ## v0.5.19 - 2025-10-28
 
 Github link: [v0.5.19](https://github.com/per2jensen/dar-backup-image/tree/v0.5.19)

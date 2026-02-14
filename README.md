@@ -89,6 +89,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [Testing Released Images from Docker Hub](#testing-released-images-from-docker-hub)
     - [Releasing a New Version](#releasing-a-new-version)
     - [Recommended Workflow](#recommended-workflow)
+  - [TODO](#todo)
   - [Software this project benefits from](#software-this-project-benefits-from)
 
 ---
@@ -124,8 +125,8 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 ## Builds uploaded to Docker Hub
 
 |Tag|`dar-backup`|`dar`|Git Revision|Docker Hub|Note|
-|---|-------------------|---|---------|----------|--|
-| 0.5.19| 1.0.0.1| 2.7.19| b3d277a|[tag:0.5.19](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.19/images/sha256:4a74b36688d756b9700e4e9b9c6834860c99fa73ad4e5ec5b1fe5ced733cfc3e)|  - |
+|---|------------|-----|------------|----------|----|
+| 0.5.19 | 1.0.0.1 | 2.7.19 | b3d277a|[tag:0.5.19](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.19/images/sha256:4a74b36688d756b9700e4e9b9c6834860c99fa73ad4e5ec5b1fe5ced733cfc3e)|  - |
 | 0.5.18| 0.8.4| 2.7.19| 25b602d|[tag:0.5.18](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.18/images/sha256:b76aa81faedf2bf57c690a7642be3a36d04240900e63b113666f1a224b42ff9f)|  - |
 | 0.5.17| 0.8.4| 2.7.19 |02822f5|[tag:0.5.17](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.17/images/sha256:a0f4dfec55005c1b07f69d1af6bc750a0c56a38cc04c536a8390347d02a3fdae)| - |
 | 0.5.16| 0.8.2| 2.7.19 |9b6dc45|[tag:0.5.16](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.16/images/sha256:462d35c545b2d516bfa402374b2ef1566f1f68298280dcdbefe5a1a9e45130af)| [Dar release note 2.7.19](https://sourceforge.net/p/dar/mailman/message/59214592/) |
@@ -830,6 +831,13 @@ The release target will:
 
     Verify the published image:
     make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
+
+## TODO
+
+- Prepare the image to be a restore tool for `dar` archives years from now
+  - Include `dar-backup` manual, to make it more useful as restore tool
+- Be very clear on "one backup definition at a time" or build functionality that loops over BACKUPS.D
+- More testing/verifying to solidify the image
 
 ---
 
