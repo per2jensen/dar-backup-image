@@ -2,8 +2,9 @@
 
 ## v0.5.20 - 2026-02-14
 
-- dar-backup version 1.1.0 included in the image
+- dar-backup version 1.1.1 included in the image
 - image rebuilt to include Ubuntu 24.04 vuln fixes
+- CI E2E now runs `scripts/backup-restore-compare.sh` (PITR restore + PITR report) to keep workflow behavior aligned with local testing
 
 ## v0.5.19 - 2025-10-28
 

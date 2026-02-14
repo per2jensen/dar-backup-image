@@ -19,12 +19,13 @@ DATA_DIR="$WORKDIR/data"
 BACKUP_DIR="$WORKDIR/backups"
 BACKUP_D_DIR="$WORKDIR/backup.d"
 RESTORE_DIR="$WORKDIR/restore"
+LIST_RESTORE_DIR="$WORKDIR/restore-list"
 DATE="$(date +%Y-%m-%d)"
 echo "Using 'DATE': $DATE"
-IMAGE="dar-backup:dev"
+IMAGE="${IMAGE:-dar-backup:dev}"
 
-rm -fr "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR"
-mkdir -p "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR"
+rm -fr "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR" "$LIST_RESTORE_DIR"
+mkdir -p "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR" "$LIST_RESTORE_DIR"
 
 # ---------- helpers ----------
 assert_deleted() { test ! -e "$1" || { echo "expected deleted: $1"; exit 1; }; }
@@ -38,6 +39,72 @@ assert_same_inode() { # hardlink check: same inode == preserved hardlink
 
 assert_mode() { # octal mode compare
   local m; m=$(stat -c '%a' "$1"); [ "$m" = "$2" ] || { echo "mode mismatch on $1: $m != $2"; exit 1; }; }
+
+assert_exists() { test -e "$1" || { echo "expected exists: $1"; exit 1; }; }
+
+dump_restore_state () {
+  echo "==> find /restore/ -ls"
+  docker run --rm \
+    -v "$RESTORE_DIR":/restore \
+    --entrypoint /bin/sh \
+    "$IMAGE" -c "find /restore/ -ls"
+}
+
+pitr_restore () {
+  local when="$1"
+  local restore_path="${2:-data/}"
+  docker run --rm --user "$(id -u):$(id -g)" \
+    -v "$BACKUP_DIR":/backups \
+    -v "$BACKUP_D_DIR":/backup.d \
+    -v "$RESTORE_DIR":/restore \
+    --entrypoint /opt/venv/bin/manager \
+    "$IMAGE" \
+      --config-file /etc/dar-backup/dar-backup.conf \
+      --backup-def default \
+      --restore-path "$restore_path" \
+      --when "$when" \
+      --target /restore \
+      --log-stdout --verbose
+}
+
+pitr_report () {
+  local when="$1"
+  local restore_path="${2:-data/}"
+  docker run --rm --user "$(id -u):$(id -g)" \
+    -v "$BACKUP_DIR":/backups \
+    -v "$BACKUP_D_DIR":/backup.d \
+    -v "$RESTORE_DIR":/restore \
+    --entrypoint /opt/venv/bin/manager \
+    "$IMAGE" \
+      --config-file /etc/dar-backup/dar-backup.conf \
+      --backup-def default \
+      --restore-path "$restore_path" \
+      --when "$when" \
+      --pitr-report \
+      --target /restore \
+      --log-stdout --verbose
+}
+
+pitr_report_expect () {
+  local when="$1"
+  local restore_path="$2"
+  local expect_deleted="${3:-0}"
+  local report_output
+
+  echo "==> PITR report: $restore_path (when: $when)"
+  report_output="$(pitr_report "$when" "$restore_path" 2>&1)"
+  echo "$report_output"
+
+  if ! printf '%s\n' "$report_output" | grep -Fq "$restore_path"; then
+    echo "❌ PITR report did not mention expected path: $restore_path"
+    exit 1
+  fi
+
+  if [[ "$expect_deleted" = "1" ]]; then
+    # Current PITR report output doesn't explicitly label deletions; path presence is the confirmation here.
+    true
+  fi
+}
 
 add_initial_dataset () {
   mkdir -p "$DATA_DIR/sub/inner" "$DATA_DIR/with space" "$DATA_DIR/unicode-æøå"
@@ -89,76 +156,66 @@ add_more_data_round2 () {
 list_contents () {
   archive_basename="$1"  # e.g., default_FULL_${DATE}, default_DIFF_${DATE}, default_INCR_${DATE}  
   echo "Contents of archive set: $archive_basename"
+  dump_restore_state
   docker run --rm   -e RUN_AS_UID=$(id -u) \
     -v "$DATA_DIR":/data \
     -v "$BACKUP_DIR":/backups \
-    -v "$RESTORE_DIR":/restore \
+    -v "$LIST_RESTORE_DIR":/restore \
     -v "$BACKUP_D_DIR":/backup.d \
     "$IMAGE" --list-contents  "$archive_basename" \
     --config /etc/dar-backup/dar-backup.conf    --log-stdout --verbose
 }
 
 
-restore_full () {
-    archive_basename="default_FULL_${DATE}"
-    list_contents "$archive_basename"
-    docker run --rm   -e RUN_AS_UID=$(id -u) \
-    -v "$DATA_DIR":/data \
-    -v "$BACKUP_DIR":/backups \
-    -v "$RESTORE_DIR":/restore \
-    -v "$BACKUP_D_DIR":/backup.d \
-    "$IMAGE" -r  "$archive_basename" \
-    --config /etc/dar-backup/dar-backup.conf    --log-stdout --verbose
-}
-
-restore_diff () {
-    archive_basename="default_DIFF_${DATE}"
-    list_contents "$archive_basename"
-    docker run --rm   -e RUN_AS_UID=$(id -u) \
-    -v "$DATA_DIR":/data \
-    -v "$BACKUP_DIR":/backups \
-    -v "$RESTORE_DIR":/restore \
-    -v "$BACKUP_D_DIR":/backup.d \
-    "$IMAGE" -r  "$archive_basename" \
-    --config /etc/dar-backup/dar-backup.conf   --log-stdout --verbose
-}
-
-restore_incr () {
-    archive_basename="default_INCR_${DATE}"
-    list_contents "$archive_basename"
-    docker run --rm   -e RUN_AS_UID=$(id -u) \
-    -v "$DATA_DIR":/data \
-    -v "$BACKUP_DIR":/backups \
-    -v "$RESTORE_DIR":/restore \
-    -v "$BACKUP_D_DIR":/backup.d \
-    "$IMAGE" -r  "$archive_basename" \
-    --config /etc/dar-backup/dar-backup.conf  --log-stdout --verbose
-}
-
 restore_and_compare () {
   local ARCHIVE_BASENAME="$1"  # e.g., default_FULL_${DATE}, default_DIFF_${DATE}, default_INCR_${DATE}
   rm -rf "$RESTORE_DIR" && mkdir -p "$RESTORE_DIR"
-  # Full restore path:
-  # - For FULL: restore only the full archive
-  # - For DIFF: restore full, then diff
-  # - For INCR: restore full, then diff, then incr
-  echo "==> Restoring set: $ARCHIVE_BASENAME"
-  if [[ "$ARCHIVE_BASENAME" == "default_FULL_${DATE}" ]]; then
-      echo "==> Restoring FULL only: $ARCHIVE_BASENAME"
-      restore_full
-  elif [[ "$ARCHIVE_BASENAME" == "default_DIFF_${DATE}" ]]; then
-      echo "==> Restoring DIFF: $ARCHIVE_BASENAME"
-      restore_full
-      restore_diff
-  elif [[ "$ARCHIVE_BASENAME" == "default_INCR_${DATE}" ]]; then
-      echo "==> Restoring INCR: $ARCHIVE_BASENAME"
-      restore_full
-      restore_diff
-      restore_incr
-  else
-    echo "Unknown restore set: $ARCHIVE_BASENAME" >&2
-    exit 2
+  echo "==> Restoring (PITR): $ARCHIVE_BASENAME"
+  local pitr_when=""
+  local report_present=()
+  local report_deleted=()
+  case "$ARCHIVE_BASENAME" in
+    "default_FULL_${DATE}")
+      pitr_when="$PITR_WHEN_FULL"
+      report_present=(
+        "data/sub/inner/note.md"
+        "data/hello.txt"
+      )
+      ;;
+    "default_DIFF_${DATE}")
+      pitr_when="$PITR_WHEN_DIFF"
+      report_present=(
+        "data/new-1m.bin"
+        "data/sub/new-r1.txt"
+        "data/alt.txt"
+      )
+      report_deleted=(
+        "data/sub/inner/note.md"
+      )
+      ;;
+    "default_INCR_${DATE}")
+      pitr_when="$PITR_WHEN_INCR"
+      report_present=(
+        "data/new-2m.bin"
+        "data/newdir/readme.txt"
+      )
+      report_deleted=(
+        "data/sub/inner/note.md"
+      )
+      ;;
+    *) echo "Unknown restore set: $ARCHIVE_BASENAME" >&2; exit 2 ;;
+  esac
+  if [[ "${LIST_CONTENTS:-0}" = "1" ]]; then
+    list_contents "$ARCHIVE_BASENAME"
   fi
+  dump_restore_state
+  for path in "${report_present[@]}"; do
+    pitr_report_expect "$pitr_when" "$path" 0
+  done
+  for path in "${report_deleted[@]}"; do
+    pitr_report_expect "$pitr_when" "$path" 1
+  done
+  pitr_restore "$pitr_when" "data/"
   echo "==> Comparing /restore vs /data for $ARCHIVE_BASENAME"
   diff -qr "$DATA_DIR" "$RESTORE_DIR/data" > "$WORKDIR/diff-${ARCHIVE_BASENAME}.txt" || true
   if [[ -s "$WORKDIR/diff-${ARCHIVE_BASENAME}.txt" ]]; then
@@ -187,7 +244,9 @@ echo "==> Creating dataset"
 add_initial_dataset
 
 echo "==> FULL backup"
+dump_restore_state
 scripts/run-backup.sh -t FULL  
+PITR_WHEN_FULL="$(date '+%Y-%m-%d %H:%M:%S')"
 restore_and_compare "default_FULL_${DATE}"
 restore_and_compare "default_FULL_${DATE}"
 # Hardlink must be preserved in FULL
@@ -199,7 +258,9 @@ assert_symlink_target "$RESTORE_DIR/data/sub/link-to-hello" "../hello.txt"
 # ---------- mutate + DIFF ----------
 echo "==> Add more data (R1) and DIFF backup"
 add_more_data_round1
+dump_restore_state
 scripts/run-backup.sh -t DIFF 
+PITR_WHEN_DIFF="$(date '+%Y-%m-%d %H:%M:%S')"
 restore_and_compare "default_DIFF_${DATE}"
 assert_deleted "$RESTORE_DIR/data/sub/inner/note.md"
 # Symlink retarget must be applied
@@ -208,7 +269,9 @@ assert_symlink_target "$RESTORE_DIR/data/sub/link-to-hello" "../alt.txt"
 # ---------- mutate + INCR ----------
 echo "==> Add more data (R2) and INCR backup"
 add_more_data_round2
+dump_restore_state
 scripts/run-backup.sh -t INCR
+PITR_WHEN_INCR="$(date '+%Y-%m-%d %H:%M:%S')"
 restore_and_compare "default_INCR_${DATE}"
 # We deliberately broke the hardlink in round2; ensure they are now different inodes
 DAT_INODE=$(stat -c '%i' "$RESTORE_DIR/data/bin-256k.dat")
