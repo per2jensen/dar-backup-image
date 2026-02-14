@@ -92,6 +92,7 @@ list_contents () {
   docker run --rm   -e RUN_AS_UID=$(id -u) \
     -v "$DATA_DIR":/data \
     -v "$BACKUP_DIR":/backups \
+    -v "$RESTORE_DIR":/restore \
     -v "$BACKUP_D_DIR":/backup.d \
     "$IMAGE" --list-contents  "$archive_basename" \
     --config /etc/dar-backup/dar-backup.conf    --log-stdout --verbose
