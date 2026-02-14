@@ -647,7 +647,7 @@ dry-run-release:
 	@cd .dryrun && \
 		echo "🚧 Running release steps in .dryrun..." && \
 		DRY_RUN=1 FINAL_VERSION=$(FINAL_VERSION) make  dry-run-release-internal
-	@git worktree remove .dryrun
+	@git worktree remove .dryrun --force
 	@echo "✅ Dry-run complete — no changes made to working directory"
 	@IMAGE=$(FINAL_IMAGE_NAME):$(FINAL_VERSION) $(MAKE) test
 
