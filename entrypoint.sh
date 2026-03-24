@@ -11,6 +11,7 @@ DEFAULT_UID=1000                # UID for daruser (default container user)
 LOG_FILE="/tmp/dar_backup_completer.log"
 CONFIG_PATH="${DAR_BACKUP_CONFIG:-/etc/dar-backup/dar-backup.conf}"
 export RUN_AS_UID="${RUN_AS_UID:-$DEFAULT_UID}"
+export RUN_AS_GID="${RUN_AS_GID:-$RUN_AS_UID}"   # default GID matches UID; override if they differ
 
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)
@@ -18,6 +19,7 @@ CURRENT_GID=$(id -g)
 # If container is run with --user <UID>, respect that user instead of daruser
 if [ "$CURRENT_UID" -ne 0 ] && [ "$CURRENT_UID" -ne "$DEFAULT_UID" ]; then
   RUN_AS_UID="$CURRENT_UID"
+  RUN_AS_GID="$CURRENT_GID"
 fi
 
 # Ensure configuration file exists
@@ -34,15 +36,15 @@ done
 
 # Only fix ownership if explicitly requested and running as root
 if [ "$CURRENT_UID" -eq 0 ] && [ "${DAR_BACKUP_FIX_PERMS:-0}" -eq 1 ]; then
-  echo "🔧 Fixing directory permissions for UID $RUN_AS_UID"
-  chown -R "$RUN_AS_UID:$RUN_AS_UID" \
+  echo "🔧 Fixing directory permissions for UID $RUN_AS_UID / GID $RUN_AS_GID"
+  chown -R "$RUN_AS_UID:$RUN_AS_GID" \
     "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR" || true
 fi
 
 # Log file handling
 if [ "$CURRENT_UID" -eq 0 ]; then
   touch "$LOG_FILE"
-  chown "$RUN_AS_UID:$RUN_AS_UID" "$LOG_FILE" || true
+  chown "$RUN_AS_UID:$RUN_AS_GID" "$LOG_FILE" || true
   chmod 644 "$LOG_FILE"
 else
   touch "$LOG_FILE" 2>/dev/null || true
@@ -50,6 +52,8 @@ else
 fi
 
 # Build arguments for dar-backup
+# Note: --config detection uses prefix-space matching, so --config=value (equals-form)
+# is not supported here; always pass --config as a separate argument.
 ARGS=()
 if [[ ! " $* " =~ " --config " ]]; then
   ARGS+=(--config "$CONFIG_PATH")
@@ -60,17 +64,21 @@ export HOME="/tmp"
 
 # === Execution ===
 if [ "$CURRENT_UID" -eq 0 ]; then
-  # Initialize database as target UID (safe privilege drop)
-  setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_UID" \
+  # Initialise the backup database as the target UID.
+  # --create-db is idempotent: it creates the DB if absent, and verifies
+  # integrity (detecting corruption) if it already exists — safe to run
+  # on every invocation.
+  setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_GID" \
     --clear-groups --no-new-privs \
     manager --create-db --config "$CONFIG_PATH"
 
   # Run dar-backup as target UID
-  exec setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_UID" \
+  exec setpriv --reuid="$RUN_AS_UID" --regid="$RUN_AS_GID" \
     --clear-groups --no-new-privs \
     dar-backup "${ARGS[@]}"
 else
-  # Non-root case: still initialize manager as current user
+  # Non-root case: initialise/verify DB as the current user, then run.
+  # --create-db is idempotent: creates if absent, checks integrity if present.
   manager --create-db --config "$CONFIG_PATH"
   exec dar-backup "${ARGS[@]}"
 fi

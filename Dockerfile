@@ -110,20 +110,12 @@ COPY --from=builder /usr/local/lib/libdar* /usr/local/lib/
 COPY --from=builder /etc/ld.so.conf.d/local.conf /etc/ld.so.conf.d/local.conf
 # Copy libthreadar and fix symlink chain
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/
-RUN ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldconfig
-
-
-# Install runtime deps (minimal)
-# ldconfig to register libdar64
-# link libthreadar.so to the expected location
-RUN apt-get update && apt-get dist-upgrade -y \
+RUN ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldconfig \
+  && apt-get update && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends \
        python3-minimal python3-venv gettext-base par2 util-linux ca-certificates tzdata libc-bin \
-       # Compression and hashing runtimes
        zlib1g libbz2-1.0 liblz4-1 liblzma5 libzstd1 liblzo2-2 libargon2-1 \
-       # Crypto, GPG, Kerberos, and backup libraries
        libgcrypt20 libgpgme11 libkrb5-3 librsync2 libext2fs2 \
-       # Networking and remote repo support
        libcurl3-gnutls \
   && ldconfig \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
@@ -132,15 +124,10 @@ RUN apt-get update && apt-get dist-upgrade -y \
 
 # Refresh linker cache so libdar64 is found
 RUN ldconfig \
-  # Sanity check DAR after copy
-  && echo "Checking DAR version...\"${DAR_VERSION}\"  " 
-
-RUN ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
+  && echo "Checking DAR version...\"${DAR_VERSION}\"  " \
+  && ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
        || (echo "❌ DAR ${DAR_VERSION} build failed version check" && exit 1) )
 
-
-#RUN set -e; V=$(/usr/local/bin/dar -Q --version | sed -n 's/^dar version \([0-9.]\+\).*/\1/p'); \
-#    [ "$V" = "$DAR_VERSION" ]
 
 # Final cleanup of venv (tests, pip, setuptools, wheel)
 RUN find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
@@ -166,5 +153,8 @@ RUN userdel -f ubuntu 2>/dev/null || true \
   && mkdir -p /backups /backup.d /restore /data \
   && chown -R daruser:users /backups /backup.d /restore /data
 
-USER root
+# Container starts as root intentionally — entrypoint.sh drops privileges
+# to RUN_AS_UID/RUN_AS_GID via setpriv before executing dar-backup.
+# Do NOT add USER daruser here; it would break the permission-fix and
+# privilege-drop logic in entrypoint.sh.
 ENTRYPOINT ["/entrypoint.sh"]

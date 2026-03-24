@@ -19,7 +19,7 @@ DAR_BACKUP_IMAGE_VERSION=0.5.18
 1. Start from scratch, no dev images to interfere
 
 ```bash
-make clean-all
+make dev-nuke
 ```
 
 2. Run integration test

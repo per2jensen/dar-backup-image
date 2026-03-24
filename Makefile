@@ -4,6 +4,7 @@
 # ---------------
 # make dev-clean dev
 # make FINAL_VERSION=0.9.9-rc1 final
+# make FINAL_VERSION=0.9.9-rc1 dry-run-release
 # make FINAL_VERSION=0.9.9-rc1 release
 
 
@@ -65,9 +66,9 @@ LABEL_ARGS = \
 # ================================
 
 .PHONY: all all-dev dev-rebuild final release clean clean-all push tag login dev dev-clean labels help \
-	check_version test test-integration all-dev dry-run-release-internal check-docker-creds \
-	test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools grype-db-status grype-db-update scan-final \
-	verify-labels
+	check_version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
+	check-docker-creds test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools \
+	grype-db-status grype-db-update scan-final verify-labels
 
 
 check_version:
@@ -127,9 +128,12 @@ sbom-sarif: install-tools
 
 
 
+# Docker-based SBOM + SARIF scan (alternative to the native sbom-sarif target).
+# Uses GRYPE_CACHE_DIR (defined at the top of this Makefile) for the Grype DB
+# volume mount — consistent with sbom-sarif and scan-final.
 sbom-sarif-docker: check_version
 	@echo "🔍 Generating SBOM and SARIF for $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
-	@mkdir -p $(GRYPE_CACHE)
+	@mkdir -p "$(GRYPE_CACHE_DIR)"
 
 	# SBOM via Syft (no network version-check)
 	@$(DOCKER) run --rm \
@@ -143,7 +147,7 @@ sbom-sarif-docker: check_version
 	@$(DOCKER) run --rm \
 	  -e GRYPE_CHECK_FOR_APP_UPDATE=false \
 	  -v /var/run/docker.sock:/var/run/docker.sock \
-	  -v $(PWD)/$(GRYPE_CACHE):/home/anchore/.cache \
+	  -v $(PWD)/$(GRYPE_CACHE_DIR):/home/anchore/.cache \
 	  anchore/grype:latest \
 	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o sarif > $(SARIF)
 
@@ -206,16 +210,18 @@ dev-clean: check_version
 		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		DAR_VERSION=$(DAR_VERSION) 
 
-# Full nuke: deletes *all* caches and forces a completely fresh build
+# Full nuke: deletes *all* caches and forces a completely fresh build.
+# Note: passes DAR_BACKUP_VERSION (not VERSION) to match the Dockerfile ARG name,
+# and includes LABEL_ARGS so the nuked image is labeled consistently with 'make dev'.
 dev-nuke:
 	@echo "🧨 Full nuke: Pruning ALL Docker build caches and images (this may take a while)..."
 	-$(DOCKER) builder prune -a -f
 	-$(DOCKER) image prune -a -f
 	@echo "Rebuilding image from scratch..."
 	$(DOCKER) build --no-cache -f Dockerfile \
-		--build-arg VERSION=$(FINAL_VERSION) \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		--build-arg DAR_VERSION=$(DAR_VERSION) \
+		$(LABEL_ARGS) \
 		-t dar-backup:$(FINAL_VERSION) .
 
 
@@ -325,7 +331,7 @@ verify-labels:
 # SBOM (Syft) + SARIF (Grype)
 SBOM := $(FINAL_IMAGE_NAME)-$(FINAL_VERSION)-sbom.cyclonedx.json
 SARIF := $(FINAL_IMAGE_NAME)-$(FINAL_VERSION)-grype.sarif
-GRYPE_CACHE := .cache/grype
+# Note: Grype DB cache is GRYPE_CACHE_DIR, defined at the top of this Makefile.
 
 
 # ================================
@@ -637,26 +643,44 @@ validate:
 
 
 
-dry-run-release:
-	@echo "🔍 Creating temporary dry-run environment..."
+# Always-run cleanup target for the dry-run worktree.
+# Called explicitly at the end of dry-run-release AND as an error recovery step,
+# since Make's per-line @-prefixed commands don't support shell trap directly.
+dry-run-cleanup:
 	@if [ -d .dryrun ]; then \
-		echo "🧹 Removing stale .dryrun worktree..."; \
-		git worktree remove --force .dryrun; \
+		echo "🧹 Removing .dryrun worktree..."; \
+		git worktree remove --force .dryrun || true; \
 	fi
+
+
+dry-run-release: check_version install-tools
+	@echo "🔍 Creating temporary dry-run environment..."
+	@$(MAKE) dry-run-cleanup
 	@git worktree add -f .dryrun HEAD
+	@echo "🚧 Running release steps in .dryrun..."
 	@cd .dryrun && \
-		echo "🚧 Running release steps in .dryrun..." && \
-		DRY_RUN=1 FINAL_VERSION=$(FINAL_VERSION) make  dry-run-release-internal
-	@git worktree remove .dryrun --force
-	@echo "✅ Dry-run complete — no changes made to working directory"
+		$(MAKE) dry-run-release-internal \
+			FINAL_VERSION=$(FINAL_VERSION) \
+			DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+			DAR_VERSION=$(DAR_VERSION) \
+		|| { cd $(CURDIR) && $(MAKE) dry-run-cleanup && exit 1; }
+	@$(MAKE) dry-run-cleanup
+	@echo "✅ Dry-run build complete — no push performed."
+	@echo "▶ Running tests against the locally built image $(FINAL_IMAGE_NAME):$(FINAL_VERSION)..."
 	@IMAGE=$(FINAL_IMAGE_NAME):$(FINAL_VERSION) $(MAKE) test
+	@echo "✅ Dry-run complete — working directory unchanged."
 
 
-
-
-dry-run-release-internal: check_version
+# Internal target: runs inside the .dryrun worktree.
+# DRY_RUN is intentionally not set here — nothing downstream checks it,
+# and 'final' already excludes push by design. If push-guarding via DRY_RUN
+# is added in future, set it here.
+dry-run-release-internal: check_version install-tools
 	@echo "🔧 Building image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) (dry-run, no push to Docker Hub)"
-	$(MAKE) FINAL_VERSION=$(FINAL_VERSION) final verify-labels verify-cli-version
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) \
+		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+		DAR_VERSION=$(DAR_VERSION) \
+		final verify-labels verify-cli-version
 	
 
 
