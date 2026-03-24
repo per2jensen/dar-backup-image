@@ -21,6 +21,7 @@ env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}
   IMAGE_NAME: dar-backup
   CI_TAG: ci-${{ github.sha }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
 
 jobs:
   build:
