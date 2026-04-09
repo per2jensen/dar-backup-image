@@ -48,6 +48,10 @@ test/
 *.egg
 .env
 .e2e/
+*.sarif
+grype-report-dar-backup-*
+*.cyclonedx.json
+.last_digest
 
 # CI artifacts (if any)
 coverage.xml

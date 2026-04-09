@@ -1,4 +1,4 @@
-name: Update GitHub Clone Metrics
+name: GH clone & Docker DL metrics
 
 permissions:
   contents: write
@@ -15,7 +15,7 @@ on:
 
 jobs:
   update-clones:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -37,6 +37,10 @@ jobs:
             --user per2jensen \
             --repo dar-backup-image
 
+      - name: Update Docker Hub pulls JSON
+        run: |
+            python clonepulse/fetch_docker_pulls.py
+
       - name: Show Git status (debug)
         run: |
           echo "::group::Git Status"
@@ -57,7 +61,7 @@ jobs:
           # Check for changes before committing
           if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
             echo "Changes detected, committing..."
-            git add $(find badges -type f \( -name '*.json' -o -name '*.txt' \)) || true
+            git add $(find clonepulse -type f \( -name '*.json' -o -name '*.txt' \)) || true
             git commit -m "CI update: 'fetched clones' data on $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             # Push changes — if it fails, likely due to race; next run will retry
             git push || echo "⚠️ Push failed (likely a fast-forward conflict). Will retry next time."
