@@ -38,7 +38,7 @@ jobs:
 
       - name: Check dashboard image exists
         run: |
-          if [ ! -f doc/weekly_clones.png ]; then
+          if [ ! -f clonepulse/weekly_clones.png ]; then
             echo "❌ Dashboard image not found"
             exit 1
           fi
@@ -47,7 +47,7 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git add -A "doc/weekly_clones.png"
+          git add -A "clonepulse/weekly_clones.png"
           if ! git diff --cached --quiet; then
             echo "📦 Changes detected, committing dashboard..."
             git commit -m "CI update:  'weekly clones dashboard'"
