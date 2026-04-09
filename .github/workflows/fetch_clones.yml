@@ -1,5 +1,8 @@
 name: GH clone & Docker DL metrics
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: write
   pull-requests: write

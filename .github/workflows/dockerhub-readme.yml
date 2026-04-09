@@ -1,11 +1,14 @@
 name: README -> DockerHub
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 on:
   push:
     branches: [main]
     paths: ["README.md"]
 
   workflow_dispatch:  # enables manual trigger
+
 
 jobs:
   sync-readme:
