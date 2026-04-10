@@ -36,7 +36,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: dependencies
         run: |
-          apt-get install -y python3-pytest
+          sudo apt-get install -y python3-pytest
 
       # -----------------------------------------------------------------------
       # 1. Source
