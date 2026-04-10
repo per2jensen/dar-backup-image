@@ -42,6 +42,12 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
   - [📑 Table of Contents](#-table-of-contents)
   - [`dar` versions](#dar-versions)
   - [Builds uploaded to Docker Hub](#builds-uploaded-to-docker-hub)
+  - [🔐 Release Pipeline and Supply Chain Security](#-release-pipeline-and-supply-chain-security)
+    - [Pipeline steps](#pipeline-steps)
+    - [What cosign keyless signing provides](#what-cosign-keyless-signing-provides)
+    - [Verifying an image yourself](#verifying-an-image-yourself)
+    - [Verifying the SBOM attestation](#verifying-the-sbom-attestation)
+    - [Inspecting the Rekor transparency log entry](#inspecting-the-rekor-transparency-log-entry)
   - [🔧 Hands-on Demo: `dar-backup` in a Container](#-hands-on-demo-dar-backup-in-a-container)
   - [Useful links](#useful-links)
   - [License](#license)
@@ -133,6 +139,69 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 | 0.5.20| 1.1.1| 2.7.19| a95fc5e|[tag:0.5.20](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.20/images/sha256:d18f42b1b7b1655522db7ae29376b5ace26bb0e84272f2d6a3bdf8b209158cc8)|  - |
 | 0.5.19 | 1.0.0.1 | 2.7.19 | b3d277a|[tag:0.5.19](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.19/images/sha256:4a74b36688d756b9700e4e9b9c6834860c99fa73ad4e5ec5b1fe5ced733cfc3e)|  - |
 | 0.5.18| 0.8.4| 2.7.19| 25b602d|[tag:0.5.18](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.18/images/sha256:b76aa81faedf2bf57c690a7642be3a36d04240900e63b113666f1a224b42ff9f)|  - |
+
+---
+
+
+## 🔐 Release Pipeline and Supply Chain Security
+
+Every image released to Docker Hub is produced by a fully automated GitHub Actions workflow — no manual `docker push`, no local machine involvement. The pipeline enforces a strict sequence of gates before any image becomes publicly available.
+
+### Pipeline steps
+
+1. **Build** — The `dar-backup:dev` image is built (version 0.5.22 onwards) from source using the versioned `DAR_VERSION` and `DAR_BACKUP_VERSION` pins in the repository.
+2. **Test** — The full pytest suite runs against the dev image. The pipeline halts if any test fails.
+3. **Promote** — The tested dev image is re-labeled and promoted to the release tag (e.g. `0.5.22`). No rebuild occurs; the promoted image is byte-for-byte identical to the tested one.
+4. **Verify** — OCI labels and the embedded `dar-backup --version` are checked against expected values.
+5. **SBOM** — [Syft](https://github.com/anchore/syft) generates a CycloneDX JSON Software Bill of Materials from the local image before it leaves the runner.
+6. **Vulnerability scan** — [Grype](https://github.com/anchore/grype) scans the SBOM and **fails the release if any High or Critical vulnerability is found**. Results are uploaded to the GitHub Security tab as SARIF.
+7. **Push** — The image is pushed to Docker Hub only after all of the above pass.
+8. **Cosign signing** — The image is signed by digest (not by mutable tag) using [cosign](https://github.com/sigstore/cosign) keyless mode.
+9. **SBOM attestation** — The SBOM is attached to the image as a signed in-toto attestation via cosign.
+10. **Rollback** — If signing or attestation fails after the push, the image tag is automatically removed from Docker Hub.
+
+### What cosign keyless signing provides
+
+Keyless signing means **no private key is stored anywhere** — not in GitHub Secrets, not on disk, not in the workflow. Instead, the signature is produced using a short-lived certificate issued by [Fulcio](https://github.com/sigstore/fulcio) (Sigstore's certificate authority), bound to GitHub's OIDC token for the specific workflow run.
+
+Every signature is permanently recorded in [Rekor](https://github.com/sigstore/rekor), Sigstore's public, append-only transparency log. This means:
+
+- **The signing identity is public and auditable** — the Rekor entry proves exactly which GitHub workflow, repository, branch, and run produced the signature.
+- **Signatures cannot be backdated or forged** — the transparency log is immutable.
+- **No key management burden** — there is no private key that could be leaked, rotated, or forgotten.
+- **Anyone can verify** — without an account, without trusting Docker Hub, without contacting the author.
+
+### Verifying an image yourself
+
+```bash
+cosign verify per2jensen/dar-backup:<tag> \
+  --certificate-identity-regexp="https://github.com/per2jensen/dar-backup-image" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+```
+
+A successful verification proves the image was signed by the `dar-backup-image` GitHub Actions workflow on the `main` branch — and by nothing else.
+
+### Verifying the SBOM attestation
+
+```bash
+cosign verify-attestation per2jensen/dar-backup:<tag> \
+  --type cyclonedx \
+  --certificate-identity-regexp="https://github.com/per2jensen/dar-backup-image" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  | jq '.payload | @base64d | fromjson | .predicate'
+```
+
+This retrieves and verifies the signed CycloneDX SBOM attached to the image, listing every package and library bundled inside.
+
+### Inspecting the Rekor transparency log entry
+
+Each release summary in the GitHub Actions tab includes a direct link to the Rekor entry for that release, for example:
+
+```
+https://search.sigstore.dev/?logIndex=1273042416
+```
+
+The entry records the signing certificate, the image digest that was signed, the GitHub workflow identity, the run URL, and the exact commit SHA — providing a complete, tamper-evident audit trail from source code to published image.
 
 ---
 
