@@ -74,7 +74,7 @@ jobs:
       - name: Build dev image
         run: |
           make \
-            FINAL_VERSION=${{ env.FINAL_VERSION }} \
+            FINAL_VERSION=dev \
             DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
             DAR_VERSION=${{ steps.versions.outputs.DAR_VERSION }} \
             dev
@@ -82,7 +82,7 @@ jobs:
       - name: Test dev image
         run: |
           make \
-            FINAL_VERSION=${{ env.FINAL_VERSION }} \
+            FINAL_VERSION=dev \
             DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
             DAR_VERSION=${{ steps.versions.outputs.DAR_VERSION }} \
             test
