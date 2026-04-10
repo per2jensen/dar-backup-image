@@ -390,7 +390,7 @@ dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
 export IMAGE=dar-backup:dev  # your own locally build image
 
 # Or set IMAGE to one of mine on Docker Hub
-VERSION=0.5.21; export IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.0.1-releasetest; export IMAGE=per2jensen/dar-backup:${VERSION}
 ```
 
 Now run `dar-backup` in the container
@@ -602,7 +602,7 @@ Learn what's inside the `dar-backup` image: program versions, build metadata, an
 Run the image with different entrypoints to check the bundled versions of `dar-backup`, `dar`, and `par2`:
 
 ```bash
-VERSION=0.5.21; IMAGE=per2jensen/dar-backup:${VERSION}
+VERSION=0.0.1-releasetest; IMAGE=per2jensen/dar-backup:${VERSION}
 
 # dar-backup version
 docker run --rm --entrypoint "dar-backup" "$IMAGE" -v
@@ -621,7 +621,7 @@ docker run --rm --entrypoint "" "$IMAGE" \
 ### 🏷️ 2. Inspect Image Labels
 
 ```bash
-VERSION=0.5.21; docker pull per2jensen/dar-backup:${VERSION}
+VERSION=0.0.1-releasetest; docker pull per2jensen/dar-backup:${VERSION}
 docker inspect per2jensen/dar-backup:${VERSION} | jq '.[0].Config.Labels'
 
 Example output:
@@ -653,7 +653,7 @@ Here's a minimal example of how to use dar directly:
 ```bash
 export DATA_DIR=/tmp/test-data
 export BACKUP_DIR=tmp/test-backups
-export VERSION=0.5.21; export IMAGE=per2jensen/dar-backup:${VERSION}
+export VERSION=0.0.1-releasetest; export IMAGE=per2jensen/dar-backup:${VERSION}
 touch /tmp/test-data/TEST.txt
 
 docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
