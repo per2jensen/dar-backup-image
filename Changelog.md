@@ -1,5 +1,15 @@
 # dar-backup-image Changelog
 
+## v0.5.22 - 
+
+### Added
+
+- Release workflow with cosign and SBOM attestation uploaded to DockerHub
+
+## v0.5.21 - 2026-03-24
+
+- Image refresh
+
 ## v0.5.20 - 2026-02-14
 
 - dar-backup version 1.1.1 included in the image
