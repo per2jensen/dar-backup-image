@@ -11,5 +11,5 @@ sarif_path = sys.argv[1] if len(sys.argv) > 1 else ""
 s = summarize(sarif_path)
 c = s["counts"] if s else {}
 
-for key in ("critical", "high", "medium", "low", "negligible"):
+for key in ("critical", "high", "medium", "low", "negligible", "warning", "note"):
     print(f"{key.upper()}={c.get(key, 0)}")

@@ -244,6 +244,7 @@ jobs:
 
           export PYTHONPATH="${PYTHONPATH}:scripts"
           python3 scripts/update_build_log.py \
+          --dar-backup-version "${{ steps.versions.outputs.DAR_BACKUP_VERSION }}" \
           --log              doc/build-history.json \
           --build-number     "${BUILD_NUMBER}" \
           --version          "${{ env.FINAL_VERSION }}" \
@@ -267,6 +268,21 @@ jobs:
           git add doc/build-history.json
           git diff --quiet doc/build-history.json || \
             git commit -m "build-history: add ${{ env.FINAL_VERSION }} metadata"
+
+          # Update README builds table
+          FINAL_VERSION="${{ env.FINAL_VERSION }}" \
+          DAR_BACKUP_VERSION="${{ steps.versions.outputs.DAR_BACKUP_VERSION }}" \
+          DAR_VERSION="${{ steps.versions.outputs.DAR_VERSION }}" \
+          GIT_REV="$(git rev-parse --short HEAD)" \
+          DOCKERHUB_REPO="${{ env.DOCKERHUB_REPO }}" \
+          DIGEST_ONLY="${DIGEST#*@}" \
+          NOTE=" - " \
+          ./scripts/patch-readme-build.sh
+
+          git add README.md
+          git diff --quiet README.md || \
+            git commit -m "README: add build row for ${{ env.FINAL_VERSION }}"
+
 
           make FINAL_VERSION=${{ env.FINAL_VERSION }} update-readme-version
 
@@ -334,6 +350,9 @@ jobs:
           echo "| 🟡 Medium     | \`${MEDIUM}\` |"                            >> $GITHUB_STEP_SUMMARY
           echo "| 🔵 Low        | \`${LOW}\` |"                               >> $GITHUB_STEP_SUMMARY
           echo "| ⚪ Negligible | \`${NEGLIGIBLE}\` |"                        >> $GITHUB_STEP_SUMMARY
+          echo "| ⚪ Negligible | \`${NEGLIGIBLE}\` |"                        >> $GITHUB_STEP_SUMMARY
+          echo "| 🔔 Warning    | \`${WARNING}\` |"                           >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 Note       | \`${NOTE}\` |"                              >> $GITHUB_STEP_SUMMARY
           echo ""                                                               >> $GITHUB_STEP_SUMMARY
           echo "### Verify the signature"                                      >> $GITHUB_STEP_SUMMARY
           echo '```bash'                                                        >> $GITHUB_STEP_SUMMARY
