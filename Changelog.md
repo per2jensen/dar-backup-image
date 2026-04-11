@@ -1,5 +1,14 @@
 # dar-backup-image Changelog
 
+## v0.5.23 - not released
+
+### Changed
+
+- Release workflow improvements
+-- cosign rollback:  change badge to "failed" in dull grey
+-- add/commit badge success in housekeeping step
+-- add/commit clonepulse release annotation in housekeeping step
+
 ## v0.5.22 - 2026-04-10
 
 ### Added
