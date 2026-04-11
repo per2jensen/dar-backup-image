@@ -5,9 +5,11 @@
 ### Changed
 
 - Release workflow improvements
--- cosign rollback:  change badge to "failed" in dull grey
--- add/commit badge success in housekeeping step
--- add/commit clonepulse release annotation in housekeeping step
+  - cosign rollback:  change badge to "failed" in dull grey
+  - add/commit badge success in housekeeping step
+  - add/commit clonepulse release annotation in housekeeping step
+- README badges update
+- Manually added the missing cosign ok badge from version 0.5.22 release
 
 ## v0.5.22 - 2026-04-10
 
