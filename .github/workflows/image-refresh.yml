@@ -1,0 +1,402 @@
+name: Weekly image refresh — dar-backup
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'   # Every Monday at 04:00 UTC
+  workflow_dispatch:       # Allow manual trigger
+
+permissions:
+  contents: write
+  security-events: write
+  id-token: write          # required for cosign keyless signing via GitHub OIDC
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOCKERHUB_REPO: per2jensen/dar-backup
+  FINAL_IMAGE_NAME: dar-backup
+  UBUNTU_VERSION: 24.04
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 0. Checkout full history — needed for git tags, scripts, and git push
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # 1. Sanity checks and compute REBUILD_VERSION
+      #    Any failure writes the cosign badge and pushes before aborting.
+      # -----------------------------------------------------------------------
+      - name: Sanity checks and compute rebuild version
+        run: |
+          git config --global user.name  "github-actions"
+          git config --global user.email "actions@github.com"
+
+          fail() {
+            echo "❌ $1"
+            python3 scripts/write_cosign_badge.py --failed
+            scripts/git_commit_if_changed.sh doc/cosign_badge.json \
+              "cosign badge: refresh aborted — $1"
+            git push origin HEAD
+            exit 1
+          }
+
+          # build-history.json must exist and be valid JSON
+          [[ -f doc/build-history.json ]] \
+            || fail "build-history.json not found"
+          jq empty doc/build-history.json 2>/dev/null \
+            || fail "build-history.json is not valid JSON"
+
+          # Read the latest tag and strip any numeric -N refresh suffix
+          RAW_TAG=$(jq -r '.[-1].tag' doc/build-history.json)
+          BASE_TAG=$(echo "${RAW_TAG}" | sed 's/-[0-9]*$//')
+
+          # BASE_TAG must be a stable x.y.z release — no pre-release or hotfix tags
+          [[ "${BASE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+            fail "BASE_TAG '${BASE_TAG}' (from '${RAW_TAG}') is not a stable x.y.z release — aborting refresh"
+
+          # The release git tag must exist so we can check it out
+          git rev-parse "v${BASE_TAG}" >/dev/null 2>&1 \
+            || fail "Git tag v${BASE_TAG} does not exist"
+
+          # Compute next rebuild number
+          ESCAPED="${BASE_TAG//./\\.}"
+          LAST_N=$(git tag --list \
+            | grep -oP "^v${ESCAPED}-\K[0-9]+$" \
+            | sort -n \
+            | tail -1)
+
+          NEXT_N=$([[ -z "${LAST_N}" ]] && echo 1 || echo $((LAST_N + 1)))
+          REBUILD_VERSION="${BASE_TAG}-${NEXT_N}"
+
+          # Guard against duplicate rebuild tags
+          git rev-parse "v${REBUILD_VERSION}" >/dev/null 2>&1 \
+            && fail "Git tag v${REBUILD_VERSION} already exists"
+
+          echo "✅ Sanity checks passed — rebuilding as ${REBUILD_VERSION}"
+          echo "BASE_TAG=${BASE_TAG}"               >> $GITHUB_ENV
+          echo "REBUILD_VERSION=${REBUILD_VERSION}" >> $GITHUB_ENV
+
+      # -----------------------------------------------------------------------
+      # 2. Install dependencies
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y python3-pytest
+
+      # -----------------------------------------------------------------------
+      # 3. Toolchain
+      # -----------------------------------------------------------------------
+      - name: Install Syft and Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      - uses: sigstore/cosign-installer@v3
+
+      # -----------------------------------------------------------------------
+      # 4. Checkout the exact released tag to build from
+      # -----------------------------------------------------------------------
+      - name: Checkout release tag v${{ env.BASE_TAG }}
+        run: |
+          git checkout "v${{ env.BASE_TAG }}"
+          echo "✅ Checked out v${{ env.BASE_TAG }}"
+
+      # -----------------------------------------------------------------------
+      # 5. Read version pins from the checked-out tag
+      # -----------------------------------------------------------------------
+      - name: Read version pins
+        id: versions
+        run: |
+          echo "DAR_BACKUP_VERSION=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
+          echo "DAR_VERSION=$(cat DAR_VERSION)"               >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # 6. Build dev image → test → final tagged image (no scan — done below)
+      # -----------------------------------------------------------------------
+      - name: Build dev image
+        run: |
+          make \
+            FINAL_VERSION=dev \
+            DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
+            DAR_VERSION=${{ steps.versions.outputs.DAR_VERSION }} \
+            dev
+
+      - name: Test dev image
+        run: |
+          make \
+            FINAL_VERSION=dev \
+            DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
+            DAR_VERSION=${{ steps.versions.outputs.DAR_VERSION }} \
+            test
+
+      - name: Create final image (re-label, no rebuild, no scan)
+        run: |
+          make \
+            FINAL_VERSION=${{ env.REBUILD_VERSION }} \
+            DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
+            DAR_VERSION=${{ steps.versions.outputs.DAR_VERSION }} \
+            final-noscan
+
+      # -----------------------------------------------------------------------
+      # 7. Verify image before it leaves the runner
+      # -----------------------------------------------------------------------
+      - name: Verify CLI version
+        run: |
+          make \
+            FINAL_VERSION=${{ env.REBUILD_VERSION }} \
+            DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
+            verify-cli-version
+
+      - name: Verify OCI labels
+        run: |
+          make \
+            FINAL_VERSION=${{ env.REBUILD_VERSION }} \
+            verify-labels
+
+      # -----------------------------------------------------------------------
+      # 8. SBOM (CycloneDX) — generated from the local image before push
+      # -----------------------------------------------------------------------
+      - name: Cache Grype DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ hashFiles('**/Dockerfile') }}
+          restore-keys: grype-db-${{ runner.os }}-
+
+      - name: Generate SBOM with Syft (CycloneDX)
+        run: |
+          SYFT_CHECK_FOR_APP_UPDATE=false \
+            syft "docker:${{ env.FINAL_IMAGE_NAME }}:${{ env.REBUILD_VERSION }}" \
+              -o cyclonedx-json \
+              > sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json
+
+      # -----------------------------------------------------------------------
+      # 9. Vulnerability scan — HARD STOP on High or Critical
+      # -----------------------------------------------------------------------
+      - name: Scan image with Grype (fail on High/Critical)
+        run: |
+          GRYPE_CHECK_FOR_APP_UPDATE=false \
+            grype \
+              "sbom:sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json" \
+              --fail-on high \
+              -o sarif \
+              > grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif
+
+      - name: Upload Grype SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3.28.21
+        with:
+          sarif_file: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Grype SARIF as Actions artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-report-${{ env.REBUILD_VERSION }}
+          path: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif
+
+      # -----------------------------------------------------------------------
+      # 10. Push to Docker Hub — both REBUILD_VERSION and :latest
+      # -----------------------------------------------------------------------
+      - name: Docker login
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" \
+            | docker login -u "${{ secrets.DOCKERHUB_USER_NAME }}" --password-stdin
+
+      - name: Tag image as :latest
+        run: |
+          docker tag \
+            ${{ env.FINAL_IMAGE_NAME }}:${{ env.REBUILD_VERSION }} \
+            ${{ env.DOCKERHUB_REPO }}:latest
+
+      - name: Docker push REBUILD_VERSION
+        run: docker push ${{ env.DOCKERHUB_REPO }}:${{ env.REBUILD_VERSION }}
+
+      - name: Docker push :latest
+        run: docker push ${{ env.DOCKERHUB_REPO }}:latest
+
+      # Capture the immutable digest — signing steps use this so signatures
+      # are never bound to a mutable tag.
+      - name: Capture image digest
+        id: image_digest
+        run: |
+          DIGEST=$(docker inspect \
+            --format='{{index .RepoDigests 0}}' \
+            ${{ env.DOCKERHUB_REPO }}:${{ env.REBUILD_VERSION }})
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "Pushed digest: ${DIGEST}"
+
+      # -----------------------------------------------------------------------
+      # 11. Cosign — sign the image (keyless, via GitHub OIDC → Sigstore / Rekor)
+      # -----------------------------------------------------------------------
+      - name: Sign image with cosign (keyless, OIDC)
+        id: cosign_sign
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          OUTPUT=$(cosign sign --yes \
+            "${{ steps.image_digest.outputs.digest }}" 2>&1)
+          echo "${OUTPUT}"
+
+          REKOR_INDEX=$(echo "${OUTPUT}" \
+            | grep -oP 'tlog entry created with index: \K[0-9]+' || true)
+          if [ -n "${REKOR_INDEX}" ]; then
+            REKOR_URL="https://search.sigstore.dev/?logIndex=${REKOR_INDEX}"
+          else
+            REKOR_URL=""
+          fi
+          echo "rekor_url=${REKOR_URL}"     >> $GITHUB_OUTPUT
+          echo "rekor_index=${REKOR_INDEX}" >> $GITHUB_OUTPUT
+          echo "Rekor entry: ${REKOR_URL}"
+
+      # -----------------------------------------------------------------------
+      # 12. Cosign — attach SBOM as a signed in-toto attestation
+      # The attestation is bound to the digest, so it covers both
+      # REBUILD_VERSION and :latest since they point to the same digest.
+      # -----------------------------------------------------------------------
+      - name: Attach SBOM attestation with cosign
+        id: cosign_attest
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign attest --yes \
+            --predicate sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json \
+            --type cyclonedx \
+            "${{ steps.image_digest.outputs.digest }}"
+
+      # -----------------------------------------------------------------------
+      # 13. Rollback — remove image from Docker Hub if signing failed
+      # -----------------------------------------------------------------------
+      - name: Rollback — remove REBUILD_VERSION from Docker Hub (signing failed)
+        if: >
+          failure() && (
+            steps.cosign_sign.outcome   == 'failure' ||
+            steps.cosign_attest.outcome == 'failure'
+          )
+        env:
+          DOCKERHUB_USER:  ${{ secrets.DOCKERHUB_USER_NAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          python3 scripts/remove_dockerhub_tag.py \
+            --repo ${{ env.DOCKERHUB_REPO }} \
+            --tag  ${{ env.REBUILD_VERSION }}
+
+      - name: Rollback — write cosign failure badge
+        if: >
+          failure() && (
+            steps.cosign_sign.outcome   == 'failure' ||
+            steps.cosign_attest.outcome == 'failure'
+          )
+        run: |
+          git config --global user.name  "github-actions"
+          git config --global user.email "actions@github.com"
+          git checkout main
+          python3 scripts/write_cosign_badge.py --failed
+          scripts/git_commit_if_changed.sh doc/cosign_badge.json \
+            "cosign badge: signing failed for ${{ env.REBUILD_VERSION }}"
+          git push origin HEAD
+
+      # -----------------------------------------------------------------------
+      # 14. Housekeeping — build log, cosign badge, git tag
+      # Switch back to main before committing — build was from the release tag.
+      # -----------------------------------------------------------------------
+      - name: Housekeeping — build log, cosign badge, git tag
+        run: |
+          git config --global user.name  "github-actions"
+          git config --global user.email "actions@github.com"
+          git checkout main
+
+          DIGEST="${{ steps.image_digest.outputs.digest }}"
+          BUILD_NUMBER=$(jq length doc/build-history.json 2>/dev/null || echo 0)
+          IMAGE_ID=$(docker inspect --format '{{ .Id }}' \
+            ${{ env.FINAL_IMAGE_NAME }}:${{ env.REBUILD_VERSION }})
+
+          export PYTHONPATH="${PYTHONPATH}:scripts"
+          python3 scripts/update_build_log.py \
+            --dar-backup-version "${{ steps.versions.outputs.DAR_BACKUP_VERSION }}" \
+            --log              doc/build-history.json \
+            --build-number     "${BUILD_NUMBER}" \
+            --version          "${{ env.REBUILD_VERSION }}" \
+            --base             "ubuntu:${{ env.UBUNTU_VERSION }}" \
+            --git-rev          "$(git rev-parse --short v${{ env.BASE_TAG }})" \
+            --created          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --url              "https://hub.docker.com/layers/${{ env.DOCKERHUB_REPO }}/${{ env.REBUILD_VERSION }}/images/${DIGEST#*@}" \
+            --digest           "${DIGEST#*@}" \
+            --image-id         "${IMAGE_ID}" \
+            --grype-sarif      "grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif" \
+            --sbom-file        "sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json" \
+            --sbom-release-asset-url "no release asset - scheduled image refresh" \
+            --cosign-signed    "true" \
+            --cosign-rekor-url "${{ steps.cosign_sign.outputs.rekor_url }}" \
+            --cosign-image-digest "${DIGEST}" \
+            --build-runner     "${{ runner.os }}-${{ runner.arch }}" \
+            --github-run-id    "${{ github.run_id }}" \
+            --github-run-url   "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          scripts/git_commit_if_changed.sh doc/build-history.json \
+            "build-history: add refresh ${{ env.REBUILD_VERSION }} metadata"
+
+          # Update cosign badge — weekly refresh is the latest golden image.
+          python3 scripts/write_cosign_badge.py
+          scripts/git_commit_if_changed.sh doc/cosign_badge.json \
+            "cosign badge: signing successful for ${{ env.REBUILD_VERSION }}"
+
+          git status
+          git push origin HEAD
+
+          # Create an annotated git tag for the rebuild so future runs can
+          # find the highest existing -N via git tag --list.
+          git tag -a "v${{ env.REBUILD_VERSION }}" \
+            -m "Weekly image refresh v${{ env.REBUILD_VERSION }}"
+          git push origin "v${{ env.REBUILD_VERSION }}"
+          echo "✅ Git tag v${{ env.REBUILD_VERSION }} created and pushed."
+
+      # -----------------------------------------------------------------------
+      # 15. Job summary
+      # -----------------------------------------------------------------------
+      - name: Post summary
+        run: |
+          SARIF="grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif"
+
+          source <(python3 scripts/grype_summary_env.py "${SARIF}")
+
+          echo "## ✅ dar-backup Weekly Refresh v${{ env.REBUILD_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo ""                                                               >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |"                                             >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|"                                             >> $GITHUB_STEP_SUMMARY
+          echo "| Docker image       | \`${{ env.DOCKERHUB_REPO }}:${{ env.REBUILD_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Also pushed as     | \`${{ env.DOCKERHUB_REPO }}:latest\` |"                     >> $GITHUB_STEP_SUMMARY
+          echo "| Image digest       | \`${{ steps.image_digest.outputs.digest }}\` |"             >> $GITHUB_STEP_SUMMARY
+          echo "| Base release       | \`${{ env.BASE_TAG }}\` |"                                  >> $GITHUB_STEP_SUMMARY
+          echo "| dar-backup version | \`${{ steps.versions.outputs.DAR_BACKUP_VERSION }}\` |"     >> $GITHUB_STEP_SUMMARY
+          echo "| Cosign signed      | ✅ keyless (Sigstore / Rekor) |"                            >> $GITHUB_STEP_SUMMARY
+          echo "| Rekor entry        | ${{ steps.cosign_sign.outputs.rekor_url }} |"               >> $GITHUB_STEP_SUMMARY
+          echo ""                                                               >> $GITHUB_STEP_SUMMARY
+          echo "### Grype vulnerability scan"                                  >> $GITHUB_STEP_SUMMARY
+          echo ""                                                               >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |"                                          >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|"                                          >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 Critical   | \`${CRITICAL}\` |"                          >> $GITHUB_STEP_SUMMARY
+          echo "| 🟠 High       | \`${HIGH}\` |"                              >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Medium     | \`${MEDIUM}\` |"                            >> $GITHUB_STEP_SUMMARY
+          echo "| 🔵 Low        | \`${LOW}\` |"                               >> $GITHUB_STEP_SUMMARY
+          echo "| ⚪ Negligible | \`${NEGLIGIBLE}\` |"                        >> $GITHUB_STEP_SUMMARY
+          echo "| 🔔 Warning    | \`${WARNING}\` |"                           >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 Note       | \`${NOTE}\` |"                              >> $GITHUB_STEP_SUMMARY
+          echo ""                                                               >> $GITHUB_STEP_SUMMARY
+          echo "### Verify the signature"                                      >> $GITHUB_STEP_SUMMARY
+          echo '```bash'                                                        >> $GITHUB_STEP_SUMMARY
+          echo "cosign verify ${{ env.DOCKERHUB_REPO }}:${{ env.REBUILD_VERSION }} \\" >> $GITHUB_STEP_SUMMARY
+          echo '  --certificate-identity-regexp="https://github.com/${{ github.repository }}" \' >> $GITHUB_STEP_SUMMARY
+          echo '  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"'        >> $GITHUB_STEP_SUMMARY
+          echo '```'                                                            >> $GITHUB_STEP_SUMMARY

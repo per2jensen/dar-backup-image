@@ -65,7 +65,7 @@ LABEL_ARGS = \
 # Targets
 # ================================
 
-.PHONY: all all-dev dev-rebuild final release clean clean-all push tag login dev dev-clean labels help \
+.PHONY: all all-dev dev-rebuild final final-noscan release clean clean-all push tag login dev dev-clean labels help \
 	check_version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
 	check-docker-creds test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools \
 	grype-db-status grype-db-update scan-final verify-labels
@@ -273,6 +273,38 @@ final: check_version
 	@echo
 	@echo "📊 Image layer size report (for audit):"
 	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
+
+
+
+final-noscan: check_version
+	@echo "🔎 Ensuring dar-backup:dev exists and is fresh…"
+	@if ! $(DOCKER) image inspect dar-backup:dev >/dev/null 2>&1; then \
+	  echo "❌ dar-backup:dev not found — run 'make dev' first"; exit 1; \
+	fi
+
+	@echo "🧩 Creating release image with corrected labels (no rebuild)…"
+	@set -e; \
+	CID="$$( $(DOCKER) create dar-backup:dev )"; \
+	$(DOCKER) commit \
+	  --change 'LABEL org.opencontainers.image.version=$(FINAL_VERSION)' \
+	  --change 'LABEL org.opencontainers.image.ref.name=$(DOCKERHUB_REPO):$(FINAL_VERSION)' \
+	  $$CID dar-backup:$(FINAL_VERSION) >/dev/null; \
+	$(DOCKER) rm $$CID >/dev/null
+
+	@$(DOCKER) tag dar-backup:$(FINAL_VERSION) $(DOCKERHUB_REPO):$(FINAL_VERSION)
+
+	@echo
+	@echo "🔎 Verifying CLI version…"
+	@$(MAKE) verify-cli-version
+
+	@echo
+	@echo "🔍 Verifying OCI image labels…"
+	@$(MAKE) verify-labels
+
+	@echo
+	@echo "📊 Image layer size report (for audit):"
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
+	@echo "ℹ️  Scan skipped — SBOM and Grype will run as dedicated workflow steps."
 
 
 verify-labels:

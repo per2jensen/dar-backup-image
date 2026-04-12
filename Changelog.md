@@ -10,6 +10,9 @@
   - add/commit badge success in housekeeping step
   - add/commit clonepulse release annotation in housekeeping step
   - Github release now adds useful information and links in body
+- Image refresh workflow which can rebuild the latest released version to keep the underlying base os up to date
+  - builds x.y.z-1, x.y.z-2 .. x.y.z-n
+  - start delivering a `:latest` image tag
 - README badges update
 - Manually added the missing cosign ok badge from version 0.5.22 release
   
