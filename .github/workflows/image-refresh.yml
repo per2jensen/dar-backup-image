@@ -108,7 +108,14 @@ jobs:
       - name: Checkout release tag v${{ env.BASE_TAG }}
         run: |
           git checkout "v${{ env.BASE_TAG }}"
-          echo "✅ Checked out v${{ env.BASE_TAG }}"
+          # Use the Makefile from main so targets added after this tag (e.g.
+          # final-noscan) are available. This assumes the main Makefile remains
+          # compatible with the Dockerfile and scripts at the checked-out tag.
+          # TODO: revisit if Makefile targets start depending on features not
+          # present in older tags — consider building from main with version
+          # args from build-history instead.
+          git checkout main -- Makefile
+          echo "✅ Checked out v${{ env.BASE_TAG }} with Makefile from main"
 
       # -----------------------------------------------------------------------
       # 5. Read version pins from the checked-out tag

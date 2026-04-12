@@ -286,9 +286,9 @@ final-noscan: check_version
 	@set -e; \
 	CID="$$( $(DOCKER) create dar-backup:dev )"; \
 	$(DOCKER) commit \
-	  --change 'LABEL org.opencontainers.image.version=$(FINAL_VERSION)' \
-	  --change 'LABEL org.opencontainers.image.ref.name=$(DOCKERHUB_REPO):$(FINAL_VERSION)' \
-	  $$CID dar-backup:$(FINAL_VERSION) >/dev/null; \
+		--change 'LABEL org.opencontainers.image.version=$(FINAL_VERSION)' \
+		--change 'LABEL org.opencontainers.image.ref.name=$(DOCKERHUB_REPO):$(FINAL_VERSION)' \
+		$$CID dar-backup:$(FINAL_VERSION) >/dev/null; \
 	$(DOCKER) rm $$CID >/dev/null
 
 	@$(DOCKER) tag dar-backup:$(FINAL_VERSION) $(DOCKERHUB_REPO):$(FINAL_VERSION)
