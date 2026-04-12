@@ -2,11 +2,6 @@ name: Manual Docker Release — dar-backup
 
 on:
   workflow_dispatch:
-    inputs:
-      FINAL_VERSION:
-        description: 'Release version (e.g. 1.2.3)'
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -24,28 +19,47 @@ jobs:
   release:
     runs-on: ubuntu-24.04
 
-    env:
-      FINAL_VERSION: ${{ inputs.FINAL_VERSION }}
-
-
-
-
     steps:
       # -----------------------------------------------------------------------
-      # 0. install dependencies 
-      # -----------------------------------------------------------------------
-      - name: dependencies
-        run: |
-          sudo apt-get install -y python3-pytest
-
-      # -----------------------------------------------------------------------
-      # 1. Source
+      # 0. Source and check version number
       # -----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           # Full history needed for git rev-parse, tags, and git push.
           fetch-depth: 0
+
+      # Abort release if IMAGE_VERSION is not set, is empty or if the tag already exists.
+      - name: Read and validate IMAGE_VERSION
+        run: |
+          if [[ ! -f IMAGE_VERSION ]]; then
+            echo "❌ IMAGE_VERSION file not found — aborting."
+            exit 1
+          fi        
+
+          FINAL_VERSION=$(cat IMAGE_VERSION)
+
+          if [[ -z "${FINAL_VERSION}" ]]; then
+            echo "❌ IMAGE_VERSION is empty — aborting."
+            exit 1
+          fi          
+
+          echo "FINAL_VERSION=${FINAL_VERSION}" >> $GITHUB_ENV
+          if git rev-parse "v${FINAL_VERSION}" >/dev/null 2>&1; then
+            echo "❌ Git tag v${FINAL_VERSION} already exists — aborting."
+            exit 1
+          fi
+
+          echo "✅ Version ${FINAL_VERSION} is new — proceeding."
+
+      # -----------------------------------------------------------------------
+      # 1. install dependencies 
+      # -----------------------------------------------------------------------
+      - name: dependencies
+        run: |
+          sudo apt-get install -y python3-pytest
+
+
 
       # -----------------------------------------------------------------------
       # 2. Toolchain
@@ -235,12 +249,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           python3 scripts/write_cosign_badge.py --failed
-          git add doc/cosign_badge.json
-          if ! git diff --quiet doc/cosign_badge.json; then
-            git commit -m "cosign badge: signing failed for ${{ env.FINAL_VERSION }}"
-            git push origin HEAD
-          fi
-
+          scripts/git_commit_if_changed.sh doc/cosign_badge.json "cosign badge: signing failed for ${{ env.FINAL_VERSION }}"
 
 
       # -----------------------------------------------------------------------
@@ -291,9 +300,8 @@ jobs:
           NOTE=" - " \
           ./scripts/patch-readme-build.sh
 
-          echo "🔄 Updating version examples in README.md to VERSION=$(FINAL_VERSION)"
-          sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md
-
+          echo "🔄 Updating version examples in README.md to VERSION=${FINAL_VERSION}"
+          sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=${FINAL_VERSION};/" README.md
           scripts/git_commit_if_changed.sh README.md "README: patched build table and version# in examples for ${{ env.FINAL_VERSION }}"
 
           # Update cosign badge to reflect successful signing.
