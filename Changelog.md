@@ -5,12 +5,13 @@
 ### Changed
 
 - Release workflow improvements
+  - Release workflow now reads IMAGE_VERSION and aborts release if version exists
   - cosign rollback:  change badge to "failed" in dull grey
   - add/commit badge success in housekeeping step
   - add/commit clonepulse release annotation in housekeeping step
+  - Github release now adds useful information and links in body
 - README badges update
 - Manually added the missing cosign ok badge from version 0.5.22 release
-- Release workflow now reads IMAGE_VERSION and aborts release if version exists
   
 ## v0.5.22 - 2026-04-10
 
