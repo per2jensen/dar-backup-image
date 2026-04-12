@@ -401,6 +401,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
           git pull --rebase origin main
 
       - name: Download all summaries
@@ -414,6 +416,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config --global user.name  "github-actions"
+          git config --global user.email "github-actions@github.com"
+
           T="$(mktemp -d)"
           shopt -s nullglob
           files=(ci-summary/*.json)
