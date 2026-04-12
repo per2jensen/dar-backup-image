@@ -30,13 +30,13 @@ jobs:
     outputs:
       image_ref: ${{ steps.meta.outputs.image_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -58,12 +58,12 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Prepare summary directory
         run: mkdir -p "ci-summary"
 
       - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Install required system packages
         run: |
@@ -82,7 +82,7 @@ jobs:
           pip install pytest pytest-json-report
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -127,7 +127,7 @@ jobs:
           fi
       - name: Upload ci-summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-summary-${{ github.job }}
           path: ci-summary
@@ -147,13 +147,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Prepare summary directory
         run: mkdir -p ci-summary
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -223,7 +223,7 @@ jobs:
 
       - name: Upload ci-summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-summary-${{ github.job }}
           path: ci-summary
@@ -238,13 +238,13 @@ jobs:
     steps:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Prepare summary directory
         run: mkdir -p ci-summary
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -260,7 +260,7 @@ jobs:
           echo "week=$(date +%G-%V)" >> $GITHUB_OUTPUT
 
       - name: Cache Grype DB
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/grype
           key: grype-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.ver }}-${{ steps.cache-key.outputs.week }}
@@ -303,21 +303,21 @@ jobs:
 
       - name: Upload SBOM
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-cyclonedx
           path: sbom-cyclonedx.json
 
       - name: Upload Grype report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: grype-report
           path: grype-report.txt
 
       - name: Upload SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: grype.sarif
 
@@ -379,7 +379,7 @@ jobs:
 
       - name: Upload ci-summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-summary-${{ github.job }}
           path: ci-summary
@@ -389,7 +389,7 @@ jobs:
     needs: [test, backup-restore-compare, sbom_vuln_scan]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -404,7 +404,7 @@ jobs:
           git pull --rebase origin main
 
       - name: Download all summaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: ci-summary-*
           merge-multiple: true
