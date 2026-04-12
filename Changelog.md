@@ -10,7 +10,8 @@
   - add/commit clonepulse release annotation in housekeeping step
 - README badges update
 - Manually added the missing cosign ok badge from version 0.5.22 release
-
+- Release workflow now reads IMAGE_VERSION and aborts release if version exists
+  
 ## v0.5.22 - 2026-04-10
 
 ### Added
