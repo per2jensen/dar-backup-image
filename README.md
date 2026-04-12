@@ -56,7 +56,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
   - [🗄️ dar-backup-image](#️-dar-backup-image)
   - [📑 Table of Contents](#-table-of-contents)
   - [`dar` versions](#dar-versions)
-  - [Builds uploaded to Docker Hub](#builds-uploaded-to-docker-hub)
+  - [Recent releases uploaded to Docker Hub](#recent-releases-uploaded-to-docker-hub)
   - [🔐 Release Pipeline and Supply Chain Security](#-release-pipeline-and-supply-chain-security)
     - [Pipeline steps](#pipeline-steps)
     - [What cosign keyless signing provides](#what-cosign-keyless-signing-provides)
@@ -78,7 +78,8 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
   - [Environment Variables](#environment-variables)
   - [How to test](#how-to-test)
   - [🔧 Image Tags](#-image-tags)
-    - [🐳 tagging strategy](#-tagging-strategy)
+    - [🐳 Tagging strategy](#-tagging-strategy)
+    - [🔄 Weekly image refresh](#-weekly-image-refresh)
   - [🧰 Volumes / Runtime Configuration](#-volumes--runtime-configuration)
   - [🚀 Usage Example](#-usage-example)
   - [run-backup.sh](#run-backupsh)
@@ -145,7 +146,9 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 ```
 
 <a name="dockerhub-builds"></a>
-## Builds uploaded to Docker Hub
+## Recent releases uploaded to Docker Hub
+
+> Weekly image refreshes (`:latest`) are not listed here — see the full audit trail in [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
 
 |Tag|`dar-backup`|`dar`|Git Revision|Docker Hub|Note|
 |---|------------|-----|------------|----------|----|
@@ -270,7 +273,7 @@ curl -s https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags | jq '
 
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
 
-This is early, the `dar-backup` images are not tested well, do not trust it too much. It will mature over time :-)
+The image is continuously tested via a full CI pipeline on every commit, with weekly refreshes to keep `:latest` current and vulnerability-free.
 
 This image includes:
 
@@ -418,26 +421,34 @@ Two images are built:
 
 ## 🔧 Image Tags
 
-Some  images are put on [DockerHub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
+All images are published to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 
-The [Release procedure](https://github.com/per2jensen/dar-backup-image/blob/main/doc/Release.md) results in two things:
-
-- An image pushed to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
-- Metadata about the image put in [build-history.md](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
+Every build — whether a release or a scheduled refresh — is recorded in [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
 
 ---
 
-### 🐳 tagging strategy
+### 🐳 Tagging strategy
 
-For now I am not using `latest`, as the images have not yet demonstrated their quality.
+| Tag           | Description                                                                 | Docker Hub | Example Usage  |
+|---------------|-----------------------------------------------------------------------------|------------|----------------|
+| `:latest`     | Most recent weekly refresh or release — always signed, scanned, and fresh   | ✅ Yes     | `docker pull per2jensen/dar-backup:latest` |
+| `:0.x.y`      | Versioned release following semantic versioning                              | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.22` |
+| `:0.x.y-N`    | Scheduled weekly refresh of release `0.x.y` (N increments each refresh)    | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.22-1` |
+| `:dev`        | Development version; may be broken or incomplete                            | ❌ No      | `docker run dar-backup:dev` |
 
-I am currently going with:
+### 🔄 Weekly image refresh
 
-| Tag        | Description                                      | Docker Hub | Example Usage  |
-|------------|--------------------------------------------------|------------|----------------|
-| `:0.x.y`   | Versioned releases following semantic versioning | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.6`   |
-| `:stable`  | Latest "good" and trusted version; perhaps `:rc` | ✅ Yes     | `docker pull per2jensen/dar-backup:stable` |
-| `:dev`     | Development version; may be broken or incomplete | ❌ No      | `docker run dar-backup:dev` |
+`:latest` is kept up to date by a scheduled weekly rebuild that runs every Saturday. Each refresh:
+
+- Rebuilds from the same source as the latest stable release, picking up any Ubuntu base image security patches
+- Runs the full test suite — the pipeline halts if any test fails
+- Scans with [Grype](https://github.com/anchore/grype) — **the refresh is aborted if any High or Critical vulnerability is found**
+- Signs the image with [cosign](https://github.com/sigstore/cosign) keyless signing and records the entry in the [Rekor](https://github.com/sigstore/rekor) transparency log
+- Attaches a signed CycloneDX SBOM attestation
+- Publishes as both `:latest` and a versioned refresh tag (e.g. `:0.5.22-1`, `:0.5.22-2`)
+- Updates the [cosign badge](https://github.com/per2jensen/dar-backup-image/blob/main/doc/cosign_badge.json) — if the badge shows `failed`, the latest image did not pass the refresh pipeline
+
+The [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json) file contains the full audit trail for every release and refresh, including digests, Rekor log entries, and Grype scan results.
 
 ---
 

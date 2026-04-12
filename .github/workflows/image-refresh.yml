@@ -2,7 +2,7 @@ name: Weekly image refresh — dar-backup
 
 on:
   schedule:
-    - cron: '0 4 * * 1'   # Every Monday at 04:00 UTC
+    - cron: '17 4 * * 6'  # Every Saturday at 04:17 UTC
   workflow_dispatch:       # Allow manual trigger
 
 permissions:
@@ -367,6 +367,23 @@ jobs:
             -m "Weekly image refresh v${{ env.REBUILD_VERSION }}"
           git push origin "v${{ env.REBUILD_VERSION }}"
           echo "✅ Git tag v${{ env.REBUILD_VERSION }} created and pushed."
+
+
+      # -----------------------------------------------------------------------
+      # Safety net — write cosign failure badge on any unexpected failure
+      # not already caught by the rollback steps above.
+      # -----------------------------------------------------------------------
+      - name: Write cosign failure badge on unexpected failure
+        if: failure()
+        run: |
+          git config --global user.name  "github-actions"
+          git config --global user.email "actions@github.com"
+          git checkout main
+          python3 scripts/write_cosign_badge.py --failed
+          scripts/git_commit_if_changed.sh doc/cosign_badge.json \
+            "cosign badge: refresh failed for ${{ env.REBUILD_VERSION }}"
+          git push origin HEAD
+
 
       # -----------------------------------------------------------------------
       # 15. Job summary
