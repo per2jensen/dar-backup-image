@@ -244,7 +244,7 @@ jobs:
 
 
       # -----------------------------------------------------------------------
-      # 12. Git housekeeping — build log, README, annotated tag
+      # 12. Git housekeeping — build log, patch README, annotated tag
       # -----------------------------------------------------------------------
       - name: Housekeeping — build log, README, badge, annotation, git tag
         run: |
@@ -279,9 +279,7 @@ jobs:
           --github-run-id    "${{ github.run_id }}" \
           --github-run-url   "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          git add doc/build-history.json
-          git diff --quiet doc/build-history.json || \
-            git commit -m "build-history: add ${{ env.FINAL_VERSION }} metadata"
+          scripts/git_commit_if_changed.sh doc/build-history.json "build-history: add ${{ env.FINAL_VERSION }} metadata"
 
           # Update README builds table
           FINAL_VERSION="${{ env.FINAL_VERSION }}" \
@@ -293,25 +291,19 @@ jobs:
           NOTE=" - " \
           ./scripts/patch-readme-build.sh
 
-          git add README.md
-          git diff --cached --quiet README.md || \
-            git commit -m "README: add build row for ${{ env.FINAL_VERSION }}"
+          echo "🔄 Updating version examples in README.md to VERSION=$(FINAL_VERSION)"
+          sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md
 
-
-          make FINAL_VERSION=${{ env.FINAL_VERSION }} update-readme-version
+          scripts/git_commit_if_changed.sh README.md "README: patched build table and version# in examples for ${{ env.FINAL_VERSION }}"
 
           # Update cosign badge to reflect successful signing.
           python3 scripts/write_cosign_badge.py
-          git add doc/cosign_badge.json
-          git diff --cached --quiet doc/cosign_badge.json || \
-            git commit -m "release v${{ env.FINAL_VERSION }}: cosign badge ok"
-
+          scripts/git_commit_if_changed.sh doc/cosign_badge.json "cosign badge: signing successful for ${{ env.FINAL_VERSION }}"
 
           # Add clonepulse annotation: "Rel. <version>"
           python clonepulse/add_release_annotation.py "${{ env.FINAL_VERSION }}"
-          git add clonepulse/fetch_clones.json
-          git diff --cached --quiet clonepulse/fetch_clones.json || \
-            git commit -m "release v${{ env.FINAL_VERSION }}: add clonepulse annotation"
+          scripts/git_commit_if_changed.sh clonepulse/fetch_clones.json "clonepulse: add release annotation for v${{ env.FINAL_VERSION }}"
+
           git status
           git push origin HEAD
 
@@ -332,19 +324,44 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.FINAL_VERSION }}
-          name: dar-backup Release v${{ env.FINAL_VERSION }}
-          generate_release_notes: true
+          name: dar-backup-image Release v${{ env.FINAL_VERSION }}
+          generate_release_notes: false
+          body: |
+            ## dar-backup-image Release v${{ env.FINAL_VERSION }}
+
+            `Dar-backup-image` is a Docker image that packages the [dar-backup](https://github.com/per2jensen/dar-backup) CLI tool for easy use on servers/workstations or in containerized environments.
+
+            The image doubles as a time capsule of `dar-backup`, `dar` and `par2`.
+
+            Based on:
+
+            - dar-backup version ${{ steps.versions.outputs.DAR_BACKUP_VERSION }}
+            - Ubuntu ${{ env.UBUNTU_VERSION }} base image
+            - [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile)
+
+            ## Changelog
+            See [Changelog.md](https://github.com/per2jensen/dar-backup-image/blob/main/Changelog.md) for what changed in this release.
+
+            ## Build info:
+            Take a look at the [build history](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json) json file for detailed metadata about this build and past builds.
+
+            ## Verify the signature
+            ```bash
+            cosign verify ${{ env.DOCKERHUB_REPO }}:${{ env.FINAL_VERSION }} \
+               --certificate-identity-regexp="https://github.com/${{ github.repository }}" \
+               --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+            ```
+
+            ## Rekor transparency log
+            ${{ steps.cosign_sign.outputs.rekor_url }}
+
+            ## SBOM
+            The CycloneDX SBOM is attached to this release as an asset.
           files: |
             sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json
             grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload SBOM as Actions artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-v${{ env.FINAL_VERSION }}
-          path: sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json
 
 
       # -----------------------------------------------------------------------
