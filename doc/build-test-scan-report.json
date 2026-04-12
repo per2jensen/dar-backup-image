@@ -1111,5 +1111,58 @@
     },
     "timestamp": "2026-04-12T10:57:05Z",
     "workflow_name": "CI — build, test, scan"
+  },
+  {
+    "actor": "per2jensen",
+    "branch": "refs/heads/main",
+    "git_commit": "da2d2c91bd514f83747017b1cf54f381c6d8d757",
+    "run_id": "24310055137",
+    "run_url": "https://github.com/per2jensen/dar-backup-image/actions/runs/24310055137",
+    "summary": {
+      "backup_restore_compare": {
+        "overall_status": "success",
+        "phases": {
+          "DIFF": {
+            "diff_lines": 0,
+            "notes": "Restore matches source",
+            "status": "ok"
+          },
+          "FULL": {
+            "diff_lines": 0,
+            "notes": "Restore matches source",
+            "status": "ok"
+          },
+          "INCR": {
+            "diff_lines": 0,
+            "notes": "Restore matches source",
+            "status": "ok"
+          }
+        }
+      },
+      "sbom_vuln_scan": {
+        "components": 3792,
+        "image": "ghcr.io/per2jensen/dar-backup:ci-da2d2c91bd514f83747017b1cf54f381c6d8d757",
+        "vulnerabilities": {
+          "by_severity": {
+            "critical": 0,
+            "high": 0,
+            "low": 29,
+            "medium": 89,
+            "negligible": 2,
+            "unknown": 0
+          },
+          "total": 120
+        }
+      },
+      "test": {
+        "failed": null,
+        "pass_rate": "100.0",
+        "passed": 14,
+        "skipped": null,
+        "total": 14
+      }
+    },
+    "timestamp": "2026-04-12T15:35:05Z",
+    "workflow_name": "CI — build, test, scan"
   }
 ]
