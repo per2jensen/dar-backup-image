@@ -24,7 +24,7 @@ jobs:
       # 0. Source and check version number
       # -----------------------------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Full history needed for git rev-parse, tags, and git push.
           fetch-depth: 0
@@ -129,7 +129,7 @@ jobs:
       # 6. SBOM (CycloneDX) — generated from the local image before push
       # -----------------------------------------------------------------------
       - name: Cache Grype DB
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ hashFiles('**/Dockerfile') }}
@@ -156,14 +156,14 @@ jobs:
 
       - name: Upload Grype SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3.28.21
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Grype SARIF as Actions artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: grype-report-${{ env.FINAL_VERSION }}
           path: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
@@ -329,7 +329,7 @@ jobs:
       # 13. GitHub Release — attach SBOM and SARIF
       # -----------------------------------------------------------------------
       - name: Create GitHub Release with assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.FINAL_VERSION }}
           name: dar-backup-image Release v${{ env.FINAL_VERSION }}
