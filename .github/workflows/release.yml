@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload Grype SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
           token: ${{ secrets.GITHUB_TOKEN }}
