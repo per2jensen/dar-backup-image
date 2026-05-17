@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# save-docker-image.sh — check if the latest dar-backup Docker image has been
+# save-dar-backup-image.sh — check if the latest dar-backup Docker image has been
 # archived locally, and if not, pull it from Docker Hub and save it as a
 # compressed tar alongside the dar archives.
 #
