@@ -1,6 +1,6 @@
 # dar-backup-image Changelog
 
-## v0.5.23 - not released
+## v0.5.23 - 2026-05-17
 
 ### Added
 
