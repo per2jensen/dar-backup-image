@@ -283,7 +283,7 @@ jobs:
           --build-number     "${BUILD_NUMBER}" \
           --version          "${{ env.FINAL_VERSION }}" \
           --base             "ubuntu:${{ env.UBUNTU_VERSION }}" \
-          --base-image-digest "${{ env.BASE_IMAGE_DIGEST }}" \
+          --base-image-digest "${BASE_IMAGE_DIGEST}" \
           --git-rev          "$(git rev-parse --short HEAD)" \
           --created          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           --url              "https://hub.docker.com/layers/${{ env.DOCKERHUB_REPO }}/${{ env.FINAL_VERSION }}/images/${DIGEST#*@}" \
