@@ -331,7 +331,7 @@ verify-labels:
 	                  org.dar.version)
 
 	@for label in $(LABELS); do \
-	  value=$$($(DOCKER) inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION)" 2>/dev/null | cut -d= -f2-); \
+	  value=$$($(DOCKER) inspect -f "{{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null); \
 	  if [ -z "$$value" ]; then \
 	    echo "❌ Missing or empty label: $$label"; \
 	    exit 1; \
