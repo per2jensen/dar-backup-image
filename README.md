@@ -1,4 +1,4 @@
-# 📦 dar-backup image for container backups and more
+# dar-backup image for container backups and more
 <a href="https://github.com/per2jensen/scrubexif/releases"><img alt="Tag" src="https://img.shields.io/github/v/tag/per2jensen/dar-backup-image"/></a>
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
 <a href="https://github.com/per2jensen/dar-backup-image/blob/main/doc/DETAILS.md#image-signing-and-supply-chain-verification">
@@ -20,7 +20,7 @@
 
 ---
 
-## 🗄️ dar-backup-image
+## dar-backup-image
 
 `dar-backup-image` is a Docker image that bundles the powerful dar (Disk ARchiver) utility with the robust Python wrapper `dar-backup`. Together, they provide a flexible, automated, and verifiable backup solution suited for long-term data retention.
 
@@ -50,14 +50,14 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
-- [📦 dar-backup image for container backups and more](#-dar-backup-image-for-container-backups-and-more)
-  - [🗄️ dar-backup-image](#️-dar-backup-image)
-  - [📑 Table of Contents](#-table-of-contents)
+- [dar-backup image for container backups and more](#dar-backup-image-for-container-backups-and-more)
+  - [dar-backup-image](#dar-backup-image)
+  - [Table of Contents](#table-of-contents)
   - [`dar` versions](#dar-versions)
   - [Recent releases uploaded to Docker Hub](#recent-releases-uploaded-to-docker-hub)
-  - [🔐 Release Pipeline and Supply Chain Security](#-release-pipeline-and-supply-chain-security)
+  - [Release Pipeline and Supply Chain Security](#release-pipeline-and-supply-chain-security)
     - [Pipeline steps](#pipeline-steps)
     - [What cosign keyless signing provides](#what-cosign-keyless-signing-provides)
     - [Verifying an image yourself](#verifying-an-image-yourself)
@@ -77,11 +77,11 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
       - [Dedicated Service Account (Automated Backups)](#dedicated-service-account-automated-backups)
   - [Environment Variables](#environment-variables)
   - [How to test](#how-to-test)
-  - [🔧 Image Tags](#-image-tags)
-    - [🐳 Tagging strategy](#-tagging-strategy)
-    - [🔄 Weekly image refresh](#-weekly-image-refresh)
-  - [🧰 Volumes / Runtime Configuration](#-volumes--runtime-configuration)
-  - [🚀 Usage Example](#-usage-example)
+  - [Image Tags](#image-tags)
+    - [Tagging strategy](#tagging-strategy)
+    - [Weekly image refresh](#weekly-image-refresh)
+  - [Volumes / Runtime Configuration](#volumes--runtime-configuration)
+  - [Usage Example](#usage-example)
   - [run-backup.sh](#run-backupsh)
     - [Baked-in config file](#baked-in-config-file)
     - [PyPI .darrc](#pypi-darrc)
@@ -92,12 +92,12 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
       - [Usage](#usage)
       - [How It Works Internally](#how-it-works-internally)
       - [Example](#example)
-    - [⚠️ Common Pitfalls](#️-common-pitfalls)
+    - [Common Pitfalls](#common-pitfalls)
     - [Basic usage](#basic-usage)
   - [🔍 Discover Image Metadata](#-discover-image-metadata)
-    - [🧪 1. Check Tool Versions](#-1-check-tool-versions)
-    - [🏷️ 2. Inspect Image Labels](#️-2-inspect-image-labels)
-    - [📦 3. List Available Image Tags](#-3-list-available-image-tags)
+    - [1. Check Tool Versions](#1-check-tool-versions)
+    - [2. Inspect Image Labels](#2-inspect-image-labels)
+    - [3. List Available Image Tags](#3-list-available-image-tags)
   - [Image deep diving](#image-deep-diving)
   - [Common `dar-backup` commands](#common-dar-backup-commands)
     - [Full backup](#full-backup)
@@ -161,7 +161,7 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 ---
 
 
-## 🔐 Release Pipeline and Supply Chain Security
+## Release Pipeline and Supply Chain Security
 
 Every image released to Docker Hub is produced by a fully automated GitHub Actions workflow — no manual `docker push`, no local machine involvement. The pipeline enforces a strict sequence of gates before any image becomes publicly available.
 
@@ -227,7 +227,7 @@ The entry records the signing certificate, the image digest that was signed, the
 
 Curious how it all works in practice?
 
-Check out the [📄 step-by-step demo](https://github.com/per2jensen/dar-backup-image/blob/main/doc/demo-containerized-dar-backup.md), which walks through:
+Check out the [step-by-step demo](https://github.com/per2jensen/dar-backup-image/blob/main/doc/demo-containerized-dar-backup.md), which walks through:
 
 - A full backup from mounted directories
 - Archive listing and contents inspection
@@ -406,20 +406,14 @@ For details on behavior, UID/GID handling, and usage examples, see the comments 
 ## How to test
 
 ```bash
-# make new base and development image
-make all-dev
+# Build development image
+make dev
 
-# run FULL, DIFF and INCR backups in a temp directory
+# Run FULL, DIFF and INCR backups in a temp directory
 make test
 ```
 
-Two images are built:
-
-1. A [base image](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile-base-image) which currently is a slimmed down ubuntu 24.04 image
-
-2. [dar-backup image](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile-dar-backup) is installed on top of the base image
-
-## 🔧 Image Tags
+## Image Tags
 
 All images are published to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 
@@ -427,7 +421,7 @@ Every build — whether a release or a scheduled refresh — is recorded in [bui
 
 ---
 
-### 🐳 Tagging strategy
+### Tagging strategy
 
 | Tag           | Description                                                                 | Docker Hub | Example Usage  |
 |---------------|-----------------------------------------------------------------------------|------------|----------------|
@@ -436,7 +430,7 @@ Every build — whether a release or a scheduled refresh — is recorded in [bui
 | `:0.x.y-N`    | Scheduled weekly refresh of release `0.x.y` (N increments each refresh)    | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.22-1` |
 | `:dev`        | Development version; may be broken or incomplete                            | ❌ No      | `docker run dar-backup:dev` |
 
-### 🔄 Weekly image refresh
+### Weekly image refresh
 
 `:latest` is kept up to date by a scheduled weekly rebuild that runs every Saturday. Each refresh:
 
@@ -452,7 +446,7 @@ The [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/mai
 
 ---
 
-## 🧰 Volumes / Runtime Configuration
+## Volumes / Runtime Configuration
 
 The default dar-backup.conf baked into the image assumes the directories mentioned below.
 
@@ -469,22 +463,25 @@ The mapping between physical directories on your file system and the expected di
 
 ---
 
-## 🚀 Usage Example
+## Usage Example
 
 Determine if you want to built an image yourself, or use one of mine from Docker Hub.
 
 ```bash
-# make a container
-$ make FINAL_VERSION=dev DAR_BACKUP_VERSION=0.8.0 dev  # make a local development image
+# Build a local development image
+$ make dev
 
-# check
-$ docker images |grep "dev"
+# Check it exists
+$ docker images | grep "dar-backup"
 dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
 
-# Set IMAGE to your own
-export IMAGE=dar-backup:dev  # your own locally build image
+# Use your own locally built image
+export IMAGE=dar-backup:dev
 
-# Or set IMAGE to one of mine on Docker Hub
+# Or use one from Docker Hub — latest is always signed, scanned, and fresh
+export IMAGE=per2jensen/dar-backup:latest
+
+# Or pin to a specific version
 VERSION=0.5.23; export IMAGE=per2jensen/dar-backup:${VERSION}
 ```
 
@@ -501,7 +498,7 @@ export BACKUP_D_DIR=/tmp/test-backup.d  # the directory keeping the `backup defi
 docker run --rm \
   -e RUN_AS_UID=$(id -u) \
   -v "$DATA_DIR":/data \
-  -v "$BACKUP_DIR":/backup \
+  -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
   "$IMAGE" \
@@ -667,7 +664,7 @@ The backup will:
 - Use `/backup.d/projects` as the definition.
 - Retain ownership based on `RUN_AS_UID` and `RUN_AS_GID`.
 
-### ⚠️ Common Pitfalls
+### Common Pitfalls
 
 > - **Why is my backup skipped?**  
 >   Only one `FULL`, one `DIFF`, and one `INCR` backup can be created per definition per day.  
@@ -692,7 +689,7 @@ Learn what's inside the `dar-backup` image: program versions, build metadata, an
 
 ---
 
-### 🧪 1. Check Tool Versions
+### 1. Check Tool Versions
 
 Run the image with different entrypoints to check the bundled versions of `dar-backup`, `dar`, and `par2`:
 
@@ -713,7 +710,7 @@ docker run --rm --entrypoint "" "$IMAGE" \
   bash -c "dar-backup -v; dar --version; par2 --version"
 ```
 
-### 🏷️ 2. Inspect Image Labels
+### 2. Inspect Image Labels
 
 ```bash
 VERSION=0.5.23; docker pull per2jensen/dar-backup:${VERSION}
@@ -731,7 +728,7 @@ Example output:
 }
 ```
 
-### 📦 3. List Available Image Tags
+### 3. List Available Image Tags
 
 ```bash
 # Show first 100 available tags
@@ -751,7 +748,7 @@ export BACKUP_DIR=tmp/test-backups
 export VERSION=0.5.23; export IMAGE=per2jensen/dar-backup:${VERSION}
 touch /tmp/test-data/TEST.txt
 
-docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backup --entrypoint dar "$IMAGE" -c /backup/myarchive -R /data
+docker run --rm -v "$DATA_DIR":/data -v "$BACKUP_DIR":/backups --entrypoint dar "$IMAGE" -c /backups/myarchive -R /data
 ```
 
 Example output
@@ -821,8 +818,7 @@ It supports **local development builds**, **final version tagging**, and **relea
 | Target                        | What It Does                                                                                         |
 |-------------------------------|------------------------------------------------------------------------------------------------------|
 | `make dev`                    | Builds a **development image** (`dar-backup:dev`) using the local Dockerfile and configuration.      |
-| `make all-dev`                | Builds both the base image and the `dar-backup:dev` image (default dependency for most other targets).|
-| `make test`                   | Builds `dar-backup:dev` (via `all-dev`) and runs the full pytest suite against it.                   |
+| `make test`                   | Builds `dar-backup:dev` and runs the full pytest suite against it.                   |
 | `make FINAL_VERSION=x.y.z final` | Tags the current `dar-backup:dev` as `dar-backup:x.y.z` and verifies version/labels.                        |
 | `make FINAL_VERSION=x.y.z test`  | Builds (or re-tags) `dar-backup:x.y.z`, then runs pytest against it.                                      |
 | `make IMAGE=per2jensen/dar-backup:x.y.z test-pulled` | Pulls the specified released image from Docker Hub and tests it (skips local build).                                 |
@@ -875,7 +871,9 @@ This:
 
 ### Releasing a New Version
 
-    Dry-run the release (build & test only, no push):
+Releases are fully automated via the **Manual Docker Release** GitHub Actions workflow — no local `docker push` required.
+
+Dry-run the release locally first (build, test, verify labels — no push):
 
 ```bash
 make FINAL_VERSION=0.5.15 dry-run-release
@@ -883,51 +881,48 @@ make FINAL_VERSION=0.5.15 dry-run-release
 
 This validates:
 
-    The image builds correctly.
+- The image builds correctly
+- Labels and `dar-backup --version` match expected values
+- All tests pass
 
-    Labels and dar-backup --version match.
+When ready, trigger the release by dispatching the workflow from GitHub Actions (`workflow_dispatch`). The workflow will:
 
-    All tests pass.
+1. Validate `IMAGE_VERSION` and abort if the git tag already exists
+2. Build, test, and promote the image
+3. Scan with Grype — hard gate on High/Critical vulnerabilities
+4. Push `per2jensen/dar-backup:VERSION` and `:latest` to Docker Hub
+5. Sign with cosign (keyless, via GitHub OIDC → Sigstore/Rekor)
+6. Attach the SBOM as a signed in-toto attestation
+7. Update `doc/build-history.json`, README, cosign badge, and git tag
 
-Perform the actual release (push to Docker Hub):
-
-```bash
-export DOCKER_USER=your-username
-  export DOCKER_TOKEN=your-access-token  # do not put token in bash_history
-make FINAL_VERSION=0.5.15 release
-```
-
-The release target will:
-
-    Build and tag dar-backup:0.5.15.
-
-    Verify labels and CLI version.
-
-    Run tests.
-
-    Push the image to Docker Hub.
-
-    Update files:    
-        doc/build-history.json
-        doc/build-test-scan-report.json  (not yet complete supply chain documentation)
+> **Note:** Do NOT manually create the git tag before triggering the workflow — it is created automatically after all steps succeed.
 
 ### Recommended Workflow
 
-    During development:
-    make dev && make test
+During development:
 
-    Before release:
-    make dev-nuke
-    make FINAL_VERSION=x.y.z final (validate your local final image)
+```bash
+make dev && make test
+```
 
-    Dry-run release:
-    make FINAL_VERSION=x.y.z dry-run-release
+Before release — validate locally:
 
-    Push the final image:
-    make FINAL_VERSION=x.y.z release
+```bash
+make dev-nuke
+make FINAL_VERSION=x.y.z final          # validate your local final image
+make FINAL_VERSION=x.y.z dry-run-release
+```
 
-    Verify the published image:
-    make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
+Trigger the release:
+
+- Set `IMAGE_VERSION` to the new version, update `Changelog.md`, commit and push
+- Dispatch the **Manual Docker Release** workflow from GitHub Actions
+
+Verify the published image:
+
+```bash
+make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
+```
 
 ## TODO
 
