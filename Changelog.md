@@ -2,6 +2,10 @@
 
 ## v0.5.23 - not released
 
+### Added
+
+- helper script `scripts/save-dar-backup-image.sh` saves Docker images locally. Suitable for crontab/systemd.
+
 ### Changed
 
 - Release workflow improvements
@@ -15,6 +19,7 @@
   - start delivering a `:latest` image tag
 - README badges update
 - Manually added the missing cosign ok badge from version 0.5.22 release
+- Using dar version 2.7.21 (no longer the RC1)
   
 ## v0.5.22 - 2026-04-10
 
