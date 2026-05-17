@@ -20,6 +20,11 @@ DOCKER ?= docker
 FINAL_VERSION ?= dev
 
 UBUNTU_VERSION ?= 24.04
+UBUNTU_DIGEST := $(shell docker pull ubuntu:$(UBUNTU_VERSION) -q >/dev/null 2>&1 && \
+    docker inspect ubuntu:$(UBUNTU_VERSION) \
+    --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
+
+
 DAR_BACKUP_VERSION ?= $(shell cat DAR_BACKUP_VERSION)
 DAR_VERSION ?= $(shell cat DAR_VERSION)
 
@@ -46,6 +51,7 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 LABEL_ARGS = \
   --label org.opencontainers.image.base.name=ubuntu \
   --label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
+  --label org.opencontainers.image.base.digest="$(UBUNTU_DIGEST)" \
   --label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
   --label org.opencontainers.image.created="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --label org.opencontainers.image.revision="$(shell git rev-parse --short HEAD)" \
@@ -191,7 +197,6 @@ release: check_version check-docker-creds final verify-labels verify-cli-version
 		echo "✅ Git tag 'v$(FINAL_VERSION)' created and pushed."; \
 	fi
 
-
 # ================================
 # Dev build
 # ================================
@@ -205,10 +210,7 @@ dev-clean: check_version
 	-$(DOCKER) image prune -f
 	@echo "Tip: Use 'make dev-nuke' for a full rebuild without cache."
 	@echo "Rebuilding image (via 'make dev' to preserve labels)..."
-	$(MAKE) dev \
-		FINAL_VERSION=$(FINAL_VERSION) \
-		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
-		DAR_VERSION=$(DAR_VERSION) 
+	$(MAKE) dev
 
 # Full nuke: deletes *all* caches and forces a completely fresh build.
 # Note: passes DAR_BACKUP_VERSION (not VERSION) to match the Dockerfile ARG name,
@@ -221,6 +223,7 @@ dev-nuke:
 	$(DOCKER) build --no-cache -f Dockerfile \
 		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
 		--build-arg DAR_VERSION=$(DAR_VERSION) \
+		--build-arg UBUNTU_DIGEST=$(UBUNTU_DIGEST) \
 		$(LABEL_ARGS) \
 		-t dar-backup:$(FINAL_VERSION) .
 
@@ -235,6 +238,7 @@ dev: validate
 	  --build-arg VERSION=$(FINAL_VERSION) \
 	  --build-arg DAR_VERSION=$(DAR_VERSION) \
 	  --build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
+	  --build-arg UBUNTU_DIGEST=$(UBUNTU_DIGEST) \
 	  $(LABEL_ARGS) \
 	  -t dar-backup:dev \
 	  .
@@ -312,6 +316,7 @@ verify-labels:
 	@echo "🔍 Verifying OCI image labels on $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
 	@$(eval LABELS := org.opencontainers.image.authors \
 	                  org.opencontainers.image.base.name \
+	                  org.opencontainers.image.base.digest \
 	                  org.opencontainers.image.base.version \
 	                  org.opencontainers.image.created \
 	                  org.opencontainers.image.description \
@@ -326,7 +331,7 @@ verify-labels:
 	                  org.dar.version)
 
 	@for label in $(LABELS); do \
-	  value=$$($(DOCKER) inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null | cut -d= -f2-); \
+	  value=$$($(DOCKER) inspect -f "$$${label}={{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION)" 2>/dev/null | cut -d= -f2-); \
 	  if [ -z "$$value" ]; then \
 	    echo "❌ Missing or empty label: $$label"; \
 	    exit 1; \
@@ -337,6 +342,15 @@ verify-labels:
 
 	@echo "🔎 Checking exact matches for version and ref.name…"
 	@set -e; \
+	exp_version="$(UBUNTU_DIGEST)"; \
+	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
+	if [ "$$act_version" != "$$exp_version" ]; then \
+	  echo "❌ org.opencontainers.image.version mismatch"; \
+	  echo "   expected: '$$exp_version'"; \
+	  echo "   actual:   '$$act_version'"; \
+	  exit 1; \
+	fi; \
+
 	exp_version="$(FINAL_VERSION)"; \
 	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
 	if [ "$$act_version" != "$$exp_version" ]; then \
@@ -460,6 +474,7 @@ log-pushed-build-json: check_version
 	@jq --arg tag "$(FINAL_VERSION)" \
 		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
 		--arg base "$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
+		--arg base_image_digest "$(UBUNTU_DIGEST)" \
 		--arg rev "$(GIT_REV)" \
 		--arg created "$(DATE)" \
 		--arg url "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
@@ -467,7 +482,7 @@ log-pushed-build-json: check_version
 		--arg image_id "$(IMAGE_ID)" \
 		--arg full_tag "$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
 		--argjson build_number $(BUILD_NUMBER) \
-		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "full_image_tag": $$full_tag, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
+		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "full_image_tag": $$full_tag, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id, "base_image_digest": $$base_image_digest}]' \
 		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH)
 
 

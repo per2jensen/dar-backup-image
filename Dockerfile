@@ -2,16 +2,20 @@
 #
 # dar-backup image with modern DAR (2.7.18) built from source.
 # Based on Ubuntu 24.04 (slim, multi-stage).
+ARG UBUNTU_DIGEST=invalid # Must be overridden at build time with a valid digest for ubuntu:24.04
+
 
 # === Builder Stage ===
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:24.04@${UBUNTU_DIGEST} AS builder
 
 ARG DAR_BACKUP_VERSION
 ARG DAR_VERSION
+
 ENV DEBIAN_FRONTEND=noninteractive PATH="/opt/venv/bin:$PATH" DAR_DIR=/usr/local
 
 # Install build deps (Python for dar-backup, toolchain for DAR)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN set -e; \
+    apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip gettext-base ca-certificates tzdata file gnupg \
       build-essential autoconf automake libtool pkg-config binutils \
       libkrb5-dev libgcrypt-dev libgpgme-dev libext2fs-dev libthreadar-dev \
@@ -32,9 +36,11 @@ COPY src/dar/dar-${DAR_VERSION}.tar.gz /tmp/dar-${DAR_VERSION}.tar.gz
 COPY src/dar/dar-${DAR_VERSION}.tar.gz.sig /tmp/
 COPY doc/denis-corbin.gpg /tmp/
 
+
 # Verify dar tarball signature (fail hard if invalid)
 # Denis Corbin's DAR signing key is used to verify the signature
-RUN gpg --batch --import /tmp/denis-corbin.gpg \
+RUN set -e; \
+    gpg --batch --import /tmp/denis-corbin.gpg \
   && gpg --batch --verify /tmp/dar-${DAR_VERSION}.tar.gz.sig /tmp/dar-${DAR_VERSION}.tar.gz \
   || (echo "❌ GPG signature verification failed for DAR ${DAR_VERSION}" && exit 1)  \
   && tar xzf /tmp/dar-${DAR_VERSION}.tar.gz -C /tmp \
@@ -42,7 +48,8 @@ RUN gpg --batch --import /tmp/denis-corbin.gpg \
 
 
 
-RUN cd /tmp/dar-${DAR_VERSION} \
+RUN set -e; \
+    cd /tmp/dar-${DAR_VERSION} \
   && CXXFLAGS=-O ./configure --prefix="$DAR_DIR" LDFLAGS="-lgssapi_krb5" --disable-python-binding \
   && make -j$(nproc) \
   && make install-strip \
@@ -87,13 +94,15 @@ RUN set -e; \
 
 
 # Cleanup builder stage to reduce layer size
-RUN pip uninstall -y pip setuptools wheel || true \
+RUN set -e; \
+    pip uninstall -y pip setuptools wheel || true \
   && find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
   && find /opt/venv -type f -name "*.pyc" -delete \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # === Final Runtime Stage ===
-FROM ubuntu:24.04
+ARG UBUNTU_DIGEST=invalid  # Must be overridden at build time with a valid digest for ubuntu:24.04
+FROM ubuntu:24.04@${UBUNTU_DIGEST}
 ARG DAR_VERSION
 ARG DAR_BACKUP_VERSION
 
@@ -110,7 +119,8 @@ COPY --from=builder /usr/local/lib/libdar* /usr/local/lib/
 COPY --from=builder /etc/ld.so.conf.d/local.conf /etc/ld.so.conf.d/local.conf
 # Copy libthreadar and fix symlink chain
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/
-RUN ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldconfig \
+RUN set -e; \
+    ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldconfig \
   && apt-get update && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends \
        python3-minimal python3-venv gettext-base par2 util-linux ca-certificates tzdata libc-bin \
@@ -123,30 +133,31 @@ RUN ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldco
 
 
 # Refresh linker cache so libdar64 is found
-RUN ldconfig \
+RUN set -e; \
+    ldconfig \
   && echo "Checking DAR version...\"${DAR_VERSION}\"  " \
   && ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
        || (echo "❌ DAR ${DAR_VERSION} build failed version check" && exit 1) )
 
 
 # Final cleanup of venv (tests, pip, setuptools, wheel)
-RUN find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
+RUN set -e; \
+    find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
   && find /opt/venv -type f -name "*.pyc" -delete \
   && find /opt/venv -type d -name "tests" -exec rm -rf {} + \
   && rm -rf /opt/venv/lib/python*/site-packages/pip \
             /opt/venv/lib/python*/site-packages/setuptools \
             /opt/venv/lib/python*/site-packages/wheel
 
-LABEL com.per2jensen.dar.version="${DAR_VERSION}" \
-      com.per2jensen.dar_backup.version="${DAR_BACKUP_VERSION}"
-
             
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN set -e; \
+    chmod +x /entrypoint.sh
 
 # Replace ubuntu user with daruser (UID 1000)
-RUN userdel -f ubuntu 2>/dev/null || true \
+RUN set -e; \
+  userdel -f ubuntu 2>/dev/null || true \
   && rm -rf /home/ubuntu || true \
   && useradd -r -u 1000 -g users \
        -s /usr/sbin/nologin -d /nonexistent daruser \

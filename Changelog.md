@@ -20,6 +20,7 @@
 - README badges update
 - Manually added the missing cosign ok badge from version 0.5.22 release
 - Using dar version 2.7.21 (no longer the RC1)
+- State specific base image digest in build-history.json
   
 ## v0.5.22 - 2026-04-10
 
