@@ -272,6 +272,9 @@ jobs:
           BUILD_NUMBER=$(jq length doc/build-history.json 2>/dev/null || echo 0)
           IMAGE_ID=$(docker inspect --format '{{ .Id }}' \
             ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }})
+          BASE_IMAGE_DIGEST=$(docker inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' \
+            ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }})
 
           export PYTHONPATH="${PYTHONPATH}:scripts"
           python3 scripts/update_build_log.py \
@@ -280,6 +283,7 @@ jobs:
           --build-number     "${BUILD_NUMBER}" \
           --version          "${{ env.FINAL_VERSION }}" \
           --base             "ubuntu:${{ env.UBUNTU_VERSION }}" \
+          --base-image-digest "${{ env.BASE_IMAGE_DIGEST }}" \
           --git-rev          "$(git rev-parse --short HEAD)" \
           --created          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           --url              "https://hub.docker.com/layers/${{ env.DOCKERHUB_REPO }}/${{ env.FINAL_VERSION }}/images/${DIGEST#*@}" \

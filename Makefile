@@ -446,80 +446,58 @@ verify-cli-version:
 	fi
 
 
-# ================================
-# Log build metadata to JSON file
-# ================================
 log-pushed-build-json: check_version
 	@mkdir -p $(BUILD_LOG_DIR)
 	@test -f $(BUILD_LOG_PATH) || echo "[]" > $(BUILD_LOG_PATH)
-
-	$(eval DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
-	$(eval GIT_REV := $(shell git rev-parse --short HEAD))
-
-	$(eval DIGEST := $(shell docker inspect --format '{{ index .RepoDigests 0 }}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
+	$(eval DATE     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
+	$(eval GIT_REV  := $(shell git rev-parse --short HEAD))
+	$(eval DIGEST   := $(shell docker inspect --format '{{index .RepoDigests 0}}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
 	@if [ -z "$(DIGEST)" ]; then \
-		echo "❌ Digest not found. Make sure the image has been pushed."; \
-		exit 1; \
+	  echo "❌ Digest not found. Make sure the image has been pushed."; \
+	  exit 1; \
 	fi
-
-	$(eval IMAGE_ID := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
-	@if [ -z "$(IMAGE_ID)" ]; then \
-		echo "❌ Image ID not found. Did you build the final image?"; \
-		exit 1; \
-	fi
-
+	$(eval IMAGE_ID    := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
 	$(eval DIGEST_ONLY := $(shell echo "$(DIGEST)" | cut -d'@' -f2))
-	$(eval BUILD_NUMBER := $(shell test -f $(BUILD_LOG_PATH) && jq length $(BUILD_LOG_PATH) || echo 0))
-
-	@jq --arg tag "$(FINAL_VERSION)" \
-		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
-		--arg base "$(BASE_IMAGE_NAME):$(UBUNTU_VERSION)-$(FINAL_VERSION)" \
-		--arg base_image_digest "$(UBUNTU_DIGEST)" \
-		--arg rev "$(GIT_REV)" \
-		--arg created "$(DATE)" \
-		--arg url "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
-		--arg digest "$(DIGEST_ONLY)" \
-		--arg image_id "$(IMAGE_ID)" \
-		--arg full_tag "$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
-		--argjson build_number $(BUILD_NUMBER) \
-		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "full_image_tag": $$full_tag, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id, "base_image_digest": $$base_image_digest}]' \
-		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH)
-
-
+	$(eval BUILD_NUMBER := $(shell jq length $(BUILD_LOG_PATH) 2>/dev/null || echo 0))
+	@export PYTHONPATH="$$PYTHONPATH:scripts"; \
+	python3 scripts/update_build_log.py \
+	  --log              $(BUILD_LOG_PATH) \
+	  --build-number     $(BUILD_NUMBER) \
+	  --version          $(FINAL_VERSION) \
+	  --base             "ubuntu:$(UBUNTU_VERSION)" \
+	  --base-image-digest "$(UBUNTU_DIGEST)" \
+	  --git-rev          $(GIT_REV) \
+	  --created          "$(DATE)" \
+	  --url              "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
+	  --digest           "$(DIGEST_ONLY)" \
+	  --image-id         "$(IMAGE_ID)" \
+	  --dar-backup-version "$(DAR_BACKUP_VERSION)"
 	@echo "✅ Log entry added. Total builds: $$(jq length $(BUILD_LOG_PATH))"
 	@jq '.[-1]' $(BUILD_LOG_PATH)
-
-
 	@echo "🔄 Checking if $(BUILD_LOG_PATH) changed"
 	@if ! git diff --quiet $(BUILD_LOG_PATH); then \
-		git add $(BUILD_LOG_PATH); \
-		git commit -m "build-history: add $(FINAL_VERSION) metadata"; \
-		echo "✅ $(BUILD_LOG_PATH) updated and committed"; \
+	  git add $(BUILD_LOG_PATH); \
+	  git commit -m "build-history: add $(FINAL_VERSION) metadata"; \
+	  echo "✅ $(BUILD_LOG_PATH) updated and committed"; \
 	else \
-		echo "ℹ️ No changes to commit — build history already up to date"; \
+	  echo "ℹ️ No changes to commit — build history already up to date"; \
 	fi
-
-
 	@echo "📘 Updating README.md with latest build row..."
 	@FINAL_VERSION="$(FINAL_VERSION)" \
-	 DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
-	 DAR_VERSION="$(DAR_VERSION)" \
-	 GIT_REV="$(GIT_REV)" \
-	 DOCKERHUB_REPO="$(DOCKERHUB_REPO)" \
-	 DIGEST_ONLY="$(DIGEST_ONLY)" \
-	 NOTE=" - " \
-	 ./scripts/patch-readme-build.sh
-
-	@echo "🔄 Updating version examples in README.md to VERSION=$(FINAL_VERSION)"
+	  DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
+	  DAR_VERSION="$(DAR_VERSION)" \
+	  GIT_REV="$(GIT_REV)" \
+	  DOCKERHUB_REPO="$(DOCKERHUB_REPO)" \
+	  DIGEST_ONLY="$(DIGEST_ONLY)" \
+	  NOTE=" - " \
+	  ./scripts/patch-readme-build.sh
 	@sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md
-
-	@echo "🔄 Checking if README.md changed"
 	@if ! git diff --quiet README.md; then \
-		git add README.md; \
-		git commit -m "Release: add tag $(FINAL_VERSION)"; \
-		echo "✅ README.md updated and committed"; \
+	  git add README.md; \
+	  git commit -m "Release: add tag $(FINAL_VERSION)"; \
+	  echo "✅ README.md updated and committed"; \
 	else \
-		echo "ℹ️ No changes to commit — README.md already up to date"; \
+	  echo "ℹ️ No changes to commit — README.md already up to date"; \
 	fi
 
 
@@ -540,36 +518,34 @@ update-readme-version:
 	fi
 
 
-
 test-log-pushed-build-json:
 	@echo "🧪 Testing log-pushed-build-json with mock values..."
 	@mkdir -p ./logs
 	@test -f ./logs/build-history.json || echo "[]" > ./logs/build-history.json
-
-	$(eval FINAL_VERSION := test-tag)
+	$(eval FINAL_VERSION     := test-tag)
 	$(eval DAR_BACKUP_VERSION := 0.99.0-test)
-	$(eval BASE_TAG := dar-backup-base:24.04-test-tag)
-	$(eval GIT_REV := mockrev123)
-	$(eval DAR_BACKUP_DATE := 2025-07-13T00:00:00Z)
-	$(eval DOCKERHUB_REPO := per2jensen/dar-backup)
-	$(eval DIGEST_ONLY := sha256:deadbeef1234567890)
-	$(eval IMAGE_ID := sha256:cafebabef00d1234567890)
-	$(eval BUILD_LOG_PATH := ./logs/build-history.json)
-	$(eval BUILD_NUMBER := $(shell test -f ./logs/build-history.json && jq length ./logs/build-history.json || echo 0))
-
-	@jq --arg tag "$(FINAL_VERSION)" \
-		--arg dar_backup_version "$(DAR_BACKUP_VERSION)" \
-		--arg base "$(BASE_TAG)" \
-		--arg rev "$(GIT_REV)" \
-		--arg created "$(DAR_BACKUP_DATE)" \
-		--arg url "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
-		--arg digest "$(DIGEST_ONLY)" \
-		--arg image_id "$(IMAGE_ID)" \
-		--argjson build_number $(BUILD_NUMBER) \
-		'. += [{"build_number": $$build_number, "tag": $$tag, "dar_backup_version": $$dar_backup_version, "base_image": $$base, "git_revision": $$rev, "created": $$created, "dockerhub_tag_url": $$url, "digest": $$digest, "image_id": $$image_id}]' \
-		$(BUILD_LOG_PATH) > $(BUILD_LOG_PATH).tmp && mv $(BUILD_LOG_PATH).tmp $(BUILD_LOG_PATH) && \
-		echo "✅ Test entry added:" && jq '.[-1]' $(BUILD_LOG_PATH)
-
+	$(eval GIT_REV           := mockrev123)
+	$(eval DAR_BACKUP_DATE   := 2025-07-13T00:00:00Z)
+	$(eval DIGEST_ONLY       := sha256:deadbeef1234567890)
+	$(eval IMAGE_ID          := sha256:cafebabef00d1234567890)
+	$(eval MOCK_UBUNTU_DIGEST := sha256:mockubuntudigest1234567890)
+	$(eval BUILD_LOG_PATH    := ./logs/build-history.json)
+	$(eval BUILD_NUMBER      := $(shell jq length ./logs/build-history.json 2>/dev/null || echo 0))
+	@export PYTHONPATH="$$PYTHONPATH:scripts"; \
+	python3 scripts/update_build_log.py \
+	  --log              ./logs/build-history.json \
+	  --build-number     $(BUILD_NUMBER) \
+	  --version          $(FINAL_VERSION) \
+	  --base             "ubuntu:24.04" \
+	  --base-image-digest "$(MOCK_UBUNTU_DIGEST)" \
+	  --git-rev          $(GIT_REV) \
+	  --created          "$(DAR_BACKUP_DATE)" \
+	  --url              "https://hub.docker.com/layers/per2jensen/dar-backup/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
+	  --digest           "$(DIGEST_ONLY)" \
+	  --image-id         "$(IMAGE_ID)" \
+	  --dar-backup-version "$(DAR_BACKUP_VERSION)"
+	@echo "✅ Test entry added:"
+	@jq '.[-1]' ./logs/build-history.json
 
 
 commit-log:

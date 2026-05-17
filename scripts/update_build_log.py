@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--build-number", type=int, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--base", required=True)
+    parser.add_argument("--base-image-digest", required=True)
     parser.add_argument("--git-rev", required=True)
     parser.add_argument("--created", required=True)
     parser.add_argument("--url", required=True)
@@ -106,14 +107,15 @@ def main() -> None:
 
     # ── core entry ────────────────────────────────────────────────────────────
     entry: Dict[str, Any] = {
-        "build_number": args.build_number,
-        "tag":          args.version,
-        "base_image":   args.base,
-        "git_revision": args.git_rev,
-        "created":      args.created,
-        "dockerhub_tag_url": args.url,
-        "digest":       args.digest,
-        "image_id":     args.image_id,
+        "build_number":       args.build_number,
+        "tag":                args.version,
+        "base_image":         args.base,
+        "base_image_digest":  args.base_image_digest,
+        "git_revision":       args.git_rev,
+        "created":            args.created,
+        "dockerhub_tag_url":  args.url,
+        "digest":             args.digest,
+        "image_id":           args.image_id,
         "dar_backup_version": args.dar_backup_version,
     }
 
