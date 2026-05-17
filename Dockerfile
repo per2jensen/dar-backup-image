@@ -118,6 +118,12 @@ COPY --from=builder /usr/local/bin/dar* /usr/local/bin/
 COPY --from=builder /usr/local/lib/libdar* /usr/local/lib/
 COPY --from=builder /etc/ld.so.conf.d/local.conf /etc/ld.so.conf.d/local.conf
 # Copy libthreadar and fix symlink chain
+# libthreadar: amd64-specific path (x86_64-linux-gnu) — see note at top of file.
+# The .so version number (currently 1000) may change between Ubuntu releases.
+# When upgrading the base image, verify with:
+#   apt-cache show libthreadar-dev | grep Version
+# or inspect the builder stage:
+#   docker run --rm dar-backup:dev ls /usr/lib/x86_64-linux-gnu/libthreadar*
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/
 RUN set -e; \
     ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldconfig \
