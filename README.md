@@ -949,7 +949,6 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 - Prepare the image to be a restore tool for `dar` archives years from now
   - Include `dar-backup` manual, to make it more useful as restore tool
-- Be very clear on "one backup definition at a time" or build functionality that loops over BACKUPS.D
 - More testing/verifying to solidify the image
 
 ---
