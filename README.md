@@ -734,18 +734,26 @@ docker run --rm --entrypoint "" "$IMAGE" \
 ### 2. Inspect Image Labels
 
 ```bash
-VERSION=0.5.24; docker pull per2jensen/dar-backup:${VERSION}
-docker inspect per2jensen/dar-backup:${VERSION} | jq '.[0].Config.Labels'
+docker pull per2jensen/dar-backup:latest
+docker inspect per2jensen/dar-backup:latest | jq '.[0].Config.Labels'
 
 Example output:
-
 {
-  "org.opencontainers.image.base.created": "2025-06-19T13:38:32Z",
-  "org.opencontainers.image.created": "2025-06-19T13:38:32Z",
-  "org.opencontainers.image.description": "Container for DAR-based backups using dar-backup",
-  "org.opencontainers.image.ref.name": "ubuntu",
-  "org.opencontainers.image.source": "https://hub.docker.com/r/per2jensen/dar-backup",
-  "org.opencontainers.image.version": "0.5.1"
+  "org.dar-backup.version": "1.1.5",
+  "org.dar.version": "2.7.21",
+  "org.opencontainers.image.authors": "Per Jensen <dar-backup@pm.me>",
+  "org.opencontainers.image.base.digest": "sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b",
+  "org.opencontainers.image.base.name": "ubuntu",
+  "org.opencontainers.image.base.version": "24.04",
+  "org.opencontainers.image.created": "2026-05-17T20:03:16Z",
+  "org.opencontainers.image.description": "Container for DAR-based backups using `dar-backup`",
+  "org.opencontainers.image.licenses": "GPL-3.0-or-later",
+  "org.opencontainers.image.ref.name": "per2jensen/dar-backup:0.5.24",
+  "org.opencontainers.image.revision": "d5bf339",
+  "org.opencontainers.image.source": "https://github.com/per2jensen/dar-backup-image",
+  "org.opencontainers.image.title": "dar-backup",
+  "org.opencontainers.image.url": "https://hub.docker.com/r/per2jensen/dar-backup",
+  "org.opencontainers.image.version": "0.5.24"
 }
 ```
 
