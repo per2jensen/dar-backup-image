@@ -1,0 +1,91 @@
+<svg width="680" height="420" viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Scenario B — map a single subdirectory to container /data</title>
+  <desc>Diagram showing that mounting only one host subdirectory at /data makes only that subtree visible inside the container, so only one backup definition can work.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#854F0B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="680" height="420" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="340" y="28" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="600" fill="#1a1a18">Scenario B — map a single subdirectory to <tspan font-family="ui-monospace, monospace" font-size="14">/data</tspan></text>
+
+  <!-- ── HOST BOX ── -->
+  <rect x="24" y="46" width="252" height="250" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+  <text x="150" y="68" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#085041">Host filesystem</text>
+
+  <!-- host dir 1 — mounted (highlighted) -->
+  <rect x="36" y="80" width="228" height="36" rx="6" fill="#9FE1CB" stroke="#0F6E56" stroke-width="1.5"/>
+  <text x="150" y="95" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" font-weight="600" fill="#085041">/home/alice/photos</text>
+  <text x="150" y="109" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F6E56">mounted ← this one only</text>
+
+  <!-- host dir 2 — NOT mounted (greyed) -->
+  <rect x="36" y="126" width="228" height="36" rx="6" fill="#f4f3f0" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3"/>
+  <text x="150" y="141" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" font-weight="600" fill="#888780">/home/bob/documents</text>
+  <text x="150" y="155" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#888780">not mounted — invisible</text>
+
+  <!-- host dir 3 — NOT mounted (greyed) -->
+  <rect x="36" y="172" width="228" height="36" rx="6" fill="#f4f3f0" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3"/>
+  <text x="150" y="187" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" font-weight="600" fill="#888780">/srv/media</text>
+  <text x="150" y="201" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#888780">not mounted — invisible</text>
+
+  <text x="150" y="234" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-style="italic" fill="#888780">Other host paths exist</text>
+  <text x="150" y="250" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-style="italic" fill="#888780">but are not in the container</text>
+  <text x="150" y="266" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-style="italic" fill="#888780">mount namespace</text>
+
+  <!-- ── MOUNT ARROW ── -->
+  <line x1="280" y1="145" x2="360" y2="145" stroke="#0F6E56" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="274" y="108" width="90" height="34" rx="4" fill="#E1F5EE"/>
+  <text x="319" y="121" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" font-weight="600" fill="#085041">-v /home/alice/</text>
+  <text x="319" y="135" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" font-weight="600" fill="#085041">photos:/data</text>
+
+  <!-- ── CONTAINER BOX ── -->
+  <rect x="368" y="46" width="288" height="250" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+  <text x="512" y="68" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#3C3489">Container</text>
+
+  <!-- /data — only the mounted dir -->
+  <rect x="380" y="78" width="264" height="70" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="512" y="97" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" font-weight="600" fill="#3C3489">/data  ←  host /home/alice/photos</text>
+  <text x="512" y="114" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#534AB7">only this subtree is visible</text>
+  <text x="512" y="130" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#534AB7">contents of photos/ appear at /data/</text>
+
+  <!-- missing paths (greyed, dashed) -->
+  <rect x="380" y="158" width="264" height="28" rx="5" fill="#f4f3f0" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3"/>
+  <text x="512" y="176" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#888780">/data/home/bob/…  does not exist</text>
+
+  <rect x="380" y="194" width="264" height="28" rx="5" fill="#f4f3f0" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3"/>
+  <text x="512" y="212" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#888780">/data/srv/…  does not exist</text>
+
+  <text x="512" y="256" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-style="italic" fill="#888780">Paths outside the mount</text>
+  <text x="512" y="270" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-style="italic" fill="#888780">simply do not exist here</text>
+
+  <!-- ── BACKUP.D BOX ── -->
+  <rect x="368" y="312" width="288" height="90" rx="12" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="512" y="332" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#633806">backup.d — one working definition</text>
+
+  <rect x="380" y="342" width="264" height="22" rx="4" fill="#FAC775" stroke="#854F0B" stroke-width="1.5"/>
+  <text x="512" y="357" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#412402">-g data     ← backs up all of /data</text>
+
+  <rect x="380" y="370" width="264" height="22" rx="4" fill="#f4f3f0" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3"/>
+  <text x="512" y="385" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#888780">-g data/home/bob/…  ← will find nothing</text>
+
+  <!-- arrow container → backup.d -->
+  <line x1="512" y1="298" x2="512" y2="310" stroke="#534AB7" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- ── RESULT NOTE ── -->
+  <rect x="24" y="312" width="252" height="82" rx="10" fill="#FAECE7" stroke="#993C1D" stroke-width="0.8"/>
+  <text x="40" y="333" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#993C1D">⚠  Only one definition works</text>
+  <text x="40" y="352" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#712B13">All backup paths must start</text>
+  <text x="40" y="367" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#712B13">under /data. Other host dirs</text>
+  <text x="40" y="382" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#712B13">are simply not reachable.</text>
+</svg>

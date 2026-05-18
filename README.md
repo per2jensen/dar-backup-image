@@ -63,7 +63,8 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [Verifying an image yourself](#verifying-an-image-yourself)
     - [Verifying the SBOM attestation](#verifying-the-sbom-attestation)
     - [Inspecting the Rekor transparency log entry](#inspecting-the-rekor-transparency-log-entry)
-  - [🔧 Hands-on Demo: `dar-backup` in a Container](#-hands-on-demo-dar-backup-in-a-container)
+  - [Hands-on Demo: `dar-backup` in a Container](#hands-on-demo-dar-backup-in-a-container)
+  - [Understanding Volume Mounts and Backup Definitions](#understanding-volume-mounts-and-backup-definitions)
   - [Useful links](#useful-links)
   - [License](#license)
   - [Docker Hub image repo](#docker-hub-image-repo)
@@ -223,7 +224,7 @@ The entry records the signing certificate, the image digest that was signed, the
 
 ---
 
-## 🔧 Hands-on Demo: `dar-backup` in a Container
+## Hands-on Demo: `dar-backup` in a Container
 
 Curious how it all works in practice?
 
@@ -235,6 +236,23 @@ Check out the [step-by-step demo](https://github.com/per2jensen/dar-backup-image
 - Output logs, par2 generation, and verification
 
 All performed using `docker run` — no host installation required.
+
+---
+
+## Understanding Volume Mounts and Backup Definitions
+
+The `-v` flag that maps host directories into the container is the key decision that controls
+how many backup definitions you can use — and which host paths are reachable at all.
+
+In short:
+
+- **Map host `/` → container `/data`** — the entire host tree is visible; multiple definitions
+  can each target different subtrees (`data/home/alice/photos`, `data/srv/media`, …).
+- **Map a single subdirectory → container `/data`** — only that directory is visible inside the
+  container; only one definition (or definitions that stay within that subtree) will work.
+
+See **[doc/volume-mount-scenarios.md](doc/volume-mount-scenarios.md)** for a full explanation
+with diagrams, worked examples, and a comparison table.
 
 ---
 
@@ -460,6 +478,9 @@ The locations should be mounted with actual directories on your machine for back
 |[/backup/definitions/](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#backup-definition-example)      | `/backup.d`             | Contains backup definition files             |
 
 The mapping between physical directories on your file system and the expected directories inside the container is performed by the `-v /physical/dir:/container/dir` options  (see example below).
+
+> 💡 **How you mount `/data` determines which backup definitions work.**
+> See [Understanding Volume Mounts and Backup Definitions](#-understanding-volume-mounts-and-backup-definitions).
 
 ---
 
