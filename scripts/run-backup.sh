@@ -10,14 +10,14 @@
 # Features and behavior:
 # -----------------------
 # 1. Uses the baked-in dar-backup.conf and PyPI .darrc (unless overridden).
-# 2. Mounts host directories for backups, definitions, data, and restore tests:
+# 2. Mounts host directories for backups, definitions, data, and restore verification
 #
 #      | Host Directory (default)        | Container Mount  | Purpose                           |
 #      |----------------------------------|------------------|-----------------------------------|
 #      | $WORKDIR/backups                 | /backups         | DAR archives and log files       |
 #      | $WORKDIR/backup.d                | /backup.d        | Backup definition files          |
 #      | $WORKDIR/data                    | /data            | Source data to back up           |
-#      | $WORKDIR/restore                 | /restore         | Destination for restore tests    |
+#      | $WORKDIR/restore                 | /restore         | Destination for restore verification |
 #
 #    - Override any of these via:
 #        DAR_BACKUP_DIR, DAR_BACKUP_D_DIR, DAR_BACKUP_DATA_DIR, DAR_BACKUP_RESTORE_DIR
@@ -59,7 +59,7 @@
 #
 # Environment variables:
 # -----------------------
-#   IMAGE                  Docker image tag (default: dar-backup:dev)
+#   IMAGE                  Docker image tag (default: per2jensen/dar-backup:latest)
 #   WORKDIR                Base directory for all backups (defaults to script dir if unset)
 #   RUN_AS_UID             UID for container (default: current user’s UID)
 #   RUN_AS_GID             GID for container (default: current user’s GID)
@@ -67,6 +67,8 @@
 #   DAR_BACKUP_D_DIR       Override for $WORKDIR/backup.d
 #   DAR_BACKUP_DATA_DIR    Override for $WORKDIR/data
 #   DAR_BACKUP_RESTORE_DIR Override for $WORKDIR/restore
+#   DOCKER_PULL            default: false. A first run will pull if the image is not present locally.
+#                          Set to true to pull a newer image before running the backup.
 #
 # Default directory structure:
 # ----------------------------
@@ -76,20 +78,33 @@
 #     ├── data/        # Source data to back up
 #     └── restore/     # Restore verification target
 #
-
-
+#
+# Example of specified WORKDIR and DAR_BACKUP_DATA_DIR:
+# -----------------------------------------------------
+#   export WORKDIR=/tmp/dar-backup-image-demo
+#   export DAR_BACKUP_DATA_DIR=$HOME/tmp/some-data-to-backup/
+#   run-backup.sh -t FULL
+#
+#   #Check the command log:
+#   cat /tmp/dar-backup-image-demo/backups/dar-backup-commands.log
+#   
 set -euo pipefail
 
+if ! command -v docker &>/dev/null; then
+    echo "❌ docker not found, exiting."
+    exit 1
+fi
+
 # === Config ===
-IMAGE="${IMAGE:-dar-backup:dev}"
+IMAGE="${IMAGE:-per2jensen/dar-backup:latest}"
 
 WORKDIR="${WORKDIR:-}"
 if [[ -z "$WORKDIR" ]]; then
   WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-export RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
-export RUN_AS_GID="${RUN_AS_GID:-$(id -g)}"
+RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
+RUN_AS_GID="${RUN_AS_GID:-$(id -g)}"
 
 if [ "$RUN_AS_UID" -eq 0 ]; then
   echo "❌ running as root not allowed, exiting."
@@ -98,10 +113,10 @@ fi
 
 BASE_DIR="$WORKDIR"
 
-export DAR_BACKUP_DIR="${DAR_BACKUP_DIR:-$BASE_DIR/backups}"
-export DAR_BACKUP_D_DIR="${DAR_BACKUP_D_DIR:-$BASE_DIR/backup.d}"
-export DAR_BACKUP_DATA_DIR="${DAR_BACKUP_DATA_DIR:-$BASE_DIR/data}"
-export DAR_BACKUP_RESTORE_DIR="${DAR_BACKUP_RESTORE_DIR:-$BASE_DIR/restore}"
+DAR_BACKUP_DIR="${DAR_BACKUP_DIR:-$BASE_DIR/backups}"
+DAR_BACKUP_D_DIR="${DAR_BACKUP_D_DIR:-$BASE_DIR/backup.d}"
+DAR_BACKUP_DATA_DIR="${DAR_BACKUP_DATA_DIR:-$BASE_DIR/data}"
+DAR_BACKUP_RESTORE_DIR="${DAR_BACKUP_RESTORE_DIR:-$BASE_DIR/restore}"
 
 # === Parse args ===
 BACKUP_TYPE=""
@@ -115,22 +130,33 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--type)
-      BACKUP_TYPE="${2:-}"
+      [[ -z "${2:-}" || "${2:-}" == -* ]] && { echo "❌ -t requires an argument"; usage; }
+      BACKUP_TYPE="$2"
       shift 2
       ;;
     -d|--backup-definition)
-      BACKUP_DEF="${2:-}"
+      [[ -z "${2:-}" || "${2:-}" == -* ]] && { echo "❌ -d requires an argument"; usage; }
+      BACKUP_DEF="$2"
       shift 2
       ;;
+    -h|--help)
+      usage
+      ;;
+    --)
+      shift
+      break
+      ;;
     -*)
-      echo "Unknown option: $1"
+      echo "❌ Unknown option: $1"
       usage
       ;;
     *)
-      break
+      echo "❌ Unexpected argument: $1"
+      usage
       ;;
   esac
 done
+
 
 if [[ -z "$BACKUP_TYPE" ]]; then
   echo "❌ Missing required option: -t FULL|DIFF|INCR"
@@ -154,9 +180,9 @@ echo "DAR backup definition directory: $DAR_BACKUP_D_DIR"
 echo "DAR backup data directory:       $DAR_BACKUP_DATA_DIR"
 echo "DAR backup restore directory:    $DAR_BACKUP_RESTORE_DIR"
 if [[ -n "$BACKUP_DEF" ]]; then
-  echo "Backup definition file:          $BACKUP_DEF"
+  echo "Backup definition file:        $BACKUP_DEF"
 else
-  echo "Backup definition file:          (default)"
+  echo "Backup definition file:        (default)"
 fi
 
 mkdir -p "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR"
@@ -173,7 +199,7 @@ if [[ ! -f "$DAR_BACKUP_D_DIR/default" ]]; then
 EOF
 fi
 
-echo "Running dar-backup test with type: $BACKUP_TYPE_LC"
+echo "Running dar-backup with type: $BACKUP_TYPE_LC"
 echo
 
 # Build docker args safely
@@ -182,9 +208,18 @@ if [[ -n "$BACKUP_DEF" ]]; then
     DOCKER_ARGS+=( "--backup-definition" "$BACKUP_DEF" )
 fi
 
+# check environment variable to avoid unwanted pulls, if you have a tried and tested image.
+DOCKER_PULL=${DOCKER_PULL:-false}
+# only pull if you state so
+if [[ "$DOCKER_PULL" == "true" ]]; then
+  docker pull "$IMAGE"
+fi
+
+
 docker run --rm \
   --user "$RUN_AS_UID:$RUN_AS_GID" \
   -e RUN_AS_UID="$RUN_AS_UID" \
+  -e RUN_AS_GID="$RUN_AS_GID" \
   -v "$DAR_BACKUP_DIR":/backups \
   -v "$DAR_BACKUP_D_DIR":/backup.d \
   -v "$DAR_BACKUP_DATA_DIR":/data \

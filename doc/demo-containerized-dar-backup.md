@@ -31,7 +31,7 @@ You’ll need:
 
 ## Backup Definition
 
-Below is a sample backup definition file named `media-test-backup`, located in `${BACKUP_D_DIR}/`:
+Below is a sample backup definition file named `media-demo-backup`, located in `${BACKUP_D_DIR}/`:
 
 ```text
 # Switch to ordered selection mode (options are evaluated top to bottom)
@@ -69,11 +69,11 @@ Below is a sample backup definition file named `media-test-backup`, located in `
 ## Run a Full Backup of ~/data
 
 ```bash
-export DATA_DIR=/home/pj/data/2023              # Source data to backup
-export BACKUP_DIR=/media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo      # USB disk or backup destination
-export RESTORE_DIR=/tmp/test-restore            # Directory for restore testing
-export BACKUP_D_DIR=/tmp/test-backup.d          # Backup definitions location
-export IMAGE=per2jensen/dar-backup:latest       # dar-backup Docker image
+DATA_DIR=/home/pj/data/2023              # Source data to backup
+BACKUP_DIR=/media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo      # USB disk or backup destination
+RESTORE_DIR=/tmp/test-restore            # Directory for restore testing
+BACKUP_D_DIR=/tmp/test-backup.d          # Backup definitions location
+IMAGE=per2jensen/dar-backup:latest       # dar-backup Docker image
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$RESTORE_DIR"
@@ -92,7 +92,14 @@ cat >  "$BACKUP_D_DIR/media-demo-backup"  << 'EOF'
 --cache-directory-tagging
 EOF
 
+# check environment variable to avoid unwanted pulls, if you have a tried and tested image.
+DOCKER_PULL=${DOCKER_PULL:-false}
+# only pull if you state so
+if [[ "$DOCKER_PULL" == "true" ]]; then
+  docker pull "$IMAGE"
+fi
 
+# the pull happens if :latest is not found locally
 docker run --rm \
   -e RUN_AS_UID=$(id -u) \
   -v "$DATA_DIR":/data \
@@ -145,6 +152,8 @@ Status: Downloaded newer image for per2jensen/dar-backup:latest
 2026-05-17 18:16:31,424 - INFO - Discord message not sent: DAR_BACKUP_DISCORD_WEBHOOK_URL not configured.
 2026-05-17 18:16:31,424 - INFO - END TIME: 1779041791
 ```
+
+Notice the `Digest`, it can be found in the [build-history.json](build-history.json) which keeps an audit trail of dar-backup-image builds. This proves you downloaded an image which has not been tampered with.
 
 ---
 
