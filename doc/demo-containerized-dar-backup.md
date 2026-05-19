@@ -66,10 +66,10 @@ Below is a sample backup definition file named `media-demo-backup`, located in `
 
 ---
 
-## Run a Full Backup of ~/data
+## Run a Full Backup of ~/data/2023
 
 ```bash
-DATA_DIR=/home/pj/data/2023              # Source data to backup
+DATA_DIR=/home/pj/data/2023             # Source data to backup
 BACKUP_DIR=/media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo      # USB disk or backup destination
 RESTORE_DIR=/tmp/test-restore            # Directory for restore testing
 BACKUP_D_DIR=/tmp/test-backup.d          # Backup definitions location
@@ -102,6 +102,7 @@ fi
 # the pull happens if :latest is not found locally
 docker run --rm \
   -e RUN_AS_UID=$(id -u) \
+  -e RUN_AS_GID=$(id -g) \
   -v "$DATA_DIR":/data \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
@@ -164,6 +165,7 @@ List all backups in /backups/
 ```bash
 $ docker run --rm  \
   -e RUN_AS_UID=$(id -u)  \
+  -e RUN_AS_GID=$(id -g) \
   -v "$DATA_DIR":/data \
   -v "$BACKUP_DIR":/backups  \
   -v "$RESTORE_DIR":/restore  \
@@ -184,7 +186,9 @@ media-demo-backup_FULL_2026-05-17 : 86924 MB
 List the contents of the archive "media-demo-backup_FULL_2026-05-17"
 
 ```bash
-$ docker run --rm   -e RUN_AS_UID=$(id -u) \
+$ docker run --rm  \
+  -e RUN_AS_UID=$(id -u)  \
+  -e RUN_AS_GID=$(id -g) \
   -v "$DATA_DIR":/data \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
@@ -223,7 +227,8 @@ In this step, we selectively restore only *.NEF files from the `data/2023-12-25-
 ls: cannot access '/tmp/test-restore/data/2023-12-25-Merle-Hundebjerget/': No such file or directory
 
 $ docker run --rm  \
-  -e RUN_AS_UID=$(id -u) \
+  -e RUN_AS_UID=$(id -u)  \
+  -e RUN_AS_GID=$(id -g) \
   -v "$DATA_DIR":/data \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
