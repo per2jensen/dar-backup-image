@@ -19,6 +19,8 @@
 #      | $WORKDIR/data                    | /data            | Source data to back up           |
 #      | $WORKDIR/restore                 | /restore         | Destination for restore verification |
 #
+#    - WORKDIR defaults to the script's directory if unset, this is probably not what you want. 
+#
 #    - Override any of these via:
 #        DAR_BACKUP_DIR, DAR_BACKUP_D_DIR, DAR_BACKUP_DATA_DIR, DAR_BACKUP_RESTORE_DIR
 #    - If unset, defaults to $WORKDIR (or the script’s directory if WORKDIR is unset).
@@ -67,8 +69,8 @@
 #   DAR_BACKUP_D_DIR       Override for $WORKDIR/backup.d
 #   DAR_BACKUP_DATA_DIR    Override for $WORKDIR/data
 #   DAR_BACKUP_RESTORE_DIR Override for $WORKDIR/restore
-#   DOCKER_PULL            default: false. A first run will pull if the image is not present locally.
-#                          Set to true to pull a newer image before running the backup.
+#   DOCKER_PULL            default: `false`. A first run will pull if the image is not present locally.
+#                          Set to `true` to pull a newer image before running the backup.
 #
 # Default directory structure:
 # ----------------------------
@@ -86,7 +88,7 @@
 #   run-backup.sh -t FULL
 #
 #   #Check the command log:
-#   cat /tmp/dar-backup-image-demo/backups/dar-backup-commands.log
+#   cat "$WORKDIR"/backups/dar-backup-commands.log
 #   
 set -euo pipefail
 
@@ -100,13 +102,13 @@ IMAGE="${IMAGE:-per2jensen/dar-backup:latest}"
 
 WORKDIR="${WORKDIR:-}"
 if [[ -z "$WORKDIR" ]]; then
-  WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # default to the script's directory if WORKDIR is not set
 fi
 
 RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
 RUN_AS_GID="${RUN_AS_GID:-$(id -g)}"
 
-if [ "$RUN_AS_UID" -eq 0 ]; then
+if [[ "$RUN_AS_UID" -eq 0 ]]; then
   echo "❌ running as root not allowed, exiting."
   exit 1
 fi
@@ -117,6 +119,13 @@ DAR_BACKUP_DIR="${DAR_BACKUP_DIR:-$BASE_DIR/backups}"
 DAR_BACKUP_D_DIR="${DAR_BACKUP_D_DIR:-$BASE_DIR/backup.d}"
 DAR_BACKUP_DATA_DIR="${DAR_BACKUP_DATA_DIR:-$BASE_DIR/data}"
 DAR_BACKUP_RESTORE_DIR="${DAR_BACKUP_RESTORE_DIR:-$BASE_DIR/restore}"
+
+for d in "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR"; do
+  if [[ "$d" == "/" ]]; then
+    echo "❌ Refusing to use / as a directory"
+    exit 1
+  fi
+done
 
 # === Parse args ===
 BACKUP_TYPE=""
@@ -173,6 +182,7 @@ case "$BACKUP_TYPE_LC" in
 esac
 
 echo "Using image: $IMAGE"
+echo "Image Digest: $(docker inspect per2jensen/dar-backup:latest | jq -r '.[].RepoDigests[] | split("@")[1]')"
 echo "Base directory:                  ${BASE_DIR}/"
 echo "Backup type:                     ${BACKUP_TYPE}"
 echo "DAR backup directory:            $DAR_BACKUP_DIR"
@@ -214,7 +224,6 @@ DOCKER_PULL=${DOCKER_PULL:-false}
 if [[ "$DOCKER_PULL" == "true" ]]; then
   docker pull "$IMAGE"
 fi
-
 
 docker run --rm \
   --user "$RUN_AS_UID:$RUN_AS_GID" \
