@@ -10,6 +10,7 @@
 # Features and behavior:
 # -----------------------
 # 1. Uses the baked-in dar-backup.conf and PyPI .darrc (unless overridden).
+#
 # 2. Mounts host directories for backups, definitions, data, and restore verification
 #
 #      | Host Directory (default)        | Container Mount  | Purpose                           |
@@ -19,11 +20,10 @@
 #      | $WORKDIR/data                    | /data            | Source data to back up           |
 #      | $WORKDIR/restore                 | /restore         | Destination for restore verification |
 #
-#    - WORKDIR defaults to the script's directory if unset, this is probably not what you want. 
+#    - WORKDIR *must* be set, otherwise the script exits with an error.
 #
 #    - Override any of these via:
 #        DAR_BACKUP_DIR, DAR_BACKUP_D_DIR, DAR_BACKUP_DATA_DIR, DAR_BACKUP_RESTORE_DIR
-#    - If unset, defaults to $WORKDIR (or the script’s directory if WORKDIR is unset).
 #
 # 3. UID/GID handling:
 #    - Defaults to your current UID/GID via `id -u` and `id -g`.
@@ -62,7 +62,7 @@
 # Environment variables:
 # -----------------------
 #   IMAGE                  Docker image tag (default: per2jensen/dar-backup:latest)
-#   WORKDIR                Base directory for all backups (defaults to script dir if unset)
+#   WORKDIR                Base directory for all backups
 #   RUN_AS_UID             UID for container (default: current user’s UID)
 #   RUN_AS_GID             GID for container (default: current user’s GID)
 #   DAR_BACKUP_DIR         Override for $WORKDIR/backups
@@ -102,8 +102,10 @@ IMAGE="${IMAGE:-per2jensen/dar-backup:latest}"
 
 WORKDIR="${WORKDIR:-}"
 if [[ -z "$WORKDIR" ]]; then
-  WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # default to the script's directory if WORKDIR is not set
+  echo "❌ WORKDIR is not set, exiting."
+  exit 1
 fi
+
 
 RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
 RUN_AS_GID="${RUN_AS_GID:-$(id -g)}"
@@ -182,7 +184,14 @@ case "$BACKUP_TYPE_LC" in
 esac
 
 echo "Using image: $IMAGE"
-echo "Image Digest: $(docker inspect per2jensen/dar-backup:latest | jq -r '.[].RepoDigests[] | split("@")[1]')"
+IMAGE_INFO=$(docker inspect "$IMAGE")
+REPO_DIGEST=$(echo "$IMAGE_INFO" | jq -r '.[0].RepoDigests[0] // empty | split("@")[1]')
+if [[ -n "$REPO_DIGEST" ]]; then
+  echo "Image Digest: $REPO_DIGEST"
+else
+  IMAGE_ID=$(echo "$IMAGE_INFO" | jq -r '.[0].Id')
+  echo "Image Id:     $IMAGE_ID"
+fi
 echo "Base directory:                  ${BASE_DIR}/"
 echo "Backup type:                     ${BACKUP_TYPE}"
 echo "DAR backup directory:            $DAR_BACKUP_DIR"

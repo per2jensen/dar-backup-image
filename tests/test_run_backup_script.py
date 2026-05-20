@@ -486,3 +486,88 @@ class TestFailurePaths:
         result = subprocess.run([SCRIPT, "-t", "FULL"], env=env_full, capture_output=True)
         assert result.returncode == 1, \
             f"Expected exit code 1 for root UID, got {result.returncode}"
+
+    # --- WORKDIR guard ---
+
+    def test_fail_when_workdir_not_set(self):
+        """
+        An unset WORKDIR must exit non-zero with a message that mentions WORKDIR,
+        so the operator immediately knows what to fix.
+        """
+        env = os.environ.copy()
+        env.pop("WORKDIR", None)
+        env["RUN_AS_UID"] = str(os.getuid())
+        env["RUN_AS_GID"] = str(os.getgid())
+        result = subprocess.run([SCRIPT, "-t", "FULL"], env=env, capture_output=True)
+        assert result.returncode != 0, \
+            "Script must exit non-zero when WORKDIR is not set"
+        msg = result.stdout.decode() + result.stderr.decode()
+        assert "WORKDIR" in msg, \
+            "Error output must mention 'WORKDIR' so the operator knows what to fix"
+
+    def test_exit_code_is_1_for_missing_workdir(self):
+        """WORKDIR not set should exit with code 1, consistent with other guard exits."""
+        env = os.environ.copy()
+        env.pop("WORKDIR", None)
+        env["RUN_AS_UID"] = str(os.getuid())
+        env["RUN_AS_GID"] = str(os.getgid())
+        result = subprocess.run([SCRIPT, "-t", "FULL"], env=env, capture_output=True)
+        assert result.returncode == 1, \
+            f"Expected exit code 1 for missing WORKDIR, got {result.returncode}"
+
+
+# ===========================================================================
+# Section 4 – Image identification output
+# ===========================================================================
+
+class TestImageIdentificationOutput:
+    """
+    The script prints either 'Image Digest:' (for pulled images with a registry
+    digest) or 'Image Id:' (for locally built images without a RepoDigest).
+    Exactly one of the two labels must appear — never both, never neither.
+    """
+
+    def test_output_contains_image_digest_or_image_id(self, workdir_env):
+        """
+        After a successful run the output must contain either
+        'Image Digest:' or 'Image Id:' but not both.
+        """
+        env = build_base_env(workdir_env)
+        result = run_script(env, "-t", "FULL")
+        stdout = result.stdout.decode()
+        has_digest = "Image Digest:" in stdout
+        has_id     = "Image Id:"     in stdout
+        assert has_digest or has_id, \
+            "Output must contain either 'Image Digest:' or 'Image Id:'"
+        assert not (has_digest and has_id), \
+            "Output must not contain both 'Image Digest:' and 'Image Id:' at the same time"
+
+    def test_image_digest_line_contains_sha256(self, workdir_env):
+        """
+        When 'Image Digest:' is printed the value on that line must look like
+        a sha256 hash (64 hex chars), as returned by a registry pull.
+        Skipped automatically when the image has no RepoDigest (locally built).
+        """
+        env = build_base_env(workdir_env)
+        result = run_script(env, "-t", "FULL")
+        stdout = result.stdout.decode()
+        if "Image Digest:" not in stdout:
+            pytest.skip("Image has no RepoDigest (locally built); skipping digest format check")
+        line = next(l for l in stdout.splitlines() if "Image Digest:" in l)
+        assert re.search(r"sha256:[0-9a-f]{64}", line), \
+            f"'Image Digest:' line does not contain a valid sha256 hash: {line!r}"
+
+    def test_image_id_line_contains_sha256(self, workdir_env):
+        """
+        When 'Image Id:' is printed the value on that line must look like
+        a sha256 hash (64 hex chars), as produced by a local build.
+        Skipped automatically when the image was pulled and has a RepoDigest.
+        """
+        env = build_base_env(workdir_env)
+        result = run_script(env, "-t", "FULL")
+        stdout = result.stdout.decode()
+        if "Image Id:" not in stdout:
+            pytest.skip("Image has a RepoDigest (pulled from registry); skipping Id format check")
+        line = next(l for l in stdout.splitlines() if "Image Id:" in l)
+        assert re.search(r"sha256:[0-9a-f]{64}", line), \
+            f"'Image Id:' line does not contain a valid sha256 hash: {line!r}"
