@@ -316,6 +316,9 @@ jobs:
           sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=${FINAL_VERSION};/" README.md
           scripts/git_commit_if_changed.sh README.md "README: patched build table and version# in examples for ${{ env.FINAL_VERSION }}"
 
+          python3 scripts/update_pages.py
+          scripts/git_commit_if_changed.sh docs/index.html "pages: update release table for ${{ env.FINAL_VERSION }}"
+
           # Update cosign badge to reflect successful signing.
           python3 scripts/write_cosign_badge.py
           scripts/git_commit_if_changed.sh doc/cosign_badge.json "cosign badge: signing successful for ${{ env.FINAL_VERSION }}"

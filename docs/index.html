@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dar-backup-image — Containerized DAR Backups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #111820;
+    --surface2: #192233;
+    --border: #1e2d42;
+    --accent: #00c8ff;
+    --accent2: #00ff9d;
+    --accent3: #ff6b35;
+    --text: #c8d8e8;
+    --text-muted: #5a7a9a;
+    --text-bright: #eaf4ff;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,200,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,200,255,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 56px;
+    background: rgba(10,14,20,0.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); text-decoration: none; letter-spacing: 0.05em; }
+  .nav-links { display: flex; gap: 2rem; list-style: none; }
+  .nav-links a { font-size: 0.82rem; color: var(--text-muted); text-decoration: none; letter-spacing: 0.08em; text-transform: uppercase; transition: color 0.2s; }
+  .nav-links a:hover { color: var(--accent); }
+
+  /* HERO */
+  .hero {
+    position: relative; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 6rem 2rem 4rem; overflow: hidden;
+  }
+  .hero-glow {
+    position: absolute; width: 700px; height: 700px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(0,200,255,0.07) 0%, transparent 70%);
+    top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none;
+  }
+  .hero-tag {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid rgba(0,200,255,0.3); padding: 0.35em 1em;
+    border-radius: 2px; margin-bottom: 2rem; display: inline-block;
+    animation: fadeUp 0.6s ease both;
+  }
+  h1 { font-family: var(--mono); font-size: clamp(2.2rem, 5vw, 3.8rem); font-weight: 700; color: var(--text-bright); line-height: 1.1; margin-bottom: 1.5rem; animation: fadeUp 0.6s 0.1s ease both; }
+  h1 span { color: var(--accent); }
+  .hero-sub { max-width: 600px; font-size: 1.1rem; font-weight: 300; color: var(--text-muted); margin-bottom: 3rem; animation: fadeUp 0.6s 0.2s ease both; }
+  .hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; animation: fadeUp 0.6s 0.3s ease both; }
+  .btn { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.8em 2em; border-radius: 2px; text-decoration: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 0.5em; }
+  .btn-primary { background: var(--accent); color: #000; font-weight: 700; }
+  .btn-primary:hover { background: #33d4ff; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,200,255,0.3); }
+  .btn-secondary { border: 1px solid var(--border); color: var(--text); background: transparent; }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .hero-stats { display: flex; gap: 3rem; margin-top: 4rem; animation: fadeUp 0.6s 0.4s ease both; flex-wrap: wrap; justify-content: center; }
+  .stat { text-align: center; }
+  .stat-num { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; color: var(--accent2); }
+  .stat-label { font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* SECTIONS */
+  section { position: relative; z-index: 1; padding: 5rem 2rem; max-width: 1100px; margin: 0 auto; }
+  .section-label { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.75rem; }
+  h2 { font-family: var(--mono); font-size: clamp(1.5rem, 3vw, 2.2rem); color: var(--text-bright); margin-bottom: 1rem; font-weight: 700; }
+  .section-intro { font-size: 1.05rem; color: var(--text-muted); max-width: 640px; margin-bottom: 3rem; }
+  .section-intro a { color: var(--accent); text-decoration: none; }
+
+  /* FEATURES */
+  .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); }
+  .feature-card { background: var(--surface); padding: 2rem; transition: background 0.2s; }
+  .feature-card:hover { background: var(--surface2); }
+  .feature-icon { font-size: 1.5rem; margin-bottom: 1rem; }
+  .feature-title { font-family: var(--mono); font-size: 0.9rem; color: var(--text-bright); margin-bottom: 0.5rem; font-weight: 700; }
+  .feature-desc { font-size: 0.88rem; color: var(--text-muted); line-height: 1.6; }
+
+  /* PIPELINE */
+  .pipeline { display: flex; flex-direction: column; border: 1px solid var(--border); }
+  .pipeline-step { display: flex; align-items: flex-start; gap: 1.5rem; padding: 1.5rem 2rem; border-bottom: 1px solid var(--border); transition: background 0.2s; }
+  .pipeline-step:last-child { border-bottom: none; }
+  .pipeline-step:hover { background: var(--surface2); }
+  .step-num { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); width: 32px; flex-shrink: 0; padding-top: 0.15rem; }
+  .step-title { font-family: var(--mono); font-size: 0.88rem; color: var(--text-bright); margin-bottom: 0.25rem; font-weight: 700; }
+  .step-desc { font-size: 0.85rem; color: var(--text-muted); }
+  .step-badge { margin-left: auto; flex-shrink: 0; font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.25em 0.75em; border-radius: 2px; align-self: center; }
+  .badge-hard   { background: rgba(255,107,53,0.15); color: var(--accent3); border: 1px solid rgba(255,107,53,0.3); }
+  .badge-signed { background: rgba(0,255,157,0.1);   color: var(--accent2); border: 1px solid rgba(0,255,157,0.2); }
+
+  /* CODE */
+  .code-block {
+    background: #080c12; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    padding: 1.5rem 2rem; font-family: var(--mono); font-size: 0.82rem; color: #8ab8e0;
+    overflow-x: auto; line-height: 1.8; margin: 1.5rem 0;
+  }
+  .code-block .comment { color: var(--text-muted); }
+  .code-block .cmd     { color: var(--accent); }
+  .code-block .var     { color: var(--accent2); }
+  .code-block .str     { color: #ffb347; }
+
+  /* VOL TABLE */
+  .vol-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 1.5rem 0; }
+  .vol-table th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent); text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+  .vol-table td { padding: 0.9rem 1rem; border-bottom: 1px solid rgba(30,45,66,0.6); color: var(--text); }
+  .vol-table tr:last-child td { border-bottom: none; }
+  .vol-table tr:hover td { background: var(--surface2); }
+  .vol-table code { font-family: var(--mono); font-size: 0.8rem; color: var(--accent2); background: rgba(0,255,157,0.06); padding: 0.1em 0.4em; }
+
+  /* RELEASES — auto-generated block lives here */
+  .releases { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); }
+  .release-row { background: var(--surface); padding: 1.25rem 2rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; transition: background 0.2s; }
+  .release-row:hover { background: var(--surface2); }
+  .release-tag { font-family: var(--mono); font-size: 0.9rem; font-weight: 700; color: var(--text-bright); min-width: 80px; }
+  .release-meta { font-size: 0.82rem; color: var(--text-muted); flex: 1; display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; }
+  .release-meta .latest { color: var(--accent2); }
+  .release-meta .git-rev { font-family: var(--mono); font-size: 0.75rem; opacity: 0.6; }
+  .release-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+  .release-link { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); text-decoration: none; border: 1px solid rgba(0,200,255,0.25); padding: 0.3em 0.8em; transition: all 0.2s; white-space: nowrap; }
+  .release-link:hover { background: rgba(0,200,255,0.08); }
+  .release-link.rekor { color: var(--accent2); border-color: rgba(0,255,157,0.25); }
+  .release-link.rekor:hover { background: rgba(0,255,157,0.08); }
+  .release-grype { font-family: var(--mono); font-size: 0.7rem; padding: 0.2em 0.6em; border-radius: 2px; white-space: nowrap; }
+  .grype-clean { background: rgba(0,255,157,0.1); color: var(--accent2); border: 1px solid rgba(0,255,157,0.2); }
+  .grype-warn  { background: rgba(255,107,53,0.15); color: var(--accent3); border: 1px solid rgba(255,107,53,0.3); }
+
+  /* LINKS */
+  .links-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-top: 2rem; }
+  .link-card { background: var(--surface); padding: 1.75rem; text-decoration: none; transition: background 0.2s; display: flex; flex-direction: column; gap: 0.5rem; }
+  .link-card:hover { background: var(--surface2); }
+  .link-card-icon { font-size: 1.25rem; }
+  .link-card-title { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); font-weight: 700; }
+  .link-card-desc { font-size: 0.82rem; color: var(--text-muted); }
+
+  footer { border-top: 1px solid var(--border); text-align: center; padding: 3rem 2rem; font-size: 0.8rem; color: var(--text-muted); font-family: var(--mono); position: relative; z-index: 1; }
+  footer a { color: var(--accent); text-decoration: none; }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 0 2rem; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  @media (max-width: 640px) {
+    .nav-links { display: none; }
+    .hero-stats { gap: 2rem; }
+    .pipeline-step { flex-wrap: wrap; }
+    .step-badge { margin-left: 0; }
+    .release-row { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="#" class="nav-logo">dar-backup-image</a>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#quickstart">Quickstart</a></li>
+    <li><a href="#pipeline">Pipeline</a></li>
+    <li><a href="#volumes">Volumes</a></li>
+    <li><a href="#releases">Releases</a></li>
+  </ul>
+</nav>
+
+<div class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-tag">Docker · DAR · GPLv3</div>
+  <h1><span>dar-backup</span>-image</h1>
+  <p class="hero-sub">
+    Containerized DAR backups — automated, cryptographically signed, and restore-verified.
+    Full · Differential · Incremental. No host installation required.
+  </p>
+  <div class="hero-actions">
+    <a href="https://hub.docker.com/r/per2jensen/dar-backup" class="btn btn-primary" target="_blank">↓ Docker Hub</a>
+    <a href="https://github.com/per2jensen/dar-backup-image" class="btn btn-secondary" target="_blank">⌥ GitHub</a>
+    <a href="#quickstart" class="btn btn-secondary">→ Quickstart</a>
+  </div>
+  <div class="hero-stats">
+    <div class="stat"><div class="stat-num">~170MB</div><div class="stat-label">Image size</div></div>
+    <div class="stat"><div class="stat-num">Ubuntu 24.04</div><div class="stat-label">Base image</div></div>
+    <div class="stat"><div class="stat-num">dar 2.7.21</div><div class="stat-label">Bundled dar</div></div>
+    <div class="stat"><div class="stat-num">Cosign</div><div class="stat-label">Keyless signed</div></div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<section id="features">
+  <div class="reveal">
+    <div class="section-label">// what you get</div>
+    <h2>Everything you need. Nothing you don't.</h2>
+    <p class="section-intro">A minimal, production-grade Docker image wrapping DAR and dar-backup for automated, verifiable long-term backups.</p>
+  </div>
+  <div class="features-grid reveal">
+    <div class="feature-card"><div class="feature-icon">🗄️</div><div class="feature-title">Full · Diff · Incr</div><div class="feature-desc">All three backup types supported. Run a complete FULL → DIFF → INCR chain, with one of each type permitted per definition per day.</div></div>
+    <div class="feature-card"><div class="feature-icon">🔐</div><div class="feature-title">Keyless Cosign Signing</div><div class="feature-desc">Every release signed via Sigstore/Rekor using GitHub OIDC — no private key stored anywhere. Fully auditable transparency log.</div></div>
+    <div class="feature-card"><div class="feature-icon">🧬</div><div class="feature-title">SBOM Attestation</div><div class="feature-desc">CycloneDX Software Bill of Materials generated by Syft and attached as a signed in-toto attestation to every release image.</div></div>
+    <div class="feature-card"><div class="feature-icon">🛡️</div><div class="feature-title">Grype Vulnerability Gate</div><div class="feature-desc">Release is hard-blocked on any High or Critical CVE. Applies to both versioned releases and weekly :latest refreshes.</div></div>
+    <div class="feature-card"><div class="feature-icon">♻️</div><div class="feature-title">Weekly Image Refresh</div><div class="feature-desc">:latest is rebuilt every Saturday, picking up Ubuntu base image patches. Tested, scanned, signed, and published automatically.</div></div>
+    <div class="feature-card"><div class="feature-icon">🔧</div><div class="feature-title">dar Compiled from Source</div><div class="feature-desc">Since v0.5.15, dar is compiled from source with full zstd, lz4, Argon2, GPGME, and remote repository support. GPG-verified tarball.</div></div>
+    <div class="feature-card"><div class="feature-icon">🧩</div><div class="feature-title">par2 Included</div><div class="feature-desc">Redundancy files generated automatically for bit-rot protection. Verify and repair archives years later.</div></div>
+    <div class="feature-card"><div class="feature-icon">👤</div><div class="feature-title">Non-root by Design</div><div class="feature-desc">Pass RUN_AS_UID to run as your own user inside the container. Root (UID 0) is blocked by the helper script.</div></div>
+    <div class="feature-card"><div class="feature-icon">⏱️</div><div class="feature-title">CI / Cron / systemd Ready</div><div class="feature-desc">Stateless, mount-based design. Drop into cron, systemd timers, GitHub Actions, or any container orchestrator without setup.</div></div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<section id="quickstart">
+  <div class="reveal">
+    <div class="section-label">// get running fast</div>
+    <h2>Quickstart</h2>
+    <p class="section-intro">Pull the image and run your first backup in under a minute.</p>
+  </div>
+  <div class="code-block reveal">
+<span class="comment"># Pull the latest signed image</span>
+<span class="cmd">docker pull</span> per2jensen/dar-backup:latest
+
+<span class="comment"># Configure your directories</span>
+<span class="var">export</span> DATA_DIR=/home/alice/documents
+<span class="var">export</span> BACKUP_DIR=/mnt/backups
+<span class="var">export</span> RESTORE_DIR=/tmp/restore-test
+<span class="var">export</span> BACKUP_D_DIR=/home/alice/.config/dar-backup/backup.d
+
+<span class="comment"># Run a full backup</span>
+<span class="cmd">docker run</span> --rm \
+  -e <span class="var">RUN_AS_UID</span>=$(id -u) \
+  -v <span class="str">"$DATA_DIR"</span>:/data \
+  -v <span class="str">"$BACKUP_DIR"</span>:/backups \
+  -v <span class="str">"$RESTORE_DIR"</span>:/restore \
+  -v <span class="str">"$BACKUP_D_DIR"</span>:/backup.d \
+  per2jensen/dar-backup:latest \
+  -F --log-stdout
+  </div>
+  <div class="code-block reveal">
+<span class="comment"># Or use run-backup.sh — handles all volume wiring for you</span>
+<span class="var">WORKDIR</span>=<span class="str">$HOME/dar-backup</span> ./run-backup.sh -t FULL
+<span class="var">WORKDIR</span>=<span class="str">$HOME/dar-backup</span> ./run-backup.sh -t DIFF -d projects
+<span class="var">WORKDIR</span>=<span class="str">$HOME/dar-backup</span> ./run-backup.sh -t INCR
+  </div>
+</section>
+
+<hr class="divider">
+
+<section id="volumes">
+  <div class="reveal">
+    <div class="section-label">// mount configuration</div>
+    <h2>Volume Mounts</h2>
+    <p class="section-intro">How you map the source data directory into <code style="font-family:var(--mono);color:var(--accent2);background:rgba(0,255,157,0.06);padding:0.1em 0.4em">/data</code> determines which backup definitions work — paths inside your definitions resolve relative to <code style="font-family:var(--mono);color:var(--accent2);background:rgba(0,255,157,0.06);padding:0.1em 0.4em">/data</code>. The other mounts (<code style="font-family:var(--mono);color:var(--accent2);background:rgba(0,255,157,0.06);padding:0.1em 0.4em">/backups</code>, <code style="font-family:var(--mono);color:var(--accent2);background:rgba(0,255,157,0.06);padding:0.1em 0.4em">/backup.d</code>, <code style="font-family:var(--mono);color:var(--accent2);background:rgba(0,255,157,0.06);padding:0.1em 0.4em">/restore</code>) are independent.</p>
+  </div>
+  <table class="vol-table reveal">
+    <thead><tr><th>Host directory (default)</th><th>Container mount</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>$WORKDIR/data</code></td><td><code>/data</code></td><td>Source data to back up</td></tr>
+      <tr><td><code>$WORKDIR/backups</code></td><td><code>/backups</code></td><td>DAR archives and log files</td></tr>
+      <tr><td><code>$WORKDIR/backup.d</code></td><td><code>/backup.d</code></td><td>Backup definition files</td></tr>
+      <tr><td><code>$WORKDIR/restore</code></td><td><code>/restore</code></td><td>Restore verification target</td></tr>
+    </tbody>
+  </table>
+  <div class="code-block reveal">
+<span class="comment"># Scenario A — full host tree, back up multiple paths in one run</span>
+<span class="cmd">docker run</span> --rm -v <span class="str">/:/data</span> -v <span class="str">"$BACKUP_DIR"</span>:/backups ...
+<span class="comment"># definitions can target: data/home/alice/photos, data/srv/media, …</span>
+
+<span class="comment"># Scenario B — least-privilege, single directory only</span>
+<span class="cmd">docker run</span> --rm -v <span class="str">/home/alice/photos:/data</span> -v <span class="str">"$BACKUP_DIR"</span>:/backups ...
+<span class="comment"># definition:  -R /   -g data</span>
+  </div>
+</section>
+
+<hr class="divider">
+
+<section id="pipeline">
+  <div class="reveal">
+    <div class="section-label">// supply chain security</div>
+    <h2>Release Pipeline</h2>
+    <p class="section-intro">Every image goes through a fully automated 10-step gauntlet before landing on Docker Hub. No manual push. No exceptions.</p>
+  </div>
+  <div class="pipeline reveal">
+    <div class="pipeline-step"><div class="step-num">01</div><div class="step-body"><div class="step-title">Build</div><div class="step-desc">dar-backup:dev built from source with versioned DAR_VERSION and DAR_BACKUP_VERSION pins. dar compiled from GPG-verified tarball.</div></div></div>
+    <div class="pipeline-step"><div class="step-num">02</div><div class="step-body"><div class="step-title">Test Suite</div><div class="step-desc">Full pytest suite runs against the dev image. FULL → DIFF → INCR chain tested with SHA256 validation. Pipeline halts on any failure.</div></div></div>
+    <div class="pipeline-step"><div class="step-num">03</div><div class="step-body"><div class="step-title">Promote</div><div class="step-desc">Tested dev image re-labeled to release tag. No rebuild — promoted image is byte-for-byte identical to the tested one.</div></div></div>
+    <div class="pipeline-step"><div class="step-num">04</div><div class="step-body"><div class="step-title">Verify</div><div class="step-desc">OCI labels and embedded dar-backup --version checked against expected values. Mismatch aborts the release.</div></div></div>
+    <div class="pipeline-step"><div class="step-num">05</div><div class="step-body"><div class="step-title">SBOM Generation</div><div class="step-desc">Syft generates a CycloneDX JSON Software Bill of Materials from the local image before it leaves the runner.</div></div></div>
+    <div class="pipeline-step"><div class="step-num">06</div><div class="step-body"><div class="step-title">Grype Vulnerability Scan</div><div class="step-desc">Grype scans the SBOM. Any High or Critical vulnerability immediately aborts the release. Results uploaded to GitHub Security tab as SARIF.</div></div><div class="step-badge badge-hard">Hard gate</div></div>
+    <div class="pipeline-step"><div class="step-num">07</div><div class="step-body"><div class="step-title">Push to Docker Hub</div><div class="step-desc">Only reached after all gates pass. Publishes both :VERSION and :latest tags.</div></div></div>
+    <div class="pipeline-step"><div class="step-num">08</div><div class="step-body"><div class="step-title">Cosign Keyless Signing</div><div class="step-desc">Image signed by digest using Fulcio certificate bound to GitHub OIDC. No private key stored anywhere.</div></div><div class="step-badge badge-signed">Sigstore</div></div>
+    <div class="pipeline-step"><div class="step-num">09</div><div class="step-body"><div class="step-title">SBOM Attestation</div><div class="step-desc">CycloneDX SBOM attached as a signed in-toto attestation via cosign. Verifiable by anyone without an account.</div></div><div class="step-badge badge-signed">Rekor</div></div>
+    <div class="pipeline-step"><div class="step-num">10</div><div class="step-body"><div class="step-title">Rollback Guard</div><div class="step-desc">If signing or attestation fails after the push, the image tag is automatically removed from Docker Hub.</div></div></div>
+  </div>
+  <div class="code-block reveal" style="margin-top:2rem">
+<span class="comment"># Verify any image yourself — no account required</span>
+<span class="cmd">cosign verify</span> per2jensen/dar-backup:latest \
+  --certificate-identity-regexp=<span class="str">"https://github.com/per2jensen/dar-backup-image"</span> \
+  --certificate-oidc-issuer=<span class="str">"https://token.actions.githubusercontent.com"</span>
+  </div>
+</section>
+
+<hr class="divider">
+
+<section id="releases">
+  <div class="reveal">
+    <div class="section-label">// recent releases</div>
+    <h2>Release History</h2>
+    <p class="section-intro">Last 5 versioned releases. Full audit trail including Grype scan results and Rekor entries in <a href="https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json">build-history.json</a>.</p>
+  </div>
+
+  <!-- @@RELEASES_START@@ -->
+  <!-- auto-generated by scripts/update_pages.py — do not edit manually -->
+  <div class="releases reveal">
+    <div class="release-row">
+      <div class="release-tag">0.5.24</div>
+      <div class="release-meta">
+        <span>dar-backup&nbsp;1.1.5</span>
+        <span>2026-05-17</span>
+        <span class="git-rev">d5bf339</span>
+        <span class="latest">&#9679;&nbsp;Latest</span>
+      </div>
+      <div class="release-actions">
+        <span class="release-grype grype-clean">0 H/C</span>
+        <a href="https://hub.docker.com/layers/per2jensen/dar-backup/0.5.24/images/sha256:0811f5e73bd5c17d204027888548f061049a063702600e55920f5bb7a5419d03" class="release-link" target="_blank">Docker&nbsp;Hub&nbsp;→</a>
+        <a href="https://search.sigstore.dev/?logIndex=1563826228" class="release-link rekor" target="_blank">Rekor&nbsp;→</a>
+      </div>
+    </div>
+    <div class="release-row">
+      <div class="release-tag">0.5.23</div>
+      <div class="release-meta">
+        <span>dar-backup&nbsp;1.1.4</span>
+        <span>2026-05-17</span>
+        <span class="git-rev">22e8bb3</span>
+        
+      </div>
+      <div class="release-actions">
+        <span class="release-grype grype-clean">0 H/C</span>
+        <a href="https://hub.docker.com/layers/per2jensen/dar-backup/0.5.23/images/sha256:68f48e71e32c4233590276fe5cec270aca10f7cd8216f217931103e8447f8713" class="release-link" target="_blank">Docker&nbsp;Hub&nbsp;→</a>
+        <a href="https://search.sigstore.dev/?logIndex=1562307829" class="release-link rekor" target="_blank">Rekor&nbsp;→</a>
+      </div>
+    </div>
+    <div class="release-row">
+      <div class="release-tag">0.5.22</div>
+      <div class="release-meta">
+        <span>dar-backup&nbsp;1.1.3</span>
+        <span>2026-04-10</span>
+        <span class="git-rev">b1bc1c0</span>
+        
+      </div>
+      <div class="release-actions">
+        <span class="release-grype grype-clean">0 H/C</span>
+        <a href="https://hub.docker.com/layers/per2jensen/dar-backup/0.5.22/images/sha256:f7337978a0310b0ddaaeeef1d2d4b56250447e19007231c91e6b1ca78cbf93b4" class="release-link" target="_blank">Docker&nbsp;Hub&nbsp;→</a>
+        <a href="https://search.sigstore.dev/?logIndex=1273042416" class="release-link rekor" target="_blank">Rekor&nbsp;→</a>
+      </div>
+    </div>
+    <div class="release-row">
+      <div class="release-tag">0.5.21</div>
+      <div class="release-meta">
+        <span>dar-backup&nbsp;1.1.3</span>
+        <span>2026-03-24</span>
+        <span class="git-rev">5840b44</span>
+        
+      </div>
+      <div class="release-actions">
+        
+        <a href="https://hub.docker.com/layers/per2jensen/dar-backup/0.5.21/images/sha256:493ae2598edc41aa08c4adeffdb209745a4ad84e2a63fa37156b4e22c1c160f5" class="release-link" target="_blank">Docker&nbsp;Hub&nbsp;→</a>
+        
+      </div>
+    </div>
+    <div class="release-row">
+      <div class="release-tag">0.5.20</div>
+      <div class="release-meta">
+        <span>dar-backup&nbsp;1.1.1</span>
+        <span>2026-02-14</span>
+        <span class="git-rev">a95fc5e</span>
+        
+      </div>
+      <div class="release-actions">
+        
+        <a href="https://hub.docker.com/layers/per2jensen/dar-backup/0.5.20/images/sha256:d18f42b1b7b1655522db7ae29376b5ace26bb0e84272f2d6a3bdf8b209158cc8" class="release-link" target="_blank">Docker&nbsp;Hub&nbsp;→</a>
+        
+      </div>
+    </div>
+  </div>
+  <!-- @@RELEASES_END@@ -->
+
+</section>
+
+<hr class="divider">
+
+<section id="links">
+  <div class="reveal">
+    <div class="section-label">// useful links</div>
+    <h2>Resources</h2>
+  </div>
+  <div class="links-grid reveal">
+    <a href="https://github.com/per2jensen/dar-backup-image" class="link-card" target="_blank"><div class="link-card-icon">⌥</div><div class="link-card-title">GitHub Repository</div><div class="link-card-desc">Source code, Dockerfile, Makefile, and CI workflows</div></a>
+    <a href="https://hub.docker.com/r/per2jensen/dar-backup/tags" class="link-card" target="_blank"><div class="link-card-icon">🐳</div><div class="link-card-title">Docker Hub</div><div class="link-card-desc">All published image tags and digests</div></a>
+    <a href="https://github.com/per2jensen/dar-backup" class="link-card" target="_blank"><div class="link-card-icon">🐍</div><div class="link-card-title">dar-backup (Python)</div><div class="link-card-desc">The Python CLI wrapper bundled inside this image</div></a>
+    <a href="http://dar.linux.free.fr/" class="link-card" target="_blank"><div class="link-card-icon">💾</div><div class="link-card-title">DAR — Disk ARchiver</div><div class="link-card-desc">The underlying archiver compiled from source in every release</div></a>
+    <a href="https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json" class="link-card" target="_blank"><div class="link-card-icon">📋</div><div class="link-card-title">Build History</div><div class="link-card-desc">Full audit trail: digests, Rekor entries, Grype results</div></a>
+    <a href="https://github.com/per2jensen/dar-backup-image/blob/main/doc/demo-containerized-dar-backup.md" class="link-card" target="_blank"><div class="link-card-icon">🎬</div><div class="link-card-title">Hands-on Demo</div><div class="link-card-desc">Step-by-step walkthrough: backup, inspect, restore</div></a>
+  </div>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/per2jensen/dar-backup-image">dar-backup-image</a>
+    is licensed under
+    <a href="https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE">GPL-3.0-or-later</a>.
+    Built by <a href="https://github.com/per2jensen">per2jensen</a>.
+  </p>
+  <p style="margin-top:0.5rem;color:rgba(90,122,154,0.5)">
+    Ubuntu 24.04 base · dar compiled from source · Cosign keyless signing · Weekly refreshes
+  </p>
+</footer>
+
+<script>
+  const observer = new IntersectionObserver(
+    entries => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); }),
+    { threshold: 0.1, rootMargin: '0px 0px -40px 0px' }
+  );
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>
