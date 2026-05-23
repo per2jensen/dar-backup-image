@@ -394,6 +394,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Post summary
         run: |
+          DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
           SARIF="grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif"
 
           source <(python3 scripts/grype_summary_env.py "${SARIF}")
