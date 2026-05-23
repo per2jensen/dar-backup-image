@@ -279,6 +279,7 @@ jobs:
           export PYTHONPATH="${PYTHONPATH}:scripts"
           python3 scripts/update_build_log.py \
           --dar-backup-version "${{ steps.versions.outputs.DAR_BACKUP_VERSION }}" \
+          --dar-version "${{ steps.versions.outputs.DAR_VERSION }}" \
           --log              doc/build-history.json \
           --build-number     "${BUILD_NUMBER}" \
           --version          "${{ env.FINAL_VERSION }}" \

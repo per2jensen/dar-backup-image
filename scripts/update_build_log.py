@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--digest", required=True)
     parser.add_argument("--image-id", required=True)
     parser.add_argument("--dar-backup-version", required=True)
+    parser.add_argument("--dar-version", required=True)
 
     # ── vulnerability scan ────────────────────────────────────────────────────
     parser.add_argument(
@@ -107,6 +108,8 @@ def main() -> None:
 
     # ── core entry ────────────────────────────────────────────────────────────
     entry: Dict[str, Any] = {
+        "dar_backup_version": args.dar_backup_version,
+        "dar_version": args.dar_version,
         "build_number":       args.build_number,
         "tag":                args.version,
         "base_image":         args.base,
@@ -115,8 +118,7 @@ def main() -> None:
         "created":            args.created,
         "dockerhub_tag_url":  args.url,
         "digest":             args.digest,
-        "image_id":           args.image_id,
-        "dar_backup_version": args.dar_backup_version,
+        "image_id":           args.image_id
     }
 
     # ── grype scan ────────────────────────────────────────────────────────────
