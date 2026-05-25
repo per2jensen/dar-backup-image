@@ -21,7 +21,7 @@ jobs:
 
     steps:
       # -----------------------------------------------------------------------
-      # 0. Source and check version number
+      # 0. Source and check version number + set artifact filenames
       # -----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v6
@@ -51,6 +51,13 @@ jobs:
           fi
 
           echo "✅ Version ${FINAL_VERSION} is new — proceeding."
+
+      - name: Set artifact filenames
+        run: |
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          echo "SBOM_FILE=doc/sbom/sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}-${TIMESTAMP}.cyclonedx.json" >> $GITHUB_ENV
+          echo "SARIF_FILE=doc/sarif/grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}-${TIMESTAMP}.sarif"       >> $GITHUB_ENV
+          echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
 
       # -----------------------------------------------------------------------
       # 1. install dependencies 
@@ -128,11 +135,15 @@ jobs:
       # -----------------------------------------------------------------------
       # 6. SBOM (CycloneDX) — generated from the local image before push
       # -----------------------------------------------------------------------
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
       - name: Cache Grype DB
         uses: actions/cache@v5
         with:
           path: ~/.cache/grype/db
-          key: grype-db-${{ runner.os }}-${{ hashFiles('**/Dockerfile') }}
+          key: grype-db-${{ runner.os }}-${{ steps.date.outputs.date }}
           restore-keys: grype-db-${{ runner.os }}-
 
       - name: Generate SBOM with Syft (CycloneDX)
@@ -140,7 +151,7 @@ jobs:
           SYFT_CHECK_FOR_APP_UPDATE=false \
             syft "docker:${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }}" \
               -o cyclonedx-json \
-              > sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json
+              >  ${{ env.SBOM_FILE }}
 
       # -----------------------------------------------------------------------
       # 7. Vulnerability scan (Grype) — gate: fail on High
@@ -149,16 +160,17 @@ jobs:
         run: |
           GRYPE_CHECK_FOR_APP_UPDATE=false \
             grype \
-              "sbom:sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json" \
+              "sbom:${{ env.SBOM_FILE }}"
               --fail-on high \
+              --add-cpes-if-none \
               -o sarif \
-              > grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
+              > ${{ env.SARIF_FILE }}
 
       - name: Upload Grype SARIF to GitHub Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@v4.35.2
         with:
-          sarif_file: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
+          sarif_file: ${{ env.SARIF_FILE }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Grype SARIF as Actions artifact
@@ -166,7 +178,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: grype-report-${{ env.FINAL_VERSION }}
-          path: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
+          path: ${{ env.SARIF_FILE }}
 
       # -----------------------------------------------------------------------
       # 8. Push to Docker Hub
@@ -230,7 +242,7 @@ jobs:
           COSIGN_EXPERIMENTAL: "1"
         run: |
           cosign attest --yes \
-            --predicate sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json \
+            --predicate ${{ env.SBOM_FILE }} \
             --type cyclonedx \
             "${{ steps.image_digest.outputs.digest }}"
 
@@ -257,7 +269,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           python3 scripts/write_cosign_badge.py --failed
-          scripts/git_commit_if_changed.sh doc/cosign_badge.json "cosign badge: signing failed for ${{ env.FINAL_VERSION }}"
+          scripts/git_commit_if_changed.sh  "cosign badge: signing failed for ${{ env.FINAL_VERSION }}"  doc/cosign_badge.json
 
 
       # -----------------------------------------------------------------------
@@ -290,8 +302,8 @@ jobs:
           --url              "https://hub.docker.com/layers/${{ env.DOCKERHUB_REPO }}/${{ env.FINAL_VERSION }}/images/${DIGEST#*@}" \
           --digest           "${DIGEST#*@}" \
           --image-id         "${IMAGE_ID}" \
-          --grype-sarif      "grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif" \
-          --sbom-file        "sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json" \
+          --grype-sarif      "${{ env.SARIF_FILE }}" \
+          --sbom-file        "${{ env.SBOM_FILE }}" \
           --sbom-release-asset-url \
             "https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json" \
           --cosign-signed    "true" \
@@ -301,7 +313,10 @@ jobs:
           --github-run-id    "${{ github.run_id }}" \
           --github-run-url   "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          scripts/git_commit_if_changed.sh doc/build-history.json "build-history: add ${{ env.FINAL_VERSION }} metadata"
+          scripts/git_commit_if_changed.sh "build-history:  ${{ env.FINAL_VERSION }} metadata + sbom & sarif" \
+             doc/build-history.json \
+             ${{ env.SARIF_FILE }} \
+             ${{ env.SBOM_FILE }}
 
           # Update README builds table
           FINAL_VERSION="${{ env.FINAL_VERSION }}" \
@@ -315,18 +330,24 @@ jobs:
 
           echo "🔄 Updating version examples in README.md to VERSION=${FINAL_VERSION}"
           sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=${FINAL_VERSION};/" README.md
-          scripts/git_commit_if_changed.sh README.md "README: patched build table and version# in examples for ${{ env.FINAL_VERSION }}"
+          #  scripts/git_commit_if_changed.sh README.md "README: patched build table and version# in examples for ${{ env.FINAL_VERSION }}"
 
           python3 scripts/update_pages.py
-          scripts/git_commit_if_changed.sh docs/index.html "pages: update release table for ${{ env.FINAL_VERSION }}"
+          # scripts/git_commit_if_changed.sh docs/index.html "pages: update release table for ${{ env.FINAL_VERSION }}"
 
           # Update cosign badge to reflect successful signing.
           python3 scripts/write_cosign_badge.py
-          scripts/git_commit_if_changed.sh doc/cosign_badge.json "cosign badge: signing successful for ${{ env.FINAL_VERSION }}"
+          # scripts/git_commit_if_changed.sh doc/cosign_badge.json "cosign badge: signing successful for ${{ env.FINAL_VERSION }}"
 
           # Add clonepulse annotation: "Rel. <version>"
           python clonepulse/add_release_annotation.py "${{ env.FINAL_VERSION }}"
-          scripts/git_commit_if_changed.sh clonepulse/fetch_clones.json "clonepulse: add release annotation for v${{ env.FINAL_VERSION }}"
+          #   scripts/git_commit_if_changed.sh clonepulse/fetch_clones.json "clonepulse: add release annotation for v${{ env.FINAL_VERSION }}"
+
+          scripts/git_commit_if_changed.sh "housekeeping: README, badge, annotation for ${{ env.FINAL_VERSION }}" \
+             README.md \
+             doc/cosign_badge.json \
+             docs/index.html \
+             clonepulse/fetch_clones.json
 
           git status
           git push origin HEAD
@@ -382,8 +403,8 @@ jobs:
             ## SBOM
             The CycloneDX SBOM is attached to this release as an asset.
           files: |
-            sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json
-            grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif
+            ${{ env.SBOM_FILE }}
+            ${{ env.SARIF_FILE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -393,8 +414,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Post summary
         run: |
-          SARIF="grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.sarif"
-
+          SARIF=${{ env.SARIF_FILE }}
           source <(python3 scripts/grype_summary_env.py "${SARIF}")
 
           echo "## ✅ dar-backup Release v${{ env.FINAL_VERSION }}"          >> $GITHUB_STEP_SUMMARY
@@ -407,7 +427,7 @@ jobs:
           echo "| DAR version        | \`${{ steps.versions.outputs.DAR_VERSION }}\` |"          >> $GITHUB_STEP_SUMMARY
           echo "| Cosign signed      | ✅ keyless (Sigstore / Rekor) |"       >> $GITHUB_STEP_SUMMARY
           echo "| Rekor entry        | ${{ steps.cosign_sign.outputs.rekor_url }} |"              >> $GITHUB_STEP_SUMMARY
-          echo "| SBOM               | [sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json](https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| SBOM               | [${{ env.SBOM_FILE }}](https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/${{ env.SBOM_FILE }}) |" >> $GITHUB_STEP_SUMMARY
           echo ""                                                               >> $GITHUB_STEP_SUMMARY
           echo "### Grype vulnerability scan"                                  >> $GITHUB_STEP_SUMMARY
           echo ""                                                               >> $GITHUB_STEP_SUMMARY

@@ -41,8 +41,7 @@ jobs:
           fail() {
             echo "❌ $1"
             python3 scripts/write_cosign_badge.py --failed
-            scripts/git_commit_if_changed.sh doc/cosign_badge.json \
-              "cosign badge: refresh aborted — $1"
+            scripts/git_commit_if_changed.sh  "cosign badge: refresh aborted — $1" doc/cosign_badge.json
             git push origin HEAD
             exit 1
           }
@@ -82,6 +81,14 @@ jobs:
           echo "✅ Sanity checks passed — rebuilding as ${REBUILD_VERSION}"
           echo "BASE_TAG=${BASE_TAG}"               >> $GITHUB_ENV
           echo "REBUILD_VERSION=${REBUILD_VERSION}" >> $GITHUB_ENV
+
+      - name: Set artifact filenames
+        run: |
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          echo "SBOM_FILE=doc/sbom/sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}-${TIMESTAMP}.cyclonedx.json" >> $GITHUB_ENV
+          echo "SARIF_FILE=doc/sarif/grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}-${TIMESTAMP}.sarif"       >> $GITHUB_ENV
+          echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
+
 
       # -----------------------------------------------------------------------
       # 2. Install dependencies
@@ -172,11 +179,15 @@ jobs:
       # -----------------------------------------------------------------------
       # 8. SBOM (CycloneDX) — generated from the local image before push
       # -----------------------------------------------------------------------
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
       - name: Cache Grype DB
         uses: actions/cache@v5
         with:
           path: ~/.cache/grype/db
-          key: grype-db-${{ runner.os }}-${{ hashFiles('**/Dockerfile') }}
+          key: grype-db-${{ runner.os }}-${{ steps.date.outputs.date }}
           restore-keys: grype-db-${{ runner.os }}-
 
       - name: Generate SBOM with Syft (CycloneDX)
@@ -184,7 +195,7 @@ jobs:
           SYFT_CHECK_FOR_APP_UPDATE=false \
             syft "docker:${{ env.FINAL_IMAGE_NAME }}:${{ env.REBUILD_VERSION }}" \
               -o cyclonedx-json \
-              > sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json
+              > ${{ env.SBOM_FILE }}
 
       # -----------------------------------------------------------------------
       # 9. Vulnerability scan — HARD STOP on High or Critical
@@ -193,16 +204,16 @@ jobs:
         run: |
           GRYPE_CHECK_FOR_APP_UPDATE=false \
             grype \
-              "sbom:sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json" \
+              "sbom:${{ env.SBOM_FILE }}" \
               --fail-on high \
               -o sarif \
-              > grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif
+              > ${{ env.SARIF_FILE }}
 
       - name: Upload Grype SARIF to GitHub Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@v4.35.2
         with:
-          sarif_file: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif
+          sarif_file: ${{ env.SARIF_FILE }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Grype SARIF as Actions artifact
@@ -210,7 +221,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: grype-report-${{ env.REBUILD_VERSION }}
-          path: grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif
+          path: ${{ env.SARIF_FILE }}
 
       # -----------------------------------------------------------------------
       # 10. Push to Docker Hub — both REBUILD_VERSION and :latest
@@ -277,7 +288,7 @@ jobs:
           COSIGN_EXPERIMENTAL: "1"
         run: |
           cosign attest --yes \
-            --predicate sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json \
+            --predicate   ${{ env.SBOM_FILE }} \
             --type cyclonedx \
             "${{ steps.image_digest.outputs.digest }}"
 
@@ -309,8 +320,7 @@ jobs:
           git config --global user.email "actions@github.com"
           git checkout main
           python3 scripts/write_cosign_badge.py --failed
-          scripts/git_commit_if_changed.sh doc/cosign_badge.json \
-            "cosign badge: signing failed for ${{ env.REBUILD_VERSION }}"
+          scripts/git_commit_if_changed.sh "cosign badge: signing failed for ${{ env.REBUILD_VERSION }}" doc/cosign_badge.json
           git push origin HEAD
 
       # -----------------------------------------------------------------------
@@ -345,8 +355,8 @@ jobs:
             --url              "https://hub.docker.com/layers/${{ env.DOCKERHUB_REPO }}/${{ env.REBUILD_VERSION }}/images/${DIGEST#*@}" \
             --digest           "${DIGEST#*@}" \
             --image-id         "${IMAGE_ID}" \
-            --grype-sarif      "grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif" \
-            --sbom-file        "sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.cyclonedx.json" \
+            --grype-sarif      "${{ env.SARIF_FILE }}" \
+            --sbom-file        "${{ env.SBOM_FILE }}" \
             --sbom-release-asset-url "no release asset - scheduled image refresh" \
             --cosign-signed    "true" \
             --cosign-rekor-url "${{ steps.cosign_sign.outputs.rekor_url }}" \
@@ -355,13 +365,15 @@ jobs:
             --github-run-id    "${{ github.run_id }}" \
             --github-run-url   "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          scripts/git_commit_if_changed.sh doc/build-history.json \
-            "build-history: add refresh ${{ env.REBUILD_VERSION }} metadata"
+          scripts/git_commit_if_changed.sh  "build-history: add refresh ${{ env.REBUILD_VERSION }} metadata + sbom & sarif" \
+           doc/build-history.json \
+           ${{env.SARIF_FILE}} \
+           ${{env.SBOM_FILE}}
+            
 
           # Update cosign badge — weekly refresh is the latest golden image.
           python3 scripts/write_cosign_badge.py
-          scripts/git_commit_if_changed.sh doc/cosign_badge.json \
-            "cosign badge: signing successful for ${{ env.REBUILD_VERSION }}"
+          scripts/git_commit_if_changed.sh  "cosign badge: signing successful for ${{ env.REBUILD_VERSION }}" doc/cosign_badge.json 
 
           git status
           git push origin HEAD
@@ -385,8 +397,7 @@ jobs:
           git config --global user.email "actions@github.com"
           git checkout main
           python3 scripts/write_cosign_badge.py --failed
-          scripts/git_commit_if_changed.sh doc/cosign_badge.json \
-            "cosign badge: refresh failed for ${{ env.REBUILD_VERSION }}"
+          scripts/git_commit_if_changed.sh "cosign badge: refresh failed for ${{ env.REBUILD_VERSION }}" doc/cosign_badge.json
           git push origin HEAD
 
 
@@ -396,7 +407,7 @@ jobs:
       - name: Post summary
         run: |
           DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
-          SARIF="grype-${{ env.FINAL_IMAGE_NAME }}-${{ env.REBUILD_VERSION }}.sarif"
+          SARIF="${{ env.SARIF_FILE }}"
 
           source <(python3 scripts/grype_summary_env.py "${SARIF}")
 
