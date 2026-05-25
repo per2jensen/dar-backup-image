@@ -1,5 +1,24 @@
 # dar-backup-image Changelog
 
+## 0.5.25 - not released
+
+### Added
+
+- documented how to mount directories into a container
+- test cases for the run_backup.sh script
+  
+### Changed
+
+- run-backup.sh demo script improvements. Now in a solid state
+- build_history.json now records versions of `dar-backup` and `dar`
+  - release and refresh workflows now commit sbom and sarif files in repo
+
+## 0.5.24 - 2026-05-17 (busy bee at work)
+
+### Changed
+
+- dar-backup version now 1.1.5
+
 ## v0.5.23 - 2026-05-17
 
 ### Added
