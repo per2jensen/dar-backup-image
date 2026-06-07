@@ -160,7 +160,7 @@ jobs:
         run: |
           GRYPE_CHECK_FOR_APP_UPDATE=false \
             grype \
-              "sbom:${{ env.SBOM_FILE }}"
+              "sbom:${{ env.SBOM_FILE }}" \
               --fail-on high \
               --add-cpes-if-none \
               -o sarif \
