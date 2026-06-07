@@ -2,7 +2,7 @@
 #
 # dar-backup image with modern DAR (2.7.18) built from source.
 # Based on Ubuntu 24.04 (slim, multi-stage).
-ARG UBUNTU_DIGEST=invalid # Must be overridden at build time with a valid digest for ubuntu:24.04
+ARG UBUNTU_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 
 # === Builder Stage ===
@@ -101,12 +101,13 @@ RUN set -e; \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # === Final Runtime Stage ===
-ARG UBUNTU_DIGEST=invalid  # Must be overridden at build time with a valid digest for ubuntu:24.04
+ARG UBUNTU_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
 FROM ubuntu:24.04@${UBUNTU_DIGEST}
 ARG DAR_VERSION
 ARG DAR_BACKUP_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive PATH="/opt/venv/bin:$PATH" \
+    LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
     DAR_BACKUP_CONFIG=/etc/dar-backup/dar-backup.conf \
     DAR_BACKUP_DIR=/backups DAR_BACKUP_D_DIR=/backup.d \
     DAR_BACKUP_RESTORE_DIR=/restore DAR_BACKUP_DATA_DIR=/data
@@ -132,7 +133,9 @@ RUN set -e; \
        python3-minimal python3-venv gettext-base par2 util-linux ca-certificates tzdata libc-bin \
        zlib1g libbz2-1.0 liblz4-1 liblzma5 libzstd1 liblzo2-2 libargon2-1 \
        libgcrypt20 libgpgme11 libkrb5-3 librsync2 libext2fs2 \
-       libcurl3-gnutls \
+       libcurl3-gnutls locales \
+  && locale-gen en_US.UTF-8 da_DK.UTF-8 fr_FR.UTF-8 es_ES.UTF-8 de_DE.UTF-8 \
+  && update-locale LANG=en_US.UTF-8 \
   && ldconfig \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
   && rm -rf /usr/share/doc /usr/share/man /usr/share/locale

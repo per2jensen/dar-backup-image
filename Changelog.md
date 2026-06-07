@@ -1,9 +1,14 @@
 # dar-backup-image Changelog
 
-## 0.5.25 - not released
+## 0.5.26 - 2026-06-07
+
+### BUGFIX
+
+- Use `dar-backup` version v2-1.1.7 (with an important par2 OOM bugfix)
 
 ### Added
 
+- Baked in en_US.UTF-8 locale + danish, german, french and spanish
 - documented how to mount directories into a container
 - test cases for the run_backup.sh script
   
