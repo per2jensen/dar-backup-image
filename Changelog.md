@@ -1,6 +1,12 @@
 # dar-backup-image Changelog
 
-## 0.5.26 - 2026-06-07
+## 0.5.25.1 - 2026-06-10
+
+### Vuln fix
+
+- Rebuild image to include openssl fix
+
+## 0.5.25 - 2026-06-07
 
 ### BUGFIX
 
