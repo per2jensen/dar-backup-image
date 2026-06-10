@@ -792,5 +792,47 @@
       "github_run_id": "27086049297",
       "github_run_url": "https://github.com/per2jensen/dar-backup-image/actions/runs/27086049297"
     }
+  },
+  {
+    "dar_backup_version": "1.1.7",
+    "dar_version": "2.7.21",
+    "build_number": 33,
+    "tag": "0.5.25.1",
+    "base_image": "ubuntu:24.04",
+    "base_image_digest": "sha256:786a8b558f7be160c6c8c4a54f9a57274f3b4fb1491cf65146521ae77ff1dc54",
+    "git_revision": "46b3fe8",
+    "created": "2026-06-10T08:26:55Z",
+    "dockerhub_tag_url": "https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25.1/images/sha256:092f1895dd31f99b4c240744ad2ffe800b233af509919dd94574325ee2f2038a",
+    "digest": "sha256:092f1895dd31f99b4c240744ad2ffe800b233af509919dd94574325ee2f2038a",
+    "image_id": "sha256:c0675edcef9dfea38850e5af41b8d08aadca1ca5855b74fec0ba8dcbd6e09d61",
+    "grype_scan": {
+      "file": "grype-dar-backup-0.5.25.1-2026-06-10T08-19-25Z.sarif",
+      "total": 215,
+      "counts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "negligible": 0,
+        "warning": 180,
+        "note": 35,
+        "info": 0,
+        "unknown": 0
+      }
+    },
+    "sbom": {
+      "file": "doc/sbom/sbom-dar-backup-0.5.25.1-2026-06-10T08-19-25Z.cyclonedx.json",
+      "release_asset_url": "https://github.com/per2jensen/dar-backup-image/releases/download/v0.5.25.1/sbom-dar-backup-0.5.25.1.cyclonedx.json"
+    },
+    "cosign": {
+      "signed": true,
+      "rekor_log_entry": "https://search.sigstore.dev/?logIndex=1777020640",
+      "image_digest": "per2jensen/dar-backup@sha256:092f1895dd31f99b4c240744ad2ffe800b233af509919dd94574325ee2f2038a"
+    },
+    "build": {
+      "runner": "Linux-X64",
+      "github_run_id": "27263026610",
+      "github_run_url": "https://github.com/per2jensen/dar-backup-image/actions/runs/27263026610"
+    }
   }
 ]
