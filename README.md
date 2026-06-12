@@ -153,11 +153,11 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 
 |Tag|`dar-backup`|`dar`|Git Revision|Docker Hub|Note|
 |---|------------|-----|------------|----------|----|
+| 0.5.26| 1.1.8| 2.7.21| eef5f2d|[tag:0.5.26](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.26/images/sha256:eabf8f0f2bc805655b9258617eb2b76fe68b1160ac8ff8975c412b24b36575d9)|  - |
 | 0.5.25.1| 1.1.7| 2.7.21| 067b651|[tag:0.5.25.1](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25.1/images/sha256:092f1895dd31f99b4c240744ad2ffe800b233af509919dd94574325ee2f2038a)|  - |
 | 0.5.25| 1.1.7| 2.7.21| ef548a3|[tag:0.5.25](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25/images/sha256:031818b681e7a583389e1a72d7c9fb114d7beb855f9cf42f396862debfc2af5c)|  - |
 | 0.5.24| 1.1.5| 2.7.21| da2c9e2|[tag:0.5.24](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.24/images/sha256:0811f5e73bd5c17d204027888548f061049a063702600e55920f5bb7a5419d03)|  - |
 | 0.5.23| 1.1.4| 2.7.21| e67c5b7|[tag:0.5.23](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.23/images/sha256:68f48e71e32c4233590276fe5cec270aca10f7cd8216f217931103e8447f8713)|  - |
-| 0.5.22| 1.1.3| 2.7.21.RC1| b1bc1c0|[tag:0.5.22](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.22/images/sha256:f7337978a0310b0ddaaeeef1d2d4b56250447e19007231c91e6b1ca78cbf93b4)|  - |
 
 ---
 
