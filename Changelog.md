@@ -1,5 +1,11 @@
 # dar-backup-image Changelog
 
+## 0.5.26 - 2026-06-12
+
+### Changed
+
+- dar-backup version 1.1.8
+
 ## 0.5.25.1 - 2026-06-10
 
 ### Vuln fix
