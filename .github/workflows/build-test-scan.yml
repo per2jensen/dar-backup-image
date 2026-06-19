@@ -30,7 +30,7 @@ jobs:
     outputs:
       image_ref: ${{ steps.meta.outputs.image_ref }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
@@ -58,7 +58,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Prepare summary directory
         run: mkdir -p "ci-summary"
 
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Prepare summary directory
         run: mkdir -p ci-summary
@@ -238,7 +238,7 @@ jobs:
     steps:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Prepare summary directory
         run: mkdir -p ci-summary
@@ -389,7 +389,7 @@ jobs:
     needs: [test, backup-restore-compare, sbom_vuln_scan]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

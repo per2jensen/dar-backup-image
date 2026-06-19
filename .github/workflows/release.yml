@@ -24,7 +24,7 @@ jobs:
       # 0. Source and check version number + set artifact filenames
       # -----------------------------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history needed for git rev-parse, tags, and git push.
           fetch-depth: 0
