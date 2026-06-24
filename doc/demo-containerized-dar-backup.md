@@ -43,9 +43,9 @@ Below is a sample backup definition file named `media-demo-backup`, located in `
 # Directories to include (relative to root)
  -g data
 
-# Directories to exclude
- -P some/directory
- -P data/temp-files
+# Files & directories to exclude
+ -P data/some/file
+ -P data/some/directory
 
 # Compression level
  -z5
@@ -66,6 +66,27 @@ Below is a sample backup definition file named `media-demo-backup`, located in `
 
 ---
 
+## Directory mapping inside container
+
+In order to avoid confusion about what is backed up, it is important take a look at how various directories are mounted inside the container.
+
+These directories are host-mounted into the container so that all backup archives, definitions, and restored files remain accessible outside Docker.
+
+These directories are used:
+
+| ENV VAR | Value | Container mapping | Note |
+| --------|-------|-------------------|------|
+| DATA_DIR | /home/pj/data/2023 | /data | Source data to backup |
+| BACKUP_DIR | /media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo | /backups | USB disk or backup destination |
+| RESTORE_DIR | /tmp/test-restore | /restore | Directory for restore testing |
+| BACKUP_D_DIR | /tmp/test-backup.d | /backup.d | Backup definitions |
+
+In the examples below `/home/pj/data/2023` is mapped onto /data inside the container.
+
+That means the backup definition which uses "-R /" and "-g data" effectively takes a backup of `/home/pj/data/2023/*`
+
+---
+
 ## Run a Full Backup of ~/data/2023
 
 ```bash
@@ -83,8 +104,8 @@ cat >  "$BACKUP_D_DIR/media-demo-backup"  << 'EOF'
 -am
 -R /
 -g data
--P some/directory
--P data/temp-files
+-P data/some/file
+-P data/some/dir
 -z5
 -n
 --slice 12G
