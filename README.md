@@ -55,6 +55,7 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 - [dar-backup image for container backups and more](#dar-backup-image-for-container-backups-and-more)
   - [dar-backup-image](#dar-backup-image)
   - [Table of Contents](#table-of-contents)
+  - [Hands-on Demo: `dar-backup` in a Container](#hands-on-demo-dar-backup-in-a-container)
   - [`dar` versions](#dar-versions)
   - [Recent releases uploaded to Docker Hub](#recent-releases-uploaded-to-docker-hub)
   - [Release Pipeline and Supply Chain Security](#release-pipeline-and-supply-chain-security)
@@ -63,7 +64,6 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [Verifying an image yourself](#verifying-an-image-yourself)
     - [Verifying the SBOM attestation](#verifying-the-sbom-attestation)
     - [Inspecting the Rekor transparency log entry](#inspecting-the-rekor-transparency-log-entry)
-  - [Hands-on Demo: `dar-backup` in a Container](#hands-on-demo-dar-backup-in-a-container)
   - [Understanding Volume Mounts and Backup Definitions](#understanding-volume-mounts-and-backup-definitions)
   - [Useful links](#useful-links)
   - [License](#license)
@@ -116,6 +116,21 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
     - [Recommended Workflow](#recommended-workflow)
   - [TODO](#todo)
   - [Software this project benefits from](#software-this-project-benefits-from)
+
+---
+
+## Hands-on Demo: `dar-backup` in a Container
+
+Curious how it all works in practice?
+
+Check out the [step-by-step demo](https://github.com/per2jensen/dar-backup-image/blob/main/doc/demo-containerized-dar-backup.md), which walks through:
+
+- A full backup from mounted directories
+- Archive listing and contents inspection
+- Selective file restore (e.g., `.JPG` only)
+- Output logs, par2 generation, and verification
+
+All performed using `docker run` — no host installation required.
 
 ---
 
@@ -221,21 +236,6 @@ https://search.sigstore.dev/?logIndex=1273042416
 ```
 
 The entry records the signing certificate, the image digest that was signed, the GitHub workflow identity, the run URL, and the exact commit SHA — providing a complete, tamper-evident audit trail from source code to published image.
-
----
-
-## Hands-on Demo: `dar-backup` in a Container
-
-Curious how it all works in practice?
-
-Check out the [step-by-step demo](https://github.com/per2jensen/dar-backup-image/blob/main/doc/demo-containerized-dar-backup.md), which walks through:
-
-- A full backup from mounted directories
-- Archive listing and contents inspection
-- Selective file restore (e.g., `.JPG` only)
-- Output logs, par2 generation, and verification
-
-All performed using `docker run` — no host installation required.
 
 ---
 
