@@ -2,6 +2,8 @@
 
 This demo illustrates how to use [`dar-backup`](https://github.com/per2jensen/dar-backup) to perform reliable, verifiable, and selective file backups — entirely from within a container.
 
+It is also demonstrated how to verify if the image was built & released from my Github workflow.
+
 Using Docker, you can mount your data, backup, and restore directories and let `dar-backup` handle slicing, verification, cataloging, and parity (par2) redundancy generation for integrity assurance.
 
 Key features demonstrated:
@@ -74,16 +76,14 @@ These directories are host-mounted into the container so that all backup archive
 
 These directories are used:
 
-| ENV VAR | Value | Container mapping | Note |
+| ENV VAR | Host path | Container path | Note |
 | --------|-------|-------------------|------|
-| DATA_DIR | /home/pj/data/2023 | /data | Source data to backup |
-| BACKUP_DIR | /media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo | /backups | USB disk or backup destination |
-| RESTORE_DIR | /tmp/test-restore | /restore | Directory for restore testing |
-| BACKUP_D_DIR | /tmp/test-backup.d | /backup.d | Backup definitions |
+| DATA_DIR | /home/pj/data/2023 | /data | "-R / -g data"  in backup definition |
+| BACKUP_DIR | /media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo | /backups | BACKUP_DIR in dar-backup config |
+| RESTORE_DIR | /tmp/test-restore | /restore | TEST_RESTORE_DIR in dar-backup config |
+| BACKUP_D_DIR | /tmp/test-backup.d | /backup.d | BACKUP.D_DIR in dar-backup config |
 
-In the examples below `/home/pj/data/2023` is mapped onto /data inside the container.
-
-That means the backup definition which uses "-R /" and "-g data" effectively takes a backup of `/home/pj/data/2023/*`
+Why "-R /" and "-g data" ? The container's root is /, and /data is where the host directory is mounted. So -g data selects exactly /home/pj/data/2023 on the host — nothing above it is included.
 
 ---
 
@@ -105,7 +105,7 @@ cat >  "$BACKUP_D_DIR/media-demo-backup"  << 'EOF'
 -R /
 -g data
 -P data/some/file
--P data/some/dir
+-P data/some/directory
 -z5
 -n
 --slice 12G
@@ -175,7 +175,64 @@ Status: Downloaded newer image for per2jensen/dar-backup:latest
 2026-05-17 18:16:31,424 - INFO - END TIME: 1779041791
 ```
 
+### Notes
+
+#### Execution time
+
+- ~23 minutes for backup, test of backup integrity and some restore tests
+- ~36 minutes for par2 redundancy files to be created - the par2 step takes a fair amount of time
+
+#### Verify image digest
+
 Notice the `Digest`, it can be found in the [build-history.json](build-history.json) which keeps an audit trail of dar-backup-image builds. This proves you downloaded an image which has not been tampered with.
+
+Every image has a set of labels baked in, verify the image digest this way, example using `:latest`:
+
+```bash
+# Pull the image
+docker pull per2jensen/dar-backup:latest
+
+IMG_NO=$(docker inspect per2jensen/dar-backup:latest | jq -r '.[0].Config.Labels["org.opencontainers.image.version"]')
+
+# output: 0.5.26-2  (will differ for newer images)
+echo $IMG_NO 
+0.5.26-2 
+
+# Check the digest Docker reports
+docker inspect per2jensen/dar-backup:latest \
+  | jq -r '.[0].RepoDigests[0]' \
+  | cut -d'@' -f2
+
+# Compare against the recorded digest in build-history.json
+curl -s https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/build-history.json \
+  | jq -r --arg tag "$IMG_NO" '.[] | select(.tag == $tag) | .digest'
+```
+
+If the digest that Docker reports matches the digest from the build_history.json file, the image built & released on Github matches the one you are running.
+
+Here is a verication run of `:latest`, which at the time of writing is `0.5.26-2`.
+
+```bash
+docker pull per2jensen/dar-backup:latest > /dev/null 2>&1
+
+IMG_NO=$(docker inspect per2jensen/dar-backup:latest | jq -r '.[0].Config.Labels["org.opencontainers.image.version"]')
+
+echo $IMG_NO 
+0.5.26-2
+
+docker inspect per2jensen/dar-backup:latest \
+  | jq -r '.[0].RepoDigests[0]' \
+  | cut -d'@' -f2
+sha256:2660f696228895316c1a57fb3b92f369f85a651d50c25ac1e4981f604c8f09aa
+
+
+# Compare against the recorded digest in build-history.json
+curl -s https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/build-history.json \
+  | jq -r --arg tag "$IMG_NO" '.[] | select(.tag == $tag) | .digest'
+sha256:2660f696228895316c1a57fb3b92f369f85a651d50c25ac1e4981f604c8f09aa
+```
+
+the digests matches, all good :-)
 
 ---
 
@@ -254,7 +311,7 @@ $ docker run --rm  \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
-  "$IMAGE" -r  media-demo-backup_FULL_2026-05-17 \
+  "$IMAGE" --restore  media-demo-backup_FULL_2026-05-17 \
   --selection=" -I '*.NEF' -g data/2023-12-25-Merle-Hundebjerget"
 
 $ ls $RESTORE_DIR/data/2023-12-25-Merle-Hundebjerget/ 
