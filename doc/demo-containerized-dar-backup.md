@@ -184,7 +184,7 @@ Status: Downloaded newer image for per2jensen/dar-backup:latest
 
 #### Verify image digest
 
-Notice the `Digest`, it can be found in the [build-history.json](build-history.json) which keeps an audit trail of dar-backup-image builds. This proves you downloaded an image which has not been tampered with.
+Notice the `Digest`, it can be found in the [build-history.json](build-history.json) which keeps an audit trail of dar-backup-image builds. This indicates with good probability you downloaded an image which has not been tampered with. It is not a guarantee as my Github project could have been tampered with.
 
 Every image has a set of labels baked in, verify the image digest this way, example using `:latest`:
 
@@ -233,6 +233,12 @@ sha256:2660f696228895316c1a57fb3b92f369f85a651d50c25ac1e4981f604c8f09aa
 ```
 
 the digests matches, all good :-)
+
+#### Verify the image using Cosign
+
+The images are cosigned. The signed images can be verified as being built on my Release pipeline on Github.
+
+Read more about cosigning and how to do the verification in the [main README](https://github.com/per2jensen/dar-backup-image#what-cosign-keyless-signing-provides).
 
 ---
 
