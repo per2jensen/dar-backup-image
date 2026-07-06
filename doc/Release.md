@@ -20,11 +20,9 @@ DAR_BACKUP_IMAGE_VERSION=$(cat IMAGE_VERSION)
 make dev-nuke
 
 # Build and test
-make FINAL_VERSION=${DAR_BACKUP_IMAGE_VERSION} dev
-make FINAL_VERSION=${DAR_BACKUP_IMAGE_VERSION} test
+make  dev
+make  test
 
-# Optional: inspect labels
-make FINAL_VERSION=${DAR_BACKUP_IMAGE_VERSION} show-labels
 ```
 
 ### Release
