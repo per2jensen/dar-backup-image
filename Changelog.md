@@ -1,5 +1,11 @@
 # dar-backup-image Changelog
 
+## 0.5.27 - 2026-07-06
+
+### Changed
+
+- dar-backup version 1.1.9
+
 ## 0.5.26 - 2026-06-12
 
 ### Changed
