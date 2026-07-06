@@ -381,6 +381,7 @@ jobs:
             Based on:
 
             - dar-backup version ${{ steps.versions.outputs.DAR_BACKUP_VERSION }}
+            - dar version ${{ steps.versions.outputs.DAR_VERSION }}
             - Ubuntu ${{ env.UBUNTU_VERSION }} base image
             - [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile)
 
