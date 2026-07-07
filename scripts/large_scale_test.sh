@@ -26,7 +26,7 @@ DO_BITROT=0                                         # --bitrot: when 1, runs do_
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="9"                                  # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="10"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -225,6 +225,7 @@ SUMMARY="${RESULTS_DIR}/summary-${DATESTAMP}.txt"   # Full tee'd transcript of t
 CONFIG_FILE="${RUN_DIR}/dar-backup.conf"            # Generated dar-backup.conf for this run — gone after the run unless --keep
 DARRC="${RUN_DIR}/.darrc"                           # Copied/generated .darrc for this run — gone after the run unless --keep
 RSS_LOGFILE="${RUN_DIR}/rss.log"                    # Raw per-process RSS samples written by start_rss_monitor — gone after the run unless --keep
+CID_FILE="${RUN_DIR}/current-container.cid"         # Written by docker_run_backup/docker_run_tool for each invocation; scopes start_rss_monitor to this run's own container instead of a host-wide process scan
 DIFF_PRIMER_DIR="${BASE_DIR}/diff-primer"           # NOT under RUN_DIR — reused/reset by create_diff_primer() at the start of every run
 
 mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$BACKUP_D_DIR" "$RESULTS_DIR" "$DIFF_PRIMER_DIR"
@@ -241,7 +242,7 @@ RUN_VARIABLES=(
     DAR_BACKUP_VERSION GIT_COMMIT REPO_DIR DAR_VERSION PAR2_VERSION
     PYTHON_VERSION OS_DESC KERNEL
     RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR BACKUP_D_DIR
-    RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE
+    RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE CID_FILE
     DIFF_PRIMER_DIR
 )
 
@@ -260,13 +261,24 @@ print_run_variables() {
 # bind mount on top of it; since both are identity mounts (same path on host
 # and in-container), CONFIG_FILE's paths and the definition's -R (validated to
 # equal MOUNT_ROOT above) need no translation.
+# Both helpers below write their container's ID to CID_FILE via --cidfile so
+# start_rss_monitor() can scope its sampling to *this run's own* container
+# (via `docker top`) instead of a host-wide `ps` scan by command name — this
+# machine also runs the user's own scheduled dar-backup jobs, and a
+# system-wide scan can't tell "this test's dar" from "an unrelated concurrent
+# dar-backup cron run" apart.
 docker_run_backup() {
+    rm -f "$CID_FILE"
     docker run --rm \
+        --cidfile "$CID_FILE" \
         -e RUN_AS_UID="$(id -u)" \
         -e RUN_AS_GID="$(id -g)" \
         -v "${MOUNT_ROOT}":"${MOUNT_ROOT}":ro \
         -v "${BASE_DIR}":"${BASE_DIR}" \
         "$IMAGE" "$@"
+    local rc=$?
+    rm -f "$CID_FILE"
+    return $rc
 }
 
 # docker_run_tool: runs a single binary (manager/dar/par2) directly inside the
@@ -274,12 +286,17 @@ docker_run_backup() {
 # uses for these tools. Only needs BASE_DIR; none of these operate on MOUNT_ROOT.
 docker_run_tool() {
     local tool_entrypoint="$1"; shift
+    rm -f "$CID_FILE"
     docker run --rm \
+        --cidfile "$CID_FILE" \
         --user "$(id -u):$(id -g)" \
         -e HOME=/tmp \
         --entrypoint "$tool_entrypoint" \
         -v "${BASE_DIR}":"${BASE_DIR}" \
         "$IMAGE" "$@"
+    local rc=$?
+    rm -f "$CID_FILE"
+    return $rc
 }
 
 # Tee all output to the summary file from this point forward so every run
@@ -297,19 +314,29 @@ stop_rss_monitor() {
     fi
 }
 start_rss_monitor() {
-    # System-wide scan by command name rather than walking the process tree a fixed
-    # two levels deep — simpler, and not blind to a descendant one level deeper than
-    # that (e.g. if dar or par2 ever forks an extra level). On a dedicated test run
-    # there's no realistic risk of an unrelated same-named process polluting the sample.
+    # Scoped to *this run's own* container (via `docker top` against whatever
+    # container ID docker_run_backup/docker_run_tool currently holds in
+    # CID_FILE), not a host-wide `ps` scan by command name. This machine also
+    # runs the user's own scheduled dar-backup jobs — a system-wide scan can't
+    # tell "this test's dar" apart from a concurrent unrelated dar-backup cron
+    # run, and a real one was misattributed to this test's peak RSS on
+    # 2026-07-07 before this fix. `docker top` needs a plain header row (`ps`'s
+    # header-suppressing "=" suffix breaks its own PID-column detection), so
+    # the header line is skipped with `tail -n +2` instead.
     (
         while true; do
-            while read -r pid cmd rss vsz; do
-                [[ -z "$pid" ]] && continue
-                if [[ "$cmd" =~ ^(dar|dar-backup|par2|manager)$ ]]; then
-                    [[ "$rss" -gt 0 ]] && printf '%s pid=%-6s rss=%-8s kB peak=%-8s kB cmd=%s\n' \
-                        "$(date '+%H:%M:%S')" "$pid" "$rss" "$vsz" "$cmd"
+            if [[ -s "$CID_FILE" ]]; then
+                cid=$(cat "$CID_FILE" 2>/dev/null)
+                if [[ -n "$cid" ]]; then
+                    while read -r pid cmd rss vsz; do
+                        [[ -z "$pid" ]] && continue
+                        if [[ "$cmd" =~ ^(dar|dar-backup|par2|manager)$ ]]; then
+                            [[ "$rss" -gt 0 ]] && printf '%s pid=%-6s rss=%-8s kB peak=%-8s kB cmd=%s\n' \
+                                "$(date '+%H:%M:%S')" "$pid" "$rss" "$vsz" "$cmd"
+                        fi
+                    done < <(docker top "$cid" -eo pid,comm,rss,vsz 2>/dev/null | tail -n +2)
                 fi
-            done < <(ps -eo pid=,comm=,rss=,vsize= 2>/dev/null)
+            fi
             sleep 0.5
         done
     ) >> "${RSS_LOGFILE:-/dev/null}" 2>/dev/null &
