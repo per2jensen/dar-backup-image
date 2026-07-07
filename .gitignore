@@ -32,6 +32,9 @@ Thumbs.db
 !src/dar/dar-*.tar.gz
 !src/dar/dar-*.tar.gz.sig
 
+# LLM
+.claude
+
 # Docker stuff
 Dockerfile-*~
 docker-compose.yml~
