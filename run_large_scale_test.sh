@@ -7,17 +7,17 @@
 # it. All file operations happen under BASE_DIR (which must live at least two
 # directories deep, see scripts/large_scale_test.sh for why).
 #
-# SOURCE_GLOB picks how much real photo data to back up (relative to -R /,
+# SOURCE_GLOB picks how much real photo data to back up (relative to -R /data,
 # i.e. under /data/billeder). Defaults to a small subdirectory for quick runs;
 # override for a full-size soak test, e.g.:
-#   SOURCE_GLOB=data/billeder/2013 ./run_large_scale_test.sh
+#   SOURCE_GLOB=billeder/2013 ./run_large_scale_test.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="/data/tmp/image-large-scale-test"
 IMAGE="dar-backup:dev"
-SOURCE_GLOB="${SOURCE_GLOB:-data/billeder/2013}"
+SOURCE_GLOB="${SOURCE_GLOB:-billeder/2013/2013-06}"
 
 echo "Building ${IMAGE}..."
 make -C "${SCRIPT_DIR}" dev
@@ -29,7 +29,7 @@ make -C "${SCRIPT_DIR}" dev
     --bitrot \
     "$@" \
     --definition "$(cat << EOF
--R /
+-R /data
 -s 10G
 -z6
 -am

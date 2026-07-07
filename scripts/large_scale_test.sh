@@ -16,7 +16,7 @@ DATESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')             # Run identifier: used in RUN
 DATE_OF_RUN=$(date '+%Y-%m-%d')                    # Calendar date only (pinned once at startup); matches the date dar-backup encodes in archive filenames
 BASE_DIR="/data/tmp/image-large-scale-test"         # --base: root directory for runs/, results/, and the diff-primer directory. Must be at least two directories deep and have MIN_FREE_MULTIPLIER x source-size free space
 IMAGE="dar-backup:dev"                              # --image: the dar-backup Docker image under test; must already be built (e.g. `make dev`)
-DEFINITION_ROOT=""                                  # Set after option parsing from the definition's `-R <path>` line; must be "/" (see validation below)
+DEFINITION_ROOT=""                                  # Set after option parsing from the definition's `-R <path>` line; must equal MOUNT_ROOT (see validation below)
 MOUNT_ROOT=""                                       # Set after option parsing from BASE_DIR's top-level directory; identity-mounted read-only into every container as the source-data volume
 DEFINITION_NAME="large-scale-test"                  # Backup definition name (also the archive filename prefix); fixed, not currently a CLI option
 DEFINITION_CONTENT=""                               # --definition (required): the backup definition body (-R/-g/etc. lines) supplied by the caller
@@ -26,7 +26,7 @@ DO_BITROT=0                                         # --bitrot: when 1, runs do_
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="8"                                  # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="9"                                  # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -76,24 +76,40 @@ done
 
 [[ -z "$DEFINITION_CONTENT" ]] && { echo "ERROR: --definition is required"; exit 1; }
 
-# The definition's -R must be the real filesystem root ("/"), not some other
-# directory. dar-backup's manager._is_directory_path() (used to tell PITR
-# restore-path directory vs. file) hardcodes `os.path.isdir(os.sep + path)` —
-# it assumes whatever -R the backup used IS "/". Using any other -R silently
-# breaks directory-chain PITR restore (it falls back to single-archive,
-# newest-first restoration instead of the additive FULL->DIFF->INCR chain).
-DEFINITION_ROOT=$(grep -m1 '^-R ' <<< "$DEFINITION_CONTENT" | awk '{print $2}')
-[[ "$DEFINITION_ROOT" != "/" ]] && { echo "ERROR: --definition's '-R' must be '/' (got '${DEFINITION_ROOT:-<none>}') — see comment above."; exit 1; }
-
 # MOUNT_ROOT is the host directory identity-mounted read-only into every
 # container as the source-data volume (derived from BASE_DIR's own top-level
 # directory, e.g. "/data/tmp/foo" -> "/data"), so BASE_DIR must live under it
-# for the diff-primer (created under BASE_DIR) to be reachable via -R /.
+# for the diff-primer (created under BASE_DIR) to be reachable via -R "$MOUNT_ROOT".
 MOUNT_ROOT="/$(echo "$BASE_DIR" | cut -d/ -f2)"
 case "$BASE_DIR" in
     "$MOUNT_ROOT"/*) ;;
     *) echo "ERROR: --base ('$BASE_DIR') must be at least two directories deep (e.g. '/data/tmp/...') so it has a mountable parent"; exit 1 ;;
 esac
+
+# The definition's -R must match MOUNT_ROOT (the host directory actually
+# identity-mounted into every container, above) so the container-side -R
+# resolves against real, visible files. dar-backup's
+# manager._is_directory_path()/_detect_directory() now correctly resolve PITR
+# catalog paths against whatever -R was really used (fixed upstream — it used
+# to hardcode "/", silently breaking directory-chain PITR restore for any
+# other root; see v2/BUG.txt in the dar-backup repo). A definition using a
+# root that doesn't match what's actually mounted would still break restore
+# detection, just against the wrong assumed root instead of a hardcoded one.
+DEFINITION_ROOT=$(python3 -c "
+import re
+import sys
+
+for line in sys.argv[1].splitlines():
+    match = re.match(r'^\s*-R\s+(.*)', line.strip())
+    if not match:
+        continue
+    value = match.group(1).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('\"', \"'\", '\`'):
+        value = value[1:-1]
+    print(value)
+    break
+" "$DEFINITION_CONTENT")
+[[ "$DEFINITION_ROOT" != "$MOUNT_ROOT" ]] && { echo "ERROR: --definition's '-R' must match the mount root '${MOUNT_ROOT}' (derived from --base '${BASE_DIR}'), got '${DEFINITION_ROOT:-<none>}'."; exit 1; }
 
 # ── preflight checks ──────────────────────────────────────────────────────────
 preflight() {
@@ -124,14 +140,32 @@ preflight
 # free — a multi-hour run has no business discovering "disk full" three phases in.
 check_disk_space() {
     local def_file="${BACKUP_D_DIR}/${DEFINITION_NAME}"
-    local root_path; root_path=$(grep -m1 '^-R ' "$def_file" | awk '{print $2}')
-    if [[ -z "$root_path" ]]; then
-        info "No -R root path found in backup definition; skipping disk-space preflight."
-        return
-    fi
+    # -R is already validated to equal MOUNT_ROOT above, so it's used directly
+    # rather than re-parsed here (the previous `awk '{print $2}'` re-parse
+    # silently truncated any -R/-g value containing a space to its first
+    # word — confirmed broken against a real quoted -R/-g).
+    local root_path="$MOUNT_ROOT"
 
     local total_bytes=0
-    local glob_paths; glob_paths=$(grep '^-g ' "$def_file" | awk '{print $2}')
+    # -g values may also be quoted (same reference-file convention as -R); a
+    # small quote-aware parser mirrors the -R parsing above rather than
+    # repeating the naive awk approach.
+    local glob_paths
+    glob_paths=$(DEF_FILE="$def_file" python3 -c "
+import os
+import re
+
+with open(os.environ['DEF_FILE']) as f:
+    lines = f.readlines()
+for line in lines:
+    match = re.match(r'^\s*-g\s+(.*)', line.strip())
+    if not match:
+        continue
+    value = match.group(1).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('\"', \"'\", '\`'):
+        value = value[1:-1]
+    print(value)
+")
     if [[ -z "$glob_paths" ]]; then
         total_bytes=$(du -sb "$root_path" 2>/dev/null | awk '{print $1}')
     else
@@ -224,8 +258,8 @@ print_run_variables() {
 # the same UID-drop logic used in production. Mounts MOUNT_ROOT read-only (real
 # + synthetic source data) and BASE_DIR read-write as a second, more specific
 # bind mount on top of it; since both are identity mounts (same path on host
-# and in-container), CONFIG_FILE's paths and the definition's -R / need no
-# translation.
+# and in-container), CONFIG_FILE's paths and the definition's -R (validated to
+# equal MOUNT_ROOT above) need no translation.
 docker_run_backup() {
     docker run --rm \
         -e RUN_AS_UID="$(id -u)" \
@@ -311,7 +345,7 @@ EOF
 write_backup_def() {
     local content="$DEFINITION_CONTENT"
     [[ ! "$content" =~ -s\  ]] && content="-s ${SLICE_SIZE}"$'\n'"$content"
-    content="${content}"$'\n'"-g ${DIFF_PRIMER_DIR#/}"
+    content="${content}"$'\n'"-g ${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     printf '%s\n' "$content" > "${BACKUP_D_DIR}/${DEFINITION_NAME}"
 }
 
@@ -339,7 +373,7 @@ update_diff_primer() {
 }
 
 verify_diff_contents() {
-    local full_base="$1" diff_base="$2" primer_rel="${DIFF_PRIMER_DIR#/}"
+    local full_base="$1" diff_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     banner "Phase 2b — DIFF contents verification"
     local diff_saved; diff_saved=$(docker_run_tool /usr/local/bin/dar -l "${BACKUP_DIR}/${diff_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
     # grep -c already prints "0" (with exit 1) on no match; the `|| true` below only
@@ -364,7 +398,7 @@ update_incr_primer() {
 }
 
 verify_incr_contents() {
-    local diff_base="$1" incr_base="$2" primer_rel="${DIFF_PRIMER_DIR#/}"
+    local diff_base="$1" incr_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     banner "Phase 2c — INCR contents verification"
     local incr_saved; incr_saved=$(docker_run_tool /usr/local/bin/dar -l "${BACKUP_DIR}/${incr_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
     local modified_count; modified_count=$(echo "$incr_saved" | grep -v "incr_new_" | { grep -c "${primer_rel}" || true; } 2>/dev/null)
@@ -581,7 +615,7 @@ info "Invoking manager to process PITR extraction for diff-primer data..."
 # Using the exact CLI arguments from restoring.md to restore our relative primer directory
 if docker_run_tool /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
            -d "$DEFINITION_NAME" \
-           --restore-path "${DIFF_PRIMER_DIR#/}/" \
+           --restore-path "${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}/" \
            --when "now" \
            --target "$RESTORE_DIR" \
            --log-stdout --verbose >> "$LOGFILE" 2>&1; then
@@ -590,7 +624,7 @@ else
     fail "manager PITR restore dropped an error exit code"
 fi
 
-RESTORE_PRIMER_PATH="${RESTORE_DIR}/${DIFF_PRIMER_DIR#/}"
+RESTORE_PRIMER_PATH="${RESTORE_DIR}/${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
 
 if [[ -f "${RESTORE_PRIMER_PATH}/link_original.txt" ]]; then
     fail "link_original.txt present in latest-state restore (should have been deleted by DIFF)"
