@@ -1,11 +1,19 @@
 # dar-backup-image Changelog
 
-## 0.5.28 - not released
+## 0.5.28 - 2026-07-08
+
+### BUGFIX
+
+- use dar-backup version v2-1.1.10 with a PITR fix
 
 ### Changed
 
-- `scripts/large_scale_test.sh`/`run_large_scale_test.sh`: dropped the "`--definition`'s `-R` must be `/`" restriction (a workaround for a dar-backup bug, now fixed upstream — see `v2/BUG.txt` in the dar-backup repo). `-R` must now match `MOUNT_ROOT` (the host directory already identity-mounted into the container, derived from `--base`) instead of a hardcoded `/`. `run_large_scale_test.sh` now uses `-R /data` directly with `SOURCE_GLOB` relative to it (was `-R /` with `SOURCE_GLOB` relative to `/`). Also fixed the same `awk '{print $2}'` field-splitting bug in `check_disk_space()`'s `-R`/`-g` extraction (broken on any quoted/spaced value). `SCRIPT_VERSION` bumped `8` → `9`.
+- `scripts/large_scale_test.sh`/`run_large_scale_test.sh` no longer compensates for a bug found in the PITR code in `dar-backup`
 
+### Added
+
+- test cases exercising file names with special non-ascii UTF-8 chars
+- [documentation](doc/demo-large-scale-test.md) on how to try out `run_large_scale_test.sh` as a user
 
 ## 0.5.27 - 2026-07-06
 
