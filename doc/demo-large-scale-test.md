@@ -15,8 +15,9 @@ Key features demonstrated:
 - FULL → DIFF → INCR backup chain, driven through the image's default
   entrypoint exactly as a real user would invoke it
 - `dar -t` integrity checks and `par2 verify` after every backup
-- Bitrot simulation: corrupt a slice, confirm `dar -t` detects it, repair with
-  `par2`, confirm `dar -t` passes again
+- Reproducible random bitrot simulation: corrupt a 2% byte range that may cross
+  DAR slices, confirm `dar -t` detects it, repair every affected slice with its
+  own PAR2 set, and confirm `dar -t` passes again
 - Point-in-Time Recovery restore of the latest state via `manager
   --restore-path`, with hard-link and deletion-record verification
 - sha256 checksum verification of every restored file against the live source
@@ -42,7 +43,7 @@ Key features demonstrated:
 
 With no environment variables set, this builds `dar-backup:dev` and runs the
 full test against the author's own personal photo folder default
-(`SOURCE_GLOB=billeder/2013/2013-06`, under `/data`) — which won't exist on
+(`SOURCE_GLOB=billeder/2013`, under `/data`) — which won't exist on
 your machine. Read on to point it at your own data.
 
 ## Pointing it at your own data
@@ -53,12 +54,13 @@ Every value the script uses is an environment variable with the shown default
 | Variable | Default | Purpose |
 |---|---|---|
 | `BASE_DIR` | `/data/tmp/image-large-scale-test` | Working directory for this run's archives, par2 files, restore output, and results. Must be at least two directories deep. |
-| `SOURCE_GLOB` | `billeder/2013/2013-06` | Real data to back up, **relative to `BASE_DIR`'s own top-level directory** (see below) |
+| `SOURCE_GLOB` | `billeder/2013` | Real data to back up, **relative to `BASE_DIR`'s own top-level directory** (see below) |
 | `IMAGE` | `dar-backup:dev` | Docker image under test |
 | `BUILD_IMAGE` | `true` | Set `false` to skip `make dev` — e.g. when `IMAGE` already points at a pulled/pre-built image |
 | `SLICE_SIZE` | `10G` | dar `-s` slice size |
 | `COMPRESSION` | `6` | dar `-z` compression level (1-9) |
 | `BITROT` | `true` | Set `false` to skip the corrupt/detect/repair phases |
+| `BITROT_SEED` | *(generated)* | Optional unsigned 64-bit seed that exactly replays the random bitrot selections |
 | `DEFINITION` | *(unset)* | Full backup-definition body — see [Full backup-definition control](#full-backup-definition-control) |
 
 **The one thing that trips people up**: `BASE_DIR`'s top-level directory
@@ -138,6 +140,7 @@ Anything you pass on the command line is forwarded straight through to
 | `--keep` | Don't delete the run directory (archives, par2 files, restore output) afterward |
 | `--smoketest` | Don't mirror this run's JSONL result into the tracked repo history file |
 | `--par2-ratio N` | PAR2 error-correction percentage (default 5) |
+| `--bitrot-seed N` | Replay the random bitrot selections made with seed N |
 | `--min-free-multiplier N` | Required free space as a multiple of source size (default 2) |
 | `--timeout N` | Per-command timeout in seconds (default 86400) |
 
@@ -162,10 +165,12 @@ Example — keep the archives around and use a lighter par2 ratio:
 ══════════════════════════════════════════
   Bitrot test on large-scale-test_FULL_2026-07-07
 ══════════════════════════════════════════
-  INFO  Injecting bitrot...
+  INFO  Injecting 2% bitrot with seed 123456789 across 2 slice(s)...
+  INFO  Corrupting large-scale-test_FULL_2026-07-07.4.dar: offset=10600000000, bytes=137418240, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-07-07.5.dar: offset=0, bytes=77330124, slice_bytes=10737418240
   PASS  dar -t correctly detected corruption
-  INFO  Repairing with par2...
-  PASS  par2 repair succeeded
+  INFO  Repairing 2 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 2 affected slice(s)
   PASS  dar -t passed after repair
 
   ...(DIFF and INCR repeat the same cycle)...
@@ -219,12 +224,21 @@ scale with however much data you point `SOURCE_GLOB` at.)
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
 
-New records use additive schema version 3. All schema-version-2 fields remain
-present for existing consumers and the older lines in the history remain
-valid. Additional provenance includes the full harness commit and dirty state,
-the requested image reference, immutable local image ID, registry digest when
-available, OCI image revision/version labels, harness script version, and the
-sha256 of the effective generated backup definition.
+New records use additive schema version 4. All schema-version-2 and -3 fields
+remain present for existing consumers and the older lines in the history
+remain valid. Additional provenance includes the full harness commit and dirty
+state, the requested image reference, immutable local image ID, registry digest
+when available, OCI image revision/version labels, harness script version, and
+the sha256 of the effective generated backup definition.
+
+Schema v4 adds `bitrot_seed` and `bitrot_evidence`. Each completed bitrot phase
+records the exact slice names, offsets and lengths, its 1 MiB injection buffer,
+injection and repair durations, whether DAR detected the damage and validated
+the repair, plus PAR2 data blocks found, total, and damaged for every affected
+slice. Evidence is updated incrementally, so an interrupted run retains the
+last completed bitrot step. Use the recorded seed as `BITROT_SEED` (or
+`--bitrot-seed`) to reproduce the same choices against an identical archive
+layout.
 
 `source_file_count` and `source_bytes` measure regular files selected by the
 definition's `-g` roots immediately before the FULL backup. Overlapping roots

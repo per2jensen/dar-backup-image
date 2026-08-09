@@ -9,6 +9,14 @@
 - verify the embedded license SHA-256 and exact OCI license label during release
 - record schema-v3 large-scale-test evidence with immutable image provenance,
   source scale, exact archive bytes, total runtime, and per-stage outcomes
+- record schema-v4 reproducible random bitrot evidence, including affected
+  slices and byte ranges, injection/repair timings, and PAR2 data-block counts
+
+### Changed
+
+- corrupt a random 2% range per backup phase, allow the range to cross DAR
+  slice boundaries, and use buffered byte-accurate writes for faster injection
+- accept `BITROT_SEED`/`--bitrot-seed` to replay exact corruption selections
 
 ### Fixed
 

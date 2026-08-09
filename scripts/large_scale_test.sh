@@ -24,10 +24,13 @@ DEFINITION_CONTENT=""                               # --definition (required): t
 SLICE_SIZE="10G"                                    # --slice: dar -s slice size; only injected into DEFINITION_CONTENT if it doesn't already set one
 PAR2_RATIO=5                                        # --par2-ratio: PAR2 ERROR_CORRECTION_PERCENT written into the generated config
 DO_BITROT=0                                         # --bitrot: when 1, runs do_bitrot_test (corrupt + par2 repair) on FULL, DIFF, and INCR
+BITROT_SEED=""                                      # --bitrot-seed: optional unsigned 64-bit seed; generated once per run when omitted
+BITROT_PERCENT=2                                    # Fixed percentage of one selected slice corrupted per bitrot phase
+BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while preserving exact byte offsets and lengths
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="11"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="12"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -50,7 +53,7 @@ SOURCE_BYTES=""                                     # Apparent regular-file byte
 BACKUP_DEFINITION_SHA256=""                         # Hash of the effective generated backup definition, including injected primer and slice options
 
 # Explicit lifecycle state is serialized by the EXIT trap. Values use the
-# schema-v3 status vocabulary: passed, failed, skipped, or not_run.
+# schema-v4 status vocabulary: passed, failed, skipped, or not_run.
 CURRENT_PHASE="preflight"
 RUN_RESULT_READY=0
 RUN_COMPLETED=0
@@ -91,6 +94,7 @@ while [[ $# -gt 0 ]]; do
         --slice)      SLICE_SIZE="$2";         shift 2 ;;
         --par2-ratio) PAR2_RATIO="$2";         shift 2 ;;
         --bitrot)     DO_BITROT=1;             shift   ;;
+        --bitrot-seed) BITROT_SEED="$2";       shift 2 ;;
         --keep)       KEEP=1;                  shift   ;;
         --smoketest)  SMOKETEST=1;             shift   ;;
         --timeout)    TIMEOUT="$2";            shift 2 ;;
@@ -101,6 +105,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$DEFINITION_CONTENT" ]] && { echo "ERROR: --definition is required"; exit 1; }
+[[ $DO_BITROT -eq 0 && -n "$BITROT_SEED" ]] && { echo "ERROR: --bitrot-seed requires --bitrot" >&2; exit 1; }
 
 if [[ $DO_BITROT -eq 0 ]]; then
     FULL_BITROT_STATUS="skipped"
@@ -173,6 +178,17 @@ preflight() {
     KERNEL=$(uname -r)
 }
 preflight
+
+if [[ $DO_BITROT -eq 1 ]]; then
+    if [[ -z "$BITROT_SEED" ]]; then
+        BITROT_SEED=$(python3 -c 'import secrets; print(secrets.randbits(64))')
+    fi
+    if ! python3 "${REPO_DIR}/scripts/large_scale_bitrot.py" validate-seed \
+        --seed "$BITROT_SEED" >/dev/null; then
+        echo "ERROR: --bitrot-seed must be an unsigned 64-bit integer" >&2
+        exit 1
+    fi
+fi
 
 # ── disk-space preflight ──────────────────────────────────────────────────────
 # Estimates the real source data size from the backup definition's -R/-g paths and
@@ -327,6 +343,7 @@ CONFIG_FILE="${RUN_DIR}/dar-backup.conf"            # Generated dar-backup.conf 
 DARRC="${RUN_DIR}/.darrc"                           # Copied/generated .darrc for this run — gone after the run unless --keep
 RSS_LOGFILE="${RUN_DIR}/rss.log"                    # Raw per-process RSS samples written by start_rss_monitor — gone after the run unless --keep
 CID_FILE="${RUN_DIR}/current-container.cid"         # Written by docker_run_backup/docker_run_tool for each invocation; scopes start_rss_monitor to this run's own container instead of a host-wide process scan
+BITROT_EVIDENCE_FILE="${RUN_DIR}/bitrot-evidence.json" # Incrementally persisted evidence included in the JSONL record by the EXIT trap
 DIFF_PRIMER_DIR="${BASE_DIR}/diff-primer"           # NOT under RUN_DIR — reused/reset by create_diff_primer() at the start of every run
 
 mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$BACKUP_D_DIR" "$RESULTS_DIR" "$DIFF_PRIMER_DIR"
@@ -339,12 +356,14 @@ RUN_VARIABLES=(
     DATESTAMP DATE_OF_RUN SCRIPT_VERSION RUN_STARTED_EPOCH
     IMAGE DEFINITION_ROOT MOUNT_ROOT
     BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE PAR2_RATIO
-    DO_BITROT KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
+    DO_BITROT BITROT_SEED BITROT_PERCENT BITROT_BUFFER_BYTES
+    KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
     DAR_BACKUP_VERSION GIT_COMMIT HARNESS_GIT_COMMIT HARNESS_GIT_DIRTY REPO_DIR
     IMAGE_ID IMAGE_REPO_DIGEST IMAGE_REVISION IMAGE_VERSION DAR_VERSION PAR2_VERSION
     PYTHON_VERSION OS_DESC KERNEL
     RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR BACKUP_D_DIR
     RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE CID_FILE
+    BITROT_EVIDENCE_FILE
     DIFF_PRIMER_DIR
 )
 
@@ -662,34 +681,190 @@ check_par2_verify() {
 
 
 
+update_bitrot_phase_evidence() {
+    local phase="$1"
+    shift
+    python3 "${REPO_DIR}/scripts/large_scale_bitrot.py" update-phase \
+        --file "$BITROT_EVIDENCE_FILE" --phase "$phase" "$@"
+}
+
+mark_bitrot_phase_failed() {
+    local phase="$1"
+    if ! update_bitrot_phase_evidence "$phase" --status failed; then
+        echo "ERROR: unable to record failed bitrot evidence for phase '${phase}'" >&2
+    fi
+}
+
 do_bitrot_test() {
     local archive_base="$1"
-    local slice="${BACKUP_DIR}/${archive_base}.1.dar"
-    local par2="${PAR2_DIR}/${archive_base}.1.dar.par2"
+    local phase="$2"
+    local helper="${REPO_DIR}/scripts/large_scale_bitrot.py"
+    local -a slice_files=()
+    local -a segment_lines=()
+    local -a segment_indices=()
+    local -a segment_paths=()
+    local selection_json segment_output
+
     banner "Bitrot test on ${archive_base}"
-    local size; size=$(stat -c%s "$slice")
-    local corrupt_bytes=$(( size * 2 / 100 )) offset=$(( size / 4 ))
-    info "Injecting bitrot..."
-    if ! dd if=/dev/urandom of="$slice" bs=1 seek="$offset" count="$corrupt_bytes" conv=notrunc >> "$LOGFILE" 2>&1; then
-        fail "Unable to inject bitrot into $(basename "$slice")"
+
+    shopt -s nullglob
+    slice_files=("${BACKUP_DIR}/${archive_base}".*.dar)
+    shopt -u nullglob
+    if [[ ${#slice_files[@]} -eq 0 ]]; then
+        fail "No DAR slices found for bitrot selection"
         return 1
     fi
+
+    if ! selection_json=$(python3 "$helper" select \
+        --seed "$BITROT_SEED" \
+        --phase "$phase" \
+        --percent "$BITROT_PERCENT" \
+        "${slice_files[@]}"); then
+        fail "Unable to select a safe random bitrot range"
+        return 1
+    fi
+    if ! python3 "$helper" init \
+        --file "$BITROT_EVIDENCE_FILE" \
+        --phase "$phase" \
+        --selection "$selection_json" \
+        --buffer-bytes "$BITROT_BUFFER_BYTES"; then
+        fail "Unable to initialize bitrot evidence"
+        return 1
+    fi
+    if ! segment_output=$(python3 "$helper" segments --selection "$selection_json"); then
+        fail "Unable to decode selected bitrot segments"
+        mark_bitrot_phase_failed "$phase"
+        return 1
+    fi
+    mapfile -t segment_lines <<< "$segment_output"
+    if [[ ${#segment_lines[@]} -eq 0 ]]; then
+        fail "Random bitrot selection contained no segments"
+        mark_bitrot_phase_failed "$phase"
+        return 1
+    fi
+
+    info "Injecting ${BITROT_PERCENT}% bitrot with seed ${BITROT_SEED} across ${#segment_lines[@]} slice(s)..."
+    local injection_started_ns injection_elapsed_ms
+    injection_started_ns=$(date +%s%N)
+    local line segment_index slice_path slice_bytes offset_bytes length_bytes
+    for line in "${segment_lines[@]}"; do
+        IFS=$'\t' read -r segment_index slice_path slice_bytes offset_bytes length_bytes <<< "$line"
+        if [[ -z "$segment_index" || -z "$slice_path" || -z "$offset_bytes" || -z "$length_bytes" ]]; then
+            fail "Malformed bitrot segment from selection helper"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
+        info "Corrupting $(basename "$slice_path"): offset=${offset_bytes}, bytes=${length_bytes}, slice_bytes=${slice_bytes}"
+        if ! dd if=/dev/urandom of="$slice_path" \
+            bs=1M iflag=fullblock,count_bytes oflag=seek_bytes \
+            seek="$offset_bytes" count="$length_bytes" \
+            conv=notrunc status=none >> "$LOGFILE" 2>&1; then
+            fail "Unable to inject bitrot into $(basename "$slice_path")"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
+        segment_indices+=("$segment_index")
+        segment_paths+=("$slice_path")
+    done
+    injection_elapsed_ms=$(( ($(date +%s%N) - injection_started_ns) / 1000000 ))
+    if ! update_bitrot_phase_evidence "$phase" \
+        --injection-elapsed-ms "$injection_elapsed_ms"; then
+        fail "Unable to record bitrot injection timing"
+        mark_bitrot_phase_failed "$phase"
+        return 1
+    fi
+
     if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
-        fail "dar-t missed corruption"
+        fail "dar -t missed corruption"
+        if ! update_bitrot_phase_evidence "$phase" \
+            --dar-detected-corruption failed --status failed; then
+            echo "ERROR: unable to record DAR corruption-detection failure" >&2
+        fi
+        return 1
+    fi
+    if ! update_bitrot_phase_evidence "$phase" --dar-detected-corruption passed; then
+        fail "Unable to record DAR corruption detection"
+        mark_bitrot_phase_failed "$phase"
         return 1
     fi
     pass "dar -t correctly detected corruption"
-    info "Repairing with par2..."
-    if ! docker_run_tool /usr/bin/par2 repair -B "$BACKUP_DIR" -q "$par2" >> "$LOGFILE" 2>&1; then
-        fail "par2 repair failed"
+
+    info "Repairing ${#segment_paths[@]} affected slice(s) with PAR2..."
+    local repair_all_started_ns repair_all_elapsed_ms
+    local repair_started_ns repair_elapsed_ms repair_output repair_status
+    local par2_file block_counts found_blocks total_blocks repair_rc
+    local array_index
+    repair_all_started_ns=$(date +%s%N)
+    for array_index in "${!segment_paths[@]}"; do
+        slice_path="${segment_paths[$array_index]}"
+        segment_index="${segment_indices[$array_index]}"
+        par2_file="${PAR2_DIR}/$(basename "$slice_path").par2"
+        if [[ ! -f "$par2_file" ]]; then
+            fail "PAR2 file missing for affected slice: $(basename "$slice_path")"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
+
+        repair_started_ns=$(date +%s%N)
+        if repair_output=$(docker_run_tool /usr/bin/par2 repair \
+            -B "$BACKUP_DIR" -q "$par2_file" 2>&1); then
+            repair_rc=0
+            repair_status="passed"
+        else
+            repair_rc=$?
+            repair_status="failed"
+        fi
+        repair_elapsed_ms=$(( ($(date +%s%N) - repair_started_ns) / 1000000 ))
+        printf '%s\n' "$repair_output" >> "$LOGFILE"
+
+        if ! block_counts=$(printf '%s\n' "$repair_output" | python3 "$helper" parse-blocks); then
+            fail "Unable to parse PAR2 data-block counts for $(basename "$slice_path")"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
+        IFS=$'\t' read -r found_blocks total_blocks <<< "$block_counts"
+        if ! python3 "$helper" update-segment \
+            --file "$BITROT_EVIDENCE_FILE" \
+            --phase "$phase" \
+            --index "$segment_index" \
+            --found "$found_blocks" \
+            --total "$total_blocks" \
+            --repair-elapsed-ms "$repair_elapsed_ms" \
+            --repair-status "$repair_status"; then
+            fail "Unable to record PAR2 repair evidence for $(basename "$slice_path")"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
+        if [[ $repair_rc -ne 0 ]]; then
+            fail "par2 repair failed for $(basename "$slice_path")"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
+    done
+    repair_all_elapsed_ms=$(( ($(date +%s%N) - repair_all_started_ns) / 1000000 ))
+    if ! update_bitrot_phase_evidence "$phase" \
+        --repair-elapsed-ms "$repair_all_elapsed_ms"; then
+        fail "Unable to record total PAR2 repair timing"
+        mark_bitrot_phase_failed "$phase"
         return 1
     fi
-    pass "par2 repair succeeded"
+    pass "par2 repair succeeded for ${#segment_paths[@]} affected slice(s)"
+
     if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
+        if ! update_bitrot_phase_evidence "$phase" \
+            --dar-verify-after-repair passed --status passed; then
+            fail "Unable to record post-repair DAR verification"
+            mark_bitrot_phase_failed "$phase"
+            return 1
+        fi
         pass "dar -t passed after repair"
         return 0
     fi
     fail "dar -t still fails after repair"
+    if ! update_bitrot_phase_evidence "$phase" \
+        --dar-verify-after-repair failed --status failed; then
+        echo "ERROR: unable to record post-repair DAR verification failure" >&2
+    fi
     return 1
 }
 
@@ -874,6 +1049,8 @@ write_json_record() {
     LST_PITR_STRUCTURE_STATUS="$PITR_STRUCTURE_STATUS" \
     LST_PITR_CHECKSUM_STATUS="$PITR_CHECKSUM_STATUS" \
     LST_PITR_OVERALL_STATUS="$PITR_OVERALL_STATUS" \
+    LST_BITROT_SEED="${BITROT_SEED:-}" \
+    LST_BITROT_EVIDENCE_FILE="${BITROT_EVIDENCE_FILE:-}" \
     LST_RESULTS_DIR="$RESULTS_DIR" \
     LST_REPO_DIR="$effective_repo_dir" \
     python3 "${REPO_DIR}/scripts/large_scale_result.py"
@@ -981,7 +1158,7 @@ if check_dar_integrity "$FULL_BASE" "FULL"; then FULL_ARCHIVE_STATUS="passed"; e
 if check_par2_per_slice "$FULL_BASE" "$FULL_SLICES"; then FULL_PAR2_FILES_STATUS="passed"; else FULL_PAR2_FILES_STATUS="failed"; fi
 if check_par2_verify "$FULL_BASE" "FULL"; then FULL_PAR2_VERIFY_STATUS="passed"; else FULL_PAR2_VERIFY_STATUS="failed"; fi
 if [[ $DO_BITROT -eq 1 ]]; then
-    if do_bitrot_test "$FULL_BASE"; then FULL_BITROT_STATUS="passed"; else FULL_BITROT_STATUS="failed"; fi
+    if do_bitrot_test "$FULL_BASE" "full"; then FULL_BITROT_STATUS="passed"; else FULL_BITROT_STATUS="failed"; fi
 fi
 
 # ── PHASE 2 ──
@@ -1007,7 +1184,7 @@ if check_dar_integrity "$DIFF_BASE" "DIFF"; then DIFF_ARCHIVE_STATUS="passed"; e
 if check_par2_per_slice "$DIFF_BASE" "$DIFF_SLICES"; then DIFF_PAR2_FILES_STATUS="passed"; else DIFF_PAR2_FILES_STATUS="failed"; fi
 if check_par2_verify "$DIFF_BASE" "DIFF"; then DIFF_PAR2_VERIFY_STATUS="passed"; else DIFF_PAR2_VERIFY_STATUS="failed"; fi
 if [[ $DO_BITROT -eq 1 ]]; then
-    if do_bitrot_test "$DIFF_BASE"; then DIFF_BITROT_STATUS="passed"; else DIFF_BITROT_STATUS="failed"; fi
+    if do_bitrot_test "$DIFF_BASE" "diff"; then DIFF_BITROT_STATUS="passed"; else DIFF_BITROT_STATUS="failed"; fi
 fi
 if verify_diff_contents "$FULL_BASE" "$DIFF_BASE"; then DIFF_CONTENTS_STATUS="passed"; else DIFF_CONTENTS_STATUS="failed"; fi
 
@@ -1036,7 +1213,7 @@ if check_dar_integrity "$INCR_BASE" "INCR"; then INCR_ARCHIVE_STATUS="passed"; e
 if check_par2_per_slice "$INCR_BASE" "$INCR_SLICES"; then INCR_PAR2_FILES_STATUS="passed"; else INCR_PAR2_FILES_STATUS="failed"; fi
 if check_par2_verify "$INCR_BASE" "INCR"; then INCR_PAR2_VERIFY_STATUS="passed"; else INCR_PAR2_VERIFY_STATUS="failed"; fi
 if [[ $DO_BITROT -eq 1 ]]; then
-    if do_bitrot_test "$INCR_BASE"; then INCR_BITROT_STATUS="passed"; else INCR_BITROT_STATUS="failed"; fi
+    if do_bitrot_test "$INCR_BASE" "incr"; then INCR_BITROT_STATUS="passed"; else INCR_BITROT_STATUS="failed"; fi
 fi
 if verify_incr_contents "$DIFF_BASE" "$INCR_BASE"; then INCR_CONTENTS_STATUS="passed"; else INCR_CONTENTS_STATUS="failed"; fi
 

@@ -14,6 +14,8 @@
 #   IMAGE=per2jensen/dar-backup:latest BUILD_IMAGE=false ./run_large_scale_test.sh
 # 3.
 #   SLICE_SIZE=20G COMPRESSION=9 BITROT=false ./run_large_scale_test.sh
+# 4. Replay the exact random bitrot choices from an earlier result:
+#   BITROT_SEED=123456789 ./run_large_scale_test.sh
 #
 # BASE_DIR must live at least two directories deep (see scripts/large_scale_test.sh
 # for why), and SOURCE_GLOB must resolve to real data under BASE_DIR's own
@@ -45,6 +47,7 @@ SOURCE_GLOB="${SOURCE_GLOB:-billeder/2013}"     # real data to back up, relative
 SLICE_SIZE="${SLICE_SIZE:-10G}"                         # dar -s slice size
 COMPRESSION="${COMPRESSION:-6}"                         # dar -z compression level (1-9)
 BITROT="${BITROT:-true}"                                # set to "false" to skip the bitrot-inject/par2-repair phases
+BITROT_SEED="${BITROT_SEED:-}"                          # optional unsigned 64-bit replay seed; empty generates and records a new seed
 DEFINITION="${DEFINITION:-}"                            # full backup-definition body; overrides SOURCE_GLOB/SLICE_SIZE/COMPRESSION entirely when set (see examples above)
 
 # large_scale_test.sh requires the definition's -R to match the mount root it
@@ -62,6 +65,7 @@ fi
 
 ARGS=(--base "${BASE_DIR}" --image "${IMAGE}")
 [[ "$BITROT" == "true" ]] && ARGS+=(--bitrot)
+[[ "$BITROT" == "true" && -n "$BITROT_SEED" ]] && ARGS+=(--bitrot-seed "$BITROT_SEED")
 
 if [[ -z "$DEFINITION" ]]; then
     DEFINITION="$(cat << EOF

@@ -134,6 +134,37 @@ def _optional_string(environment: Mapping[str, str], key: str) -> str | None:
     return value or None
 
 
+def _optional_json_object(
+    environment: Mapping[str, str], key: str
+) -> dict[str, Any] | None:
+    """Load an optional JSON object from a path supplied in the environment.
+
+    Args:
+        environment: Environment values supplied by the test harness.
+        key: Name of the environment value containing the JSON file path.
+
+    Returns:
+        The decoded object, or ``None`` when no path or file is available.
+
+    Raises:
+        OSError: If an existing evidence file cannot be read.
+        ValueError: If existing evidence is malformed or not an object.
+    """
+    value = environment.get(key, "")
+    if not value:
+        return None
+    path = Path(value)
+    if not path.exists():
+        return None
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Malformed JSON evidence in {path}: {error}") from error
+    if not isinstance(decoded, dict):
+        raise ValueError(f"JSON evidence in {path} must be an object")
+    return decoded
+
+
 def _status(environment: Mapping[str, str], key: str) -> str:
     """Return and validate a check status.
 
@@ -155,7 +186,7 @@ def _status(environment: Mapping[str, str], key: str) -> str:
 
 
 def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
-    """Build one backward-compatible schema-v3 result record.
+    """Build one backward-compatible schema-v4 result record.
 
     Args:
         environment: Environment values exported by ``large_scale_test.sh``.
@@ -175,7 +206,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     aborted_phase = None if completed else _required(environment, "LST_CURRENT_PHASE")
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "datestamp": _required(environment, "LST_DATESTAMP"),
         "date": _required(environment, "LST_DATE"),
         # Retained unchanged for schema-v2 consumers.
@@ -259,6 +290,11 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
                 "overall": _status(environment, "LST_PITR_OVERALL_STATUS"),
             },
         },
+        # Schema-v4 reproducible random corruption and per-slice PAR2 metrics.
+        "bitrot_seed": _optional_int(environment, "LST_BITROT_SEED"),
+        "bitrot_evidence": _optional_json_object(
+            environment, "LST_BITROT_EVIDENCE_FILE"
+        ),
     }
 
 

@@ -1,10 +1,12 @@
-"""Tests for schema-v3 large-scale test result records."""
+"""Tests for schema-v4 large-scale test result records."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
 from pathlib import Path
+
+import pytest
 
 
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "large_scale_result.py"
@@ -84,11 +86,13 @@ def _base_environment() -> dict[str, str]:
         "LST_PITR_STRUCTURE_STATUS": "passed",
         "LST_PITR_CHECKSUM_STATUS": "passed",
         "LST_PITR_OVERALL_STATUS": "passed",
+        "LST_BITROT_SEED": "987654321",
+        "LST_BITROT_EVIDENCE_FILE": "",
     }
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v3_to_both_histories(
+def test_write_result_completed_run_appends_schema_v4_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -113,7 +117,7 @@ def test_write_result_completed_run_appends_schema_v3_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 3
+    assert local_record["schema_version"] == 4
     assert local_record["passed"] is True
     assert local_record["completed"] is True
     assert local_record["aborted_phase"] is None
@@ -122,6 +126,8 @@ def test_write_result_completed_run_appends_schema_v3_to_both_histories(
     assert local_record["source_file_count"] == 42137
     assert local_record["full_size_bytes"] == 124801234567
     assert local_record["checks"]["pitr_restore"]["overall"] == "passed"
+    assert local_record["bitrot_seed"] == 987654321
+    assert local_record["bitrot_evidence"] is None
 
 
 def test_write_result_aborted_run_records_phase_and_unreached_checks(
@@ -198,7 +204,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
 def test_write_result_existing_schema_v2_history_remains_readable(
     tmp_path: Path,
 ) -> None:
-    """Appending schema v3 preserves an existing schema-v2 JSONL record.
+    """Appending schema v4 preserves an existing schema-v2 JSONL record.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -219,4 +225,52 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 3
+    assert records[1]["schema_version"] == 4
+
+
+def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
+    """Schema v4 embeds per-phase bitrot and PAR2 block evidence.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    evidence = {
+        "full": {
+            "seed": 987654321,
+            "status": "passed",
+            "segments": [
+                {
+                    "slice": "archive.7.dar",
+                    "par2_data_blocks_found": 1959,
+                    "par2_data_blocks_total": 2000,
+                    "par2_data_blocks_damaged": 41,
+                }
+            ],
+        }
+    }
+    evidence_path = tmp_path / "bitrot-evidence.json"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+    environment = _base_environment()
+    environment["LST_BITROT_EVIDENCE_FILE"] = str(evidence_path)
+
+    record = build_record(environment)
+
+    assert record["schema_version"] == 4
+    assert record["bitrot_evidence"] == evidence
+
+
+def test_build_record_malformed_bitrot_evidence_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """Malformed evidence cannot silently enter the release history.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    evidence_path = tmp_path / "bitrot-evidence.json"
+    evidence_path.write_text("{not-json", encoding="utf-8")
+    environment = _base_environment()
+    environment["LST_BITROT_EVIDENCE_FILE"] = str(evidence_path)
+
+    with pytest.raises(ValueError, match="Malformed JSON evidence"):
+        build_record(environment)
