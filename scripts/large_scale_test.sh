@@ -12,6 +12,7 @@ set -euo pipefail
 # run directory itself is gone afterward. If you add a new top-level variable,
 # add its name to RUN_VARIABLES (below the directory-layout block) too.
 
+RUN_STARTED_EPOCH=$(date +%s)                       # Wall-clock start used for overall_elapsed_s, including preflight and every lifecycle phase
 DATESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')             # Run identifier: used in RUN_DIR, LOGFILE, SUMMARY filenames, and the JSONL record
 DATE_OF_RUN=$(date '+%Y-%m-%d')                    # Calendar date only (pinned once at startup); matches the date dar-backup encodes in archive filenames
 BASE_DIR="/data/tmp/image-large-scale-test"         # --base: root directory for runs/, results/, and the diff-primer directory. Must be at least two directories deep and have MIN_FREE_MULTIPLIER x source-size free space
@@ -26,18 +27,43 @@ DO_BITROT=0                                         # --bitrot: when 1, runs do_
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="10"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="11"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
 DAR_BACKUP_VERSION=""                               # Set by preflight() from the image's org.dar-backup.version label
 GIT_COMMIT=""                                       # Set by preflight() from `git rev-parse --short HEAD` in REPO_DIR (this repo, dar-backup-image)
+HARNESS_GIT_COMMIT=""                               # Full commit for the harness checkout; unlike GIT_COMMIT, this is unambiguous provenance
+HARNESS_GIT_DIRTY=0                                 # Whether tracked or untracked harness files differed from HARNESS_GIT_COMMIT before the run
 REPO_DIR=""                                         # Set by preflight() to the dar-backup-image repo root; also the JSONL-mirror target (unless SMOKETEST=1)
+IMAGE_ID=""                                         # Immutable local Docker image config digest
+IMAGE_REPO_DIGEST=""                                # Registry manifest digest when the image was pulled/pushed; empty for local-only dev images
+IMAGE_REVISION=""                                   # OCI source-revision label embedded in the image
+IMAGE_VERSION=""                                    # OCI image-version label embedded in the image
 DAR_VERSION=""                                      # Set by preflight() from the image's org.dar.version label
 PAR2_VERSION=""                                     # Set by preflight() from `par2 --version`, run inside the image
 PYTHON_VERSION=""                                   # Set by preflight() from `python3 --version`, run inside the image
 OS_DESC=""                                           # Set by preflight() from `lsb_release -d` (describes the Docker host, not the image)
 KERNEL=""                                           # Set by preflight() from `uname -r` (the Docker host's kernel)
+SOURCE_FILE_COUNT=""                                # Regular-file count across effective -g source paths, captured before FULL
+SOURCE_BYTES=""                                     # Apparent regular-file bytes across effective -g source paths, captured before FULL
+BACKUP_DEFINITION_SHA256=""                         # Hash of the effective generated backup definition, including injected primer and slice options
+
+# Explicit lifecycle state is serialized by the EXIT trap. Values use the
+# schema-v3 status vocabulary: passed, failed, skipped, or not_run.
+CURRENT_PHASE="preflight"
+RUN_RESULT_READY=0
+RUN_COMPLETED=0
+RESULT_WRITTEN=0
+MANAGER_DB_STATUS="not_run"
+FULL_BACKUP_STATUS="not_run"; DIFF_BACKUP_STATUS="not_run"; INCR_BACKUP_STATUS="not_run"
+FULL_ARCHIVE_STATUS="not_run"; DIFF_ARCHIVE_STATUS="not_run"; INCR_ARCHIVE_STATUS="not_run"
+FULL_PAR2_FILES_STATUS="not_run"; DIFF_PAR2_FILES_STATUS="not_run"; INCR_PAR2_FILES_STATUS="not_run"
+FULL_PAR2_VERIFY_STATUS="not_run"; DIFF_PAR2_VERIFY_STATUS="not_run"; INCR_PAR2_VERIFY_STATUS="not_run"
+FULL_BITROT_STATUS="not_run"; DIFF_BITROT_STATUS="not_run"; INCR_BITROT_STATUS="not_run"
+DIFF_CONTENTS_STATUS="not_run"; INCR_CONTENTS_STATUS="not_run"
+PITR_EXECUTION_STATUS="not_run"; PITR_STRUCTURE_STATUS="not_run"
+PITR_CHECKSUM_STATUS="not_run"; PITR_OVERALL_STATUS="not_run"
 
 # ── colours ─────────────────────────────────────────────────────────────────
 RED='\033[31m'; GREEN='\033[32m'
@@ -75,6 +101,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$DEFINITION_CONTENT" ]] && { echo "ERROR: --definition is required"; exit 1; }
+
+if [[ $DO_BITROT -eq 0 ]]; then
+    FULL_BITROT_STATUS="skipped"
+    DIFF_BITROT_STATUS="skipped"
+    INCR_BITROT_STATUS="skipped"
+fi
 
 # MOUNT_ROOT is the host directory identity-mounted read-only into every
 # container as the source-data volume (derived from BASE_DIR's own top-level
@@ -125,6 +157,14 @@ preflight() {
 
     REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     GIT_COMMIT=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    HARNESS_GIT_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+    [[ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=normal 2>/dev/null)" ]] && HARNESS_GIT_DIRTY=1
+    IMAGE_ID=$(docker image inspect -f '{{.Id}}' "$IMAGE")
+    IMAGE_REPO_DIGEST=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE" | head -n 1)
+    IMAGE_REVISION=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE" 2>/dev/null || true)
+    IMAGE_VERSION=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$IMAGE" 2>/dev/null || true)
+    [[ "$IMAGE_REVISION" == "<no value>" ]] && IMAGE_REVISION=""
+    [[ "$IMAGE_VERSION" == "<no value>" ]] && IMAGE_VERSION=""
     DAR_BACKUP_VERSION=$(docker inspect -f '{{ index .Config.Labels "org.dar-backup.version" }}' "$IMAGE" 2>/dev/null || echo "unknown")
     DAR_VERSION=$(docker inspect -f '{{ index .Config.Labels "org.dar.version" }}' "$IMAGE" 2>/dev/null || echo "unknown")
     PAR2_VERSION=$(docker run --rm --entrypoint /usr/bin/par2 "$IMAGE" --version 2>/dev/null | head -1 || echo "unknown")
@@ -166,17 +206,78 @@ for line in lines:
         value = value[1:-1]
     print(value)
 ")
+    local -a source_paths=()
     if [[ -z "$glob_paths" ]]; then
-        total_bytes=$(du -sb "$root_path" 2>/dev/null | awk '{print $1}')
+        source_paths+=("$root_path")
     else
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
             local full_path="${root_path%/}/${g}"
-            if [[ -e "$full_path" ]]; then
-                local sz; sz=$(du -sb "$full_path" 2>/dev/null | awk '{print $1}')
-                total_bytes=$(( total_bytes + ${sz:-0} ))
+            if [[ ! -e "$full_path" ]]; then
+                echo "ERROR: source path from backup definition does not exist: ${full_path}" >&2
+                return 1
             fi
+            source_paths+=("$full_path")
         done <<< "$glob_paths"
+    fi
+
+    if [[ ${#source_paths[@]} -gt 0 ]]; then
+        # Measure regular files by unique absolute path so overlapping -g entries
+        # are not counted twice. Symlink targets are deliberately not followed.
+        local source_measurement
+        if ! source_measurement=$(python3 - "${source_paths[@]}" << 'PYEOF'
+import os
+import stat
+import sys
+
+def raise_walk_error(error: OSError) -> None:
+    """Propagate an os.walk error instead of silently skipping source data.
+
+    Args:
+        error: Filesystem error raised while walking a source directory.
+
+    Raises:
+        OSError: Always, using the original walk error.
+    """
+    raise error
+
+seen_paths = set()
+file_count = 0
+total_bytes = 0
+
+for source_path in sys.argv[1:]:
+    if os.path.isfile(source_path):
+        candidates = [source_path]
+    else:
+        candidates = (
+            os.path.join(directory, filename)
+            for directory, _, filenames in os.walk(
+                source_path, followlinks=False, onerror=raise_walk_error
+            )
+            for filename in filenames
+        )
+    for candidate in candidates:
+        absolute_path = os.path.abspath(candidate)
+        if absolute_path in seen_paths:
+            continue
+        seen_paths.add(absolute_path)
+        file_stat = os.stat(absolute_path, follow_symlinks=False)
+        if stat.S_ISREG(file_stat.st_mode):
+            file_count += 1
+            total_bytes += file_stat.st_size
+
+print(file_count, total_bytes)
+PYEOF
+        ); then
+            echo "ERROR: failed to measure source files for release evidence" >&2
+            return 1
+        fi
+        read -r SOURCE_FILE_COUNT SOURCE_BYTES <<< "$source_measurement"
+        if [[ ! "$SOURCE_FILE_COUNT" =~ ^[0-9]+$ || ! "$SOURCE_BYTES" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: invalid source measurement: '${source_measurement}'" >&2
+            return 1
+        fi
+        total_bytes="${SOURCE_BYTES:-0}"
     fi
 
     if [[ "${total_bytes:-0}" -le 0 ]]; then
@@ -235,11 +336,12 @@ mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$BACKUP_D_DIR" "$RESULTS_DIR"
 # summary of *this script's* configuration and derived paths, not shell noise.
 # Add new top-level variables here when you add them above.
 RUN_VARIABLES=(
-    DATESTAMP DATE_OF_RUN SCRIPT_VERSION
+    DATESTAMP DATE_OF_RUN SCRIPT_VERSION RUN_STARTED_EPOCH
     IMAGE DEFINITION_ROOT MOUNT_ROOT
     BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE PAR2_RATIO
     DO_BITROT KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
-    DAR_BACKUP_VERSION GIT_COMMIT REPO_DIR DAR_VERSION PAR2_VERSION
+    DAR_BACKUP_VERSION GIT_COMMIT HARNESS_GIT_COMMIT HARNESS_GIT_DIRTY REPO_DIR
+    IMAGE_ID IMAGE_REPO_DIGEST IMAGE_REVISION IMAGE_VERSION DAR_VERSION PAR2_VERSION
     PYTHON_VERSION OS_DESC KERNEL
     RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR BACKUP_D_DIR
     RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE CID_FILE
@@ -374,6 +476,7 @@ write_backup_def() {
     [[ ! "$content" =~ -s\  ]] && content="-s ${SLICE_SIZE}"$'\n'"$content"
     content="${content}"$'\n'"-g ${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     printf '%s\n' "$content" > "${BACKUP_D_DIR}/${DEFINITION_NAME}"
+    BACKUP_DEFINITION_SHA256=$(sha256sum "${BACKUP_D_DIR}/${DEFINITION_NAME}" | awk '{print $1}')
 }
 
 create_diff_primer() {
@@ -391,7 +494,7 @@ create_diff_primer() {
 update_diff_primer() {
     info "Updating diff-primer data..."
     find "$DIFF_PRIMER_DIR" -type f | grep -v "link_" | while read -r f; do
-        dd if=/dev/urandom of="$f" bs=$(stat -c%s "$f") count=1 2>/dev/null
+        dd if=/dev/urandom of="$f" bs="$(stat -c%s "$f")" count=1 2>/dev/null
     done || true
     rm "${DIFF_PRIMER_DIR}/link_original.txt"
     echo "Appended text block mutating target1 inode before execution of DIFF backup." >> "${DIFF_PRIMER_DIR}/link_target1.txt"
@@ -400,7 +503,8 @@ update_diff_primer() {
 }
 
 verify_diff_contents() {
-    local full_base="$1" diff_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
+    local diff_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
+    local ok=1
     banner "Phase 2b — DIFF contents verification"
     local diff_saved; diff_saved=$(docker_run_tool /usr/local/bin/dar -l "${BACKUP_DIR}/${diff_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
     # grep -c already prints "0" (with exit 1) on no match; the `|| true` below only
@@ -408,14 +512,25 @@ verify_diff_contents() {
     # value the way `|| echo 0` used to (which silently corrupted the count to "0\n0").
     local modified_count; modified_count=$(echo "$diff_saved" | grep -v "diff_new_" | { grep -c "${primer_rel}" || true; } 2>/dev/null)
     local new_count; new_count=$(echo "$diff_saved" | { grep -c "diff_new_" || true; } 2>/dev/null)
-    [[ "${modified_count}" -ge "${PRIMER_NON_LINK_COUNT}" ]] && pass "Modified file count OK (${modified_count})" || fail "Modified file count LOW (${modified_count}, expected >=${PRIMER_NON_LINK_COUNT})"
-    [[ "${new_count}" -ge 1 ]] && pass "New file count OK" || fail "New file missing from DIFF"
+    if [[ "${modified_count}" -ge "${PRIMER_NON_LINK_COUNT}" ]]; then
+        pass "Modified file count OK (${modified_count})"
+    else
+        fail "Modified file count LOW (${modified_count}, expected >=${PRIMER_NON_LINK_COUNT})"
+        ok=0
+    fi
+    if [[ "${new_count}" -ge 1 ]]; then
+        pass "New file count OK"
+    else
+        fail "New file missing from DIFF"
+        ok=0
+    fi
+    return $((1 - ok))
 }
 
 update_incr_primer() {
     info "Updating diff-primer data for INCR..."
     find "$DIFF_PRIMER_DIR" -type f | grep -v "link_" | while read -r f; do
-        dd if=/dev/urandom of="$f" bs=$(stat -c%s "$f") count=1 2>/dev/null
+        dd if=/dev/urandom of="$f" bs="$(stat -c%s "$f")" count=1 2>/dev/null
     done || true
     # Remove one of the two current hardlink names; the underlying inode/content
     # survives via link_target2.txt, extending the hardlink-tracking chain one tier.
@@ -426,12 +541,24 @@ update_incr_primer() {
 
 verify_incr_contents() {
     local diff_base="$1" incr_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
+    local ok=1
     banner "Phase 2c — INCR contents verification"
     local incr_saved; incr_saved=$(docker_run_tool /usr/local/bin/dar -l "${BACKUP_DIR}/${incr_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
     local modified_count; modified_count=$(echo "$incr_saved" | grep -v "incr_new_" | { grep -c "${primer_rel}" || true; } 2>/dev/null)
     local new_count; new_count=$(echo "$incr_saved" | { grep -c "incr_new_" || true; } 2>/dev/null)
-    [[ "${modified_count}" -ge "${PRIMER_NON_LINK_COUNT}" ]] && pass "Modified file count OK (${modified_count})" || fail "Modified file count LOW (${modified_count}, expected >=${PRIMER_NON_LINK_COUNT})"
-    [[ "${new_count}" -ge 1 ]] && pass "New file count OK" || fail "New file missing from INCR"
+    if [[ "${modified_count}" -ge "${PRIMER_NON_LINK_COUNT}" ]]; then
+        pass "Modified file count OK (${modified_count})"
+    else
+        fail "Modified file count LOW (${modified_count}, expected >=${PRIMER_NON_LINK_COUNT})"
+        ok=0
+    fi
+    if [[ "${new_count}" -ge 1 ]]; then
+        pass "New file count OK"
+    else
+        fail "New file missing from INCR"
+        ok=0
+    fi
+    return $((1 - ok))
 }
 
 # ── content checksum tracking ─────────────────────────────────────────────────
@@ -466,6 +593,7 @@ verify_primer_checksums() {
         fi
     done
     [[ $ok -eq 1 ]] && pass "All ${checked} restored file(s) match source sha256 checksums"
+    return $((1 - ok))
 }
 
 write_darrc() {
@@ -493,13 +621,23 @@ check_par2_per_slice() {
         [[ ! -f "${PAR2_DIR}/${archive_base}.${i}.dar.par2" ]] && { fail "Missing par2 slice ${i}"; ok=0; }
     done
     [[ -f "${PAR2_DIR}/${archive_base}.par2" ]] && { fail "Archive-level par2 found (regression)"; ok=0; }
-    [[ -f "${PAR2_DIR}/${archive_base}.par2.manifest.ini" ]] && pass "Manifest present" || { fail "Manifest missing"; ok=0; }
+    if [[ -f "${PAR2_DIR}/${archive_base}.par2.manifest.ini" ]]; then
+        pass "Manifest present"
+    else
+        fail "Manifest missing"
+        ok=0
+    fi
     return $((1 - ok))
 }
 
 check_dar_integrity() {
     info "Running dar -t on $2..."
-    docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${1}" -N -Q >> "$LOGFILE" 2>&1 && pass "dar -t passed: $2" || fail "dar -t failed: $2"
+    if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${1}" -N -Q >> "$LOGFILE" 2>&1; then
+        pass "dar -t passed: $2"
+        return 0
+    fi
+    fail "dar -t failed: $2"
+    return 1
 }
 
 check_par2_verify() {
@@ -510,10 +648,16 @@ check_par2_verify() {
     local par2_files=("${PAR2_DIR}/${archive_base}".*.dar.par2)
     shopt -u nullglob
 
+    if [[ ${#par2_files[@]} -eq 0 ]]; then
+        fail "No par2 slice files found for ${label} verification"
+        return 1
+    fi
+
     for par2_file in "${par2_files[@]}"; do
         docker_run_tool /usr/bin/par2 verify -B "$BACKUP_DIR" -q "$par2_file" >> "$LOGFILE" 2>&1 || { fail "par2 verify FAILED: $(basename "$par2_file")"; all_ok=0; }
     done
     [[ $all_ok -eq 1 ]] && pass "par2 verify passed all slices: ${label}"
+    return $((1 - all_ok))
 }
 
 
@@ -526,15 +670,45 @@ do_bitrot_test() {
     local size; size=$(stat -c%s "$slice")
     local corrupt_bytes=$(( size * 2 / 100 )) offset=$(( size / 4 ))
     info "Injecting bitrot..."
-    dd if=/dev/urandom of="$slice" bs=1 seek="$offset" count="$corrupt_bytes" conv=notrunc >> "$LOGFILE" 2>&1
-    docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1 && { fail "dar-t missed corruption"; return; } || pass "dar -t correctly detected corruption"
+    if ! dd if=/dev/urandom of="$slice" bs=1 seek="$offset" count="$corrupt_bytes" conv=notrunc >> "$LOGFILE" 2>&1; then
+        fail "Unable to inject bitrot into $(basename "$slice")"
+        return 1
+    fi
+    if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
+        fail "dar-t missed corruption"
+        return 1
+    fi
+    pass "dar -t correctly detected corruption"
     info "Repairing with par2..."
-    docker_run_tool /usr/bin/par2 repair -B "$BACKUP_DIR" -q "$par2" >> "$LOGFILE" 2>&1 && pass "par2 repair succeeded" || { fail "par2 repair failed"; return; }
-    docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1 && pass "dar -t passed after repair" || fail "dar -t still fails after repair"
+    if ! docker_run_tool /usr/bin/par2 repair -B "$BACKUP_DIR" -q "$par2" >> "$LOGFILE" 2>&1; then
+        fail "par2 repair failed"
+        return 1
+    fi
+    pass "par2 repair succeeded"
+    if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
+        pass "dar -t passed after repair"
+        return 0
+    fi
+    fail "dar -t still fails after repair"
+    return 1
 }
 
-count_slices() { ls "${BACKUP_DIR}/${1}".*.dar 2>/dev/null | wc -l; }
-init_manager_db() { docker_run_tool /opt/venv/bin/manager --create-db --config-file "$CONFIG_FILE" --log-stdout >> "$LOGFILE" 2>&1 && pass "manager --create-db succeeded" || fail "manager --create-db failed"; }
+count_slices() {
+    local archive_base="$1"
+    local -a slice_files
+    shopt -s nullglob
+    slice_files=("${BACKUP_DIR}/${archive_base}".*.dar)
+    shopt -u nullglob
+    echo "${#slice_files[@]}"
+}
+init_manager_db() {
+    if docker_run_tool /opt/venv/bin/manager --create-db --config-file "$CONFIG_FILE" --log-stdout >> "$LOGFILE" 2>&1; then
+        pass "manager --create-db succeeded"
+        return 0
+    fi
+    fail "manager --create-db failed"
+    return 1
+}
 
 # ── find archive base for a backup type ───────────────────────────────────────
 find_archive_base() {
@@ -554,9 +728,215 @@ find_archive_base() {
     fi
 }
 
-cleanup() { stop_rss_monitor; [[ $KEEP -eq 0 ]] && rm -rf "$RUN_DIR" || info "Keeping run directory: $RUN_DIR"; }
+calc_max_rss() {
+    local target_cmd="$1"
+    local log_path="${RSS_LOGFILE:-}"
 
-trap cleanup EXIT
+    if [[ -n "$log_path" && -f "$log_path" ]]; then
+        awk -v target="cmd=$target_cmd" '
+            $7 == target {
+                split($3, rss_val, "=");
+                if (rss_val[2] > max) max = rss_val[2]
+            }
+            END { if (max > 0) printf "%.1f MB", max / 1024; else print "N/A" }
+        ' "$log_path"
+        return 0
+    fi
+    echo "N/A"
+}
+
+calc_archive_bytes() {
+    local prefix="$1"
+    local target_dir="${BACKUP_DIR:-}"
+    local def_name="${DEFINITION_NAME:-}"
+    local total_bytes=0
+
+    if [[ -z "$target_dir" || ! -d "$target_dir" || -z "$def_name" ]]; then
+        echo ""
+        return 0
+    fi
+
+    shopt -s nullglob
+    local archive_files=("${target_dir}/${def_name}_${prefix}_"*.dar)
+    shopt -u nullglob
+    if [[ ${#archive_files[@]} -eq 0 ]]; then
+        echo ""
+        return 0
+    fi
+
+    local archive_file file_bytes
+    for archive_file in "${archive_files[@]}"; do
+        file_bytes=$(stat -c%s "$archive_file")
+        total_bytes=$((total_bytes + file_bytes))
+    done
+    echo "$total_bytes"
+}
+
+bytes_to_gb() {
+    local byte_count="${1:-}"
+    if [[ -z "$byte_count" ]]; then
+        echo ""
+        return 0
+    fi
+    awk -v bytes="$byte_count" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 / 1024 }'
+}
+
+prepare_result_metrics() {
+    MAX_DAR_BACKUP=$(calc_max_rss "dar-backup")
+    MAX_DAR=$(calc_max_rss "dar")
+    MAX_PAR2=$(calc_max_rss "par2")
+    MAX_MANAGER=$(calc_max_rss "manager")
+
+    FULL_SIZE_BYTES=$(calc_archive_bytes "FULL")
+    DIFF_SIZE_BYTES=$(calc_archive_bytes "DIFF")
+    INCR_SIZE_BYTES=$(calc_archive_bytes "INCR")
+    FULL_SIZE_GB=$(bytes_to_gb "$FULL_SIZE_BYTES")
+    DIFF_SIZE_GB=$(bytes_to_gb "$DIFF_SIZE_BYTES")
+    INCR_SIZE_GB=$(bytes_to_gb "$INCR_SIZE_BYTES")
+    OVERALL_ELAPSED=$(( $(date +%s) - RUN_STARTED_EPOCH ))
+}
+
+# Invoked indirectly from the EXIT trap via on_exit.
+# shellcheck disable=SC2317
+write_json_record() {
+    local exit_status="$1"
+    local effective_repo_dir="${REPO_DIR:-}"
+    local db_mb dar_mb_value par2_mb manager_mb
+
+    db_mb=$(awk '{print $1}' <<< "${MAX_DAR_BACKUP:-N/A}")
+    dar_mb_value=$(awk '{print $1}' <<< "${MAX_DAR:-N/A}")
+    par2_mb=$(awk '{print $1}' <<< "${MAX_PAR2:-N/A}")
+    manager_mb=$(awk '{print $1}' <<< "${MAX_MANAGER:-N/A}")
+
+    if [[ $SMOKETEST -eq 1 ]]; then
+        effective_repo_dir=""
+        info "Smoketest mode: not mirroring this run into the tracked repo history file."
+    fi
+
+    RESULT_WRITTEN=1
+    LST_DATESTAMP="${DATESTAMP:-}" \
+    LST_DATE="${DATE_OF_RUN:-}" \
+    LST_GIT_COMMIT="${GIT_COMMIT:-unknown}" \
+    LST_DAR_BACKUP_VER="${DAR_BACKUP_VERSION:-unknown}" \
+    LST_DAR_VER="${DAR_VERSION:-unknown}" \
+    LST_PAR2_VER="${PAR2_VERSION:-unknown}" \
+    LST_PYTHON_VER="${PYTHON_VERSION:-unknown}" \
+    LST_OS_DESC="${OS_DESC:-unknown}" \
+    LST_KERNEL="${KERNEL:-unknown}" \
+    LST_FULL_ELAPSED="${full_elapsed:-0}" \
+    LST_FULL_GB="${FULL_SIZE_GB:-}" \
+    LST_DIFF_ELAPSED="${diff_elapsed:-0}" \
+    LST_DIFF_GB="${DIFF_SIZE_GB:-}" \
+    LST_INCR_ELAPSED="${incr_elapsed:-0}" \
+    LST_INCR_GB="${INCR_SIZE_GB:-}" \
+    LST_DB_MB="$db_mb" \
+    LST_DAR_MB="$dar_mb_value" \
+    LST_PAR2_MB="$par2_mb" \
+    LST_MGR_MB="$manager_mb" \
+    LST_FAILURES="${FAILURES:-0}" \
+    LST_SCRIPT_VERSION="$SCRIPT_VERSION" \
+    LST_HARNESS_GIT_COMMIT="${HARNESS_GIT_COMMIT:-unknown}" \
+    LST_HARNESS_GIT_DIRTY="${HARNESS_GIT_DIRTY:-0}" \
+    LST_IMAGE_REFERENCE="$IMAGE" \
+    LST_IMAGE_ID="${IMAGE_ID:-unknown}" \
+    LST_IMAGE_REPO_DIGEST="${IMAGE_REPO_DIGEST:-}" \
+    LST_IMAGE_REVISION="${IMAGE_REVISION:-}" \
+    LST_IMAGE_VERSION="${IMAGE_VERSION:-}" \
+    LST_SOURCE_FILE_COUNT="${SOURCE_FILE_COUNT:-}" \
+    LST_SOURCE_BYTES="${SOURCE_BYTES:-}" \
+    LST_BACKUP_DEFINITION_SHA256="${BACKUP_DEFINITION_SHA256:-}" \
+    LST_FULL_BYTES="${FULL_SIZE_BYTES:-}" \
+    LST_DIFF_BYTES="${DIFF_SIZE_BYTES:-}" \
+    LST_INCR_BYTES="${INCR_SIZE_BYTES:-}" \
+    LST_OVERALL_ELAPSED="${OVERALL_ELAPSED:-0}" \
+    LST_COMPLETED="${RUN_COMPLETED:-0}" \
+    LST_CURRENT_PHASE="${CURRENT_PHASE:-unknown}" \
+    LST_EXIT_CODE="$exit_status" \
+    LST_MANAGER_DB_STATUS="$MANAGER_DB_STATUS" \
+    LST_FULL_BACKUP_STATUS="$FULL_BACKUP_STATUS" \
+    LST_DIFF_BACKUP_STATUS="$DIFF_BACKUP_STATUS" \
+    LST_INCR_BACKUP_STATUS="$INCR_BACKUP_STATUS" \
+    LST_FULL_ARCHIVE_STATUS="$FULL_ARCHIVE_STATUS" \
+    LST_DIFF_ARCHIVE_STATUS="$DIFF_ARCHIVE_STATUS" \
+    LST_INCR_ARCHIVE_STATUS="$INCR_ARCHIVE_STATUS" \
+    LST_FULL_PAR2_FILES_STATUS="$FULL_PAR2_FILES_STATUS" \
+    LST_DIFF_PAR2_FILES_STATUS="$DIFF_PAR2_FILES_STATUS" \
+    LST_INCR_PAR2_FILES_STATUS="$INCR_PAR2_FILES_STATUS" \
+    LST_FULL_PAR2_VERIFY_STATUS="$FULL_PAR2_VERIFY_STATUS" \
+    LST_DIFF_PAR2_VERIFY_STATUS="$DIFF_PAR2_VERIFY_STATUS" \
+    LST_INCR_PAR2_VERIFY_STATUS="$INCR_PAR2_VERIFY_STATUS" \
+    LST_FULL_BITROT_STATUS="$FULL_BITROT_STATUS" \
+    LST_DIFF_BITROT_STATUS="$DIFF_BITROT_STATUS" \
+    LST_INCR_BITROT_STATUS="$INCR_BITROT_STATUS" \
+    LST_DIFF_CONTENTS_STATUS="$DIFF_CONTENTS_STATUS" \
+    LST_INCR_CONTENTS_STATUS="$INCR_CONTENTS_STATUS" \
+    LST_PITR_EXECUTION_STATUS="$PITR_EXECUTION_STATUS" \
+    LST_PITR_STRUCTURE_STATUS="$PITR_STRUCTURE_STATUS" \
+    LST_PITR_CHECKSUM_STATUS="$PITR_CHECKSUM_STATUS" \
+    LST_PITR_OVERALL_STATUS="$PITR_OVERALL_STATUS" \
+    LST_RESULTS_DIR="$RESULTS_DIR" \
+    LST_REPO_DIR="$effective_repo_dir" \
+    python3 "${REPO_DIR}/scripts/large_scale_result.py"
+    local result_status=$?
+    if [[ $result_status -ne 0 ]]; then
+        return "$result_status"
+    fi
+
+    info "Structured result written to: ${RESULTS_DIR}/large-scale-results.jsonl"
+    if [[ -n "$effective_repo_dir" ]]; then
+        info "Structured result mirrored to: ${effective_repo_dir}/doc/test-report/large-scale-results.jsonl"
+    fi
+}
+
+# Invoked indirectly from the EXIT trap via on_exit.
+# shellcheck disable=SC2317
+cleanup() {
+    if [[ $KEEP -eq 0 ]]; then
+        rm -rf "${RUN_DIR:?}"
+        return 0
+    fi
+    info "Keeping run directory: $RUN_DIR"
+}
+
+# Static analysis cannot follow function names registered as trap handlers.
+# shellcheck disable=SC2317
+on_exit() {
+    local exit_status=$?
+    local writer_status=0
+
+    trap - EXIT HUP INT QUIT TERM
+    set +e
+    stop_rss_monitor
+    if [[ $RUN_RESULT_READY -eq 1 && $RESULT_WRITTEN -eq 0 ]]; then
+        prepare_result_metrics
+        write_json_record "$exit_status"
+        writer_status=$?
+        if [[ $writer_status -ne 0 ]]; then
+            echo "ERROR: failed to write structured JSON result (exit ${writer_status})" >&2
+            [[ $exit_status -eq 0 ]] && exit_status=$writer_status
+        fi
+    fi
+    cleanup
+    exit "$exit_status"
+}
+
+# Static analysis cannot follow function names registered as trap handlers.
+# shellcheck disable=SC2317
+on_interrupt() {
+    local signal_exit_code="$1"
+    CURRENT_PHASE="${CURRENT_PHASE}:interrupted"
+    exit "$signal_exit_code"
+}
+
+full_elapsed=0; diff_elapsed=0; incr_elapsed=0
+FULL_BASE=""; DIFF_BASE=""; INCR_BASE=""; FULL_SLICES=0
+
+RUN_RESULT_READY=1
+trap on_exit EXIT
+trap 'on_interrupt 129' HUP
+trap 'on_interrupt 130' INT
+trap 'on_interrupt 131' QUIT
+trap 'on_interrupt 143' TERM
 
 # ════════════════════════════════════════════════════════════════════════════════
 # MAIN ORCHESTRATION
@@ -565,17 +945,30 @@ banner "dar-backup large-scale test  ${DATESTAMP}"
 
 print_run_variables
 
-full_elapsed=0; diff_elapsed=0; incr_elapsed=0
-FULL_BASE=""; DIFF_BASE=""; INCR_BASE=""; FULL_SLICES=0
-
-write_config; create_diff_primer; write_backup_def; check_disk_space; write_darrc; init_manager_db; start_rss_monitor
+CURRENT_PHASE="setup"
+write_config
+create_diff_primer
+write_backup_def
+check_disk_space
+write_darrc
+if init_manager_db; then
+    MANAGER_DB_STATUS="passed"
+else
+    MANAGER_DB_STATUS="failed"
+fi
+start_rss_monitor
 
 # ── PHASE 1 ──
+CURRENT_PHASE="full_backup"
 banner "Phase 1 — FULL backup"
 t0=$(date +%s)
 if docker_run_backup -F -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --darrc "$DARRC" --log-level debug; then
-    full_elapsed=$(( $(date +%s) - t0 )); pass "FULL backup completed in ${full_elapsed}s"
+    full_elapsed=$(( $(date +%s) - t0 ))
+    FULL_BACKUP_STATUS="passed"
+    pass "FULL backup completed in ${full_elapsed}s"
 else
+    full_elapsed=$(( $(date +%s) - t0 ))
+    FULL_BACKUP_STATUS="failed"
     exit 1
 fi
 
@@ -583,54 +976,74 @@ FULL_BASE=$(find_archive_base "FULL")
 [[ -z "${FULL_BASE}" ]] && { fail "No FULL base found"; exit 1; }
 FULL_SLICES=$(count_slices "$FULL_BASE")
 
-check_dar_integrity  "$FULL_BASE" "FULL"
-check_par2_per_slice "$FULL_BASE" "$FULL_SLICES"
-check_par2_verify    "$FULL_BASE" "FULL"
-[[ $DO_BITROT -eq 1 ]] && do_bitrot_test "$FULL_BASE"
+CURRENT_PHASE="full_verification"
+if check_dar_integrity "$FULL_BASE" "FULL"; then FULL_ARCHIVE_STATUS="passed"; else FULL_ARCHIVE_STATUS="failed"; fi
+if check_par2_per_slice "$FULL_BASE" "$FULL_SLICES"; then FULL_PAR2_FILES_STATUS="passed"; else FULL_PAR2_FILES_STATUS="failed"; fi
+if check_par2_verify "$FULL_BASE" "FULL"; then FULL_PAR2_VERIFY_STATUS="passed"; else FULL_PAR2_VERIFY_STATUS="failed"; fi
+if [[ $DO_BITROT -eq 1 ]]; then
+    if do_bitrot_test "$FULL_BASE"; then FULL_BITROT_STATUS="passed"; else FULL_BITROT_STATUS="failed"; fi
+fi
 
 # ── PHASE 2 ──
+CURRENT_PHASE="diff_backup"
 banner "Phase 2 — DIFF backup"
 update_diff_primer
 t0=$(date +%s)
 if docker_run_backup -D -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --darrc "$DARRC" --log-level debug; then
-    diff_elapsed=$(( $(date +%s) - t0 )); pass "DIFF backup completed in ${diff_elapsed}s"
+    diff_elapsed=$(( $(date +%s) - t0 ))
+    DIFF_BACKUP_STATUS="passed"
+    pass "DIFF backup completed in ${diff_elapsed}s"
 else
+    diff_elapsed=$(( $(date +%s) - t0 ))
+    DIFF_BACKUP_STATUS="failed"
     exit 1
 fi
 
 DIFF_BASE=$(find_archive_base "DIFF")
 [[ -z "${DIFF_BASE}" ]] && { fail "No DIFF base found"; exit 1; }
 DIFF_SLICES=$(count_slices "$DIFF_BASE")
-check_dar_integrity  "$DIFF_BASE" "DIFF"
-check_par2_per_slice "$DIFF_BASE" "$DIFF_SLICES"
-check_par2_verify    "$DIFF_BASE" "DIFF"
-[[ $DO_BITROT -eq 1 ]] && do_bitrot_test "$DIFF_BASE"
-verify_diff_contents "$FULL_BASE" "$DIFF_BASE"
+CURRENT_PHASE="diff_verification"
+if check_dar_integrity "$DIFF_BASE" "DIFF"; then DIFF_ARCHIVE_STATUS="passed"; else DIFF_ARCHIVE_STATUS="failed"; fi
+if check_par2_per_slice "$DIFF_BASE" "$DIFF_SLICES"; then DIFF_PAR2_FILES_STATUS="passed"; else DIFF_PAR2_FILES_STATUS="failed"; fi
+if check_par2_verify "$DIFF_BASE" "DIFF"; then DIFF_PAR2_VERIFY_STATUS="passed"; else DIFF_PAR2_VERIFY_STATUS="failed"; fi
+if [[ $DO_BITROT -eq 1 ]]; then
+    if do_bitrot_test "$DIFF_BASE"; then DIFF_BITROT_STATUS="passed"; else DIFF_BITROT_STATUS="failed"; fi
+fi
+if verify_diff_contents "$FULL_BASE" "$DIFF_BASE"; then DIFF_CONTENTS_STATUS="passed"; else DIFF_CONTENTS_STATUS="failed"; fi
 
 # ── PHASE 2c ──
+CURRENT_PHASE="incr_backup"
 banner "Phase 2c — INCR backup"
 info "Waiting ~2-3 minutes before mutating data for INCR (keeps primer mtimes cleanly separated in the log)..."
 sleep 150
 update_incr_primer
 t0=$(date +%s)
 if docker_run_backup -I -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --darrc "$DARRC" --log-level debug; then
-    incr_elapsed=$(( $(date +%s) - t0 )); pass "INCR backup completed in ${incr_elapsed}s"
+    incr_elapsed=$(( $(date +%s) - t0 ))
+    INCR_BACKUP_STATUS="passed"
+    pass "INCR backup completed in ${incr_elapsed}s"
 else
+    incr_elapsed=$(( $(date +%s) - t0 ))
+    INCR_BACKUP_STATUS="failed"
     exit 1
 fi
 
 INCR_BASE=$(find_archive_base "INCR")
 [[ -z "${INCR_BASE}" ]] && { fail "No INCR base found"; exit 1; }
 INCR_SLICES=$(count_slices "$INCR_BASE")
-check_dar_integrity  "$INCR_BASE" "INCR"
-check_par2_per_slice "$INCR_BASE" "$INCR_SLICES"
-check_par2_verify    "$INCR_BASE" "INCR"
-[[ $DO_BITROT -eq 1 ]] && do_bitrot_test "$INCR_BASE"
-verify_incr_contents "$DIFF_BASE" "$INCR_BASE"
+CURRENT_PHASE="incr_verification"
+if check_dar_integrity "$INCR_BASE" "INCR"; then INCR_ARCHIVE_STATUS="passed"; else INCR_ARCHIVE_STATUS="failed"; fi
+if check_par2_per_slice "$INCR_BASE" "$INCR_SLICES"; then INCR_PAR2_FILES_STATUS="passed"; else INCR_PAR2_FILES_STATUS="failed"; fi
+if check_par2_verify "$INCR_BASE" "INCR"; then INCR_PAR2_VERIFY_STATUS="passed"; else INCR_PAR2_VERIFY_STATUS="failed"; fi
+if [[ $DO_BITROT -eq 1 ]]; then
+    if do_bitrot_test "$INCR_BASE"; then INCR_BITROT_STATUS="passed"; else INCR_BITROT_STATUS="failed"; fi
+fi
+if verify_incr_contents "$DIFF_BASE" "$INCR_BASE"; then INCR_CONTENTS_STATUS="passed"; else INCR_CONTENTS_STATUS="failed"; fi
 
 capture_primer_checksums
 
 # ── PHASE 3 ──
+CURRENT_PHASE="pitr_restore"
 banner "Phase 3a — Point-In-Time Restore Validation (latest state)"
 
 info "Cleaning restore target directory to satisfy manager safety checks..."
@@ -646,94 +1059,68 @@ if docker_run_tool /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
            --when "now" \
            --target "$RESTORE_DIR" \
            --log-stdout --verbose >> "$LOGFILE" 2>&1; then
+    PITR_EXECUTION_STATUS="passed"
     pass "Restore sequence completed execution via manager"
 else
+    PITR_EXECUTION_STATUS="failed"
     fail "manager PITR restore dropped an error exit code"
 fi
 
 RESTORE_PRIMER_PATH="${RESTORE_DIR}/${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
+pitr_structure_ok=1
 
 if [[ -f "${RESTORE_PRIMER_PATH}/link_original.txt" ]]; then
     fail "link_original.txt present in latest-state restore (should have been deleted by DIFF)"
+    pitr_structure_ok=0
 else
     pass "link_original.txt correctly absent from latest-state restore"
 fi
 if [[ -f "${RESTORE_PRIMER_PATH}/link_target1.txt" ]]; then
     fail "link_target1.txt present in latest-state restore (should have been deleted by INCR)"
+    pitr_structure_ok=0
 else
     pass "link_target1.txt correctly absent from latest-state restore"
 fi
 if [[ -f "${RESTORE_PRIMER_PATH}/link_target2.txt" && -f "${RESTORE_PRIMER_PATH}/link_target3.txt" ]]; then
     inode2=$(stat -c %i "${RESTORE_PRIMER_PATH}/link_target2.txt")
     inode3=$(stat -c %i "${RESTORE_PRIMER_PATH}/link_target3.txt")
-    [[ "$inode2" -eq "$inode3" ]] && pass "Hard Link Inodes match (${inode2})" || fail "Inodes mismatched (Cloned data!)"
+    if [[ "$inode2" -eq "$inode3" ]]; then
+        pass "Hard Link Inodes match (${inode2})"
+    else
+        fail "Inodes mismatched (Cloned data!)"
+        pitr_structure_ok=0
+    fi
 else
     fail "Hard-link targets missing"
+    pitr_structure_ok=0
 fi
 if compgen -G "${RESTORE_PRIMER_PATH}/incr_new_*.bin" > /dev/null; then
     pass "INCR-tier new file present in latest-state restore"
 else
     fail "INCR-tier new file missing from latest-state restore"
+    pitr_structure_ok=0
 fi
 
-verify_primer_checksums
+if [[ $pitr_structure_ok -eq 1 ]]; then PITR_STRUCTURE_STATUS="passed"; else PITR_STRUCTURE_STATUS="failed"; fi
+if verify_primer_checksums; then PITR_CHECKSUM_STATUS="passed"; else PITR_CHECKSUM_STATUS="failed"; fi
+if [[ "$PITR_EXECUTION_STATUS" == "passed" && "$PITR_STRUCTURE_STATUS" == "passed" && "$PITR_CHECKSUM_STATUS" == "passed" ]]; then
+    PITR_OVERALL_STATUS="passed"
+else
+    PITR_OVERALL_STATUS="failed"
+fi
 
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
+CURRENT_PHASE="summary"
 banner "Summary"
 
 stop_rss_monitor
-
-calc_max_rss() {
-    local target_cmd="$1"
-    local log_path="${RSS_LOGFILE:-}"
-    
-    if [[ -n "$log_path" && -f "$log_path" ]]; then
-        awk -v target="cmd=$target_cmd" '
-            $7 == target {
-                split($3, rss_val, "=");
-                if (rss_val[2] > max) max = rss_val[2] 
-            } 
-            END { if (max > 0) printf "%.1f MB", max / 1024; else print "N/A" }
-        ' "$log_path"
-    else
-        echo "N/A"
-    fi
-}
-
-# Use the precise binary names matching the output of cmd= in rss.log
-MAX_DAR_BACKUP=$(calc_max_rss "dar-backup")
-MAX_DAR=$(calc_max_rss "dar")
-MAX_PAR2=$(calc_max_rss "par2")
-MAX_MANAGER=$(calc_max_rss "manager")
-
-# Fixed disk analyzer helper: avoids pipe failures if globs don't match files
-calc_slice_size() {
-    local prefix="$1"
-    local target_dir="${BACKUP_DIR:-}"
-    local def_name="${DEFINITION_NAME:-}"
-    
-    if [[ -n "$target_dir" && -d "$target_dir" && -n "$def_name" ]]; then
-        # Ensure the glob resolves without throwing errors to du
-        local bytes; bytes=$(du -cb "${target_dir}/${def_name}_${prefix}_"* 2>/dev/null | awk 'END{print $1}' || echo 0)
-        if [[ "$bytes" -gt 0 ]]; then
-            awk -v b="$bytes" 'BEGIN { printf "%.2f GB", b / 1024 / 1024 / 1024 }'
-        else
-            echo "0.00 GB"
-        fi
-    else
-        echo "0.00 GB"
-    fi
-}
-
-FULL_SIZE=$(calc_slice_size "FULL")
-DIFF_SIZE=$(calc_slice_size "DIFF")
-INCR_SIZE=$(calc_slice_size "INCR")
+prepare_result_metrics
 
 # Compile final analytics screen layout using matched variable casing
 echo -e "dar-backup test pass: ${DATESTAMP:-}"
-echo -e "FULL elapsed: ${full_elapsed:-0}s (~${FULL_SIZE})"
-echo -e "DIFF elapsed: ${diff_elapsed:-0}s (~${DIFF_SIZE})"
-echo -e "INCR elapsed: ${incr_elapsed:-0}s (~${INCR_SIZE})"
+echo -e "FULL elapsed: ${full_elapsed:-0}s (~${FULL_SIZE_GB:-N/A} GB)"
+echo -e "DIFF elapsed: ${diff_elapsed:-0}s (~${DIFF_SIZE_GB:-N/A} GB)"
+echo -e "INCR elapsed: ${incr_elapsed:-0}s (~${INCR_SIZE_GB:-N/A} GB)"
 echo -e "Peak Engine Memory Consumption:"
 echo -e "  ├── dar-backup : ${MAX_DAR_BACKUP}"
 echo -e "  ├── dar backend: ${MAX_DAR}"
@@ -741,162 +1128,9 @@ echo -e "  ├── par2 engine: ${MAX_PAR2}"
 echo -e "  └── db manager : ${MAX_MANAGER}"
 echo -e "Failures:      ${FAILURES:-0}"
 
-# ── Structured JSON record ────────────────────────────────────────────────────
-# Appends one JSONL line to RESULTS_DIR and mirrors it to the repo doc directory.
-# Python handles all JSON serialisation so version strings with special characters
-# are encoded safely without manual escaping.
-write_json_record() {
-    local full_gb diff_gb incr_gb db_mb dar_mb_val p2_mb mgr_mb
-    full_gb=$(awk '{print $1}' <<< "${FULL_SIZE:-0}")
-    diff_gb=$(awk '{print $1}' <<< "${DIFF_SIZE:-0}")
-    incr_gb=$(awk '{print $1}' <<< "${INCR_SIZE:-0}")
-    db_mb=$(awk  '{print $1}' <<< "${MAX_DAR_BACKUP:-N/A}")
-    dar_mb_val=$(awk '{print $1}' <<< "${MAX_DAR:-N/A}")
-    p2_mb=$(awk  '{print $1}' <<< "${MAX_PAR2:-N/A}")
-    mgr_mb=$(awk '{print $1}' <<< "${MAX_MANAGER:-N/A}")
-
-    # --smoketest never mirrors into the tracked repo history file: a fast, tiny
-    # synthetic run would otherwise sit alongside real multi-hour/116GB runs and
-    # corrupt the regression-detection trend and show_large_scale_results.py output.
-    local effective_repo_dir="${REPO_DIR:-}"
-    if [[ $SMOKETEST -eq 1 ]]; then
-        effective_repo_dir=""
-        info "Smoketest mode: not mirroring this run into the tracked repo history file."
-    fi
-
-    LST_DATESTAMP="${DATESTAMP:-}" \
-    LST_DATE="${DATE_OF_RUN:-}" \
-    LST_GIT_COMMIT="${GIT_COMMIT:-unknown}" \
-    LST_DAR_BACKUP_VER="${DAR_BACKUP_VERSION:-unknown}" \
-    LST_DAR_VER="${DAR_VERSION:-unknown}" \
-    LST_PAR2_VER="${PAR2_VERSION:-unknown}" \
-    LST_PYTHON_VER="${PYTHON_VERSION:-unknown}" \
-    LST_OS_DESC="${OS_DESC:-unknown}" \
-    LST_KERNEL="${KERNEL:-unknown}" \
-    LST_FULL_ELAPSED="${full_elapsed:-0}" \
-    LST_FULL_GB="${full_gb:-0}" \
-    LST_DIFF_ELAPSED="${diff_elapsed:-0}" \
-    LST_DIFF_GB="${diff_gb:-0}" \
-    LST_INCR_ELAPSED="${incr_elapsed:-0}" \
-    LST_INCR_GB="${incr_gb:-0}" \
-    LST_DB_MB="${db_mb}" \
-    LST_DAR_MB="${dar_mb_val}" \
-    LST_PAR2_MB="${p2_mb}" \
-    LST_MGR_MB="${mgr_mb}" \
-    LST_FAILURES="${FAILURES:-0}" \
-    LST_RESULTS_DIR="${RESULTS_DIR}" \
-    LST_REPO_DIR="${effective_repo_dir}" \
-    python3 - << 'PYEOF'
-import json, os
-from pathlib import Path
-
-def to_float(s: str) -> float | None:
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return None
-
-e = os.environ
-record = {
-    "schema_version": 2,
-    "datestamp":          e["LST_DATESTAMP"],
-    "date":               e["LST_DATE"],
-    "git_commit":         e["LST_GIT_COMMIT"],
-    "dar_backup_version": e["LST_DAR_BACKUP_VER"],
-    "dar_version":        e["LST_DAR_VER"],
-    "par2_version":       e["LST_PAR2_VER"],
-    "python_version":     e["LST_PYTHON_VER"],
-    "os_desc":            e["LST_OS_DESC"],
-    "kernel":             e["LST_KERNEL"],
-    "full_elapsed_s":     int(e["LST_FULL_ELAPSED"]),
-    "full_size_gb":       to_float(e["LST_FULL_GB"]),
-    "diff_elapsed_s":     int(e["LST_DIFF_ELAPSED"]),
-    "diff_size_gb":       to_float(e["LST_DIFF_GB"]),
-    "incr_elapsed_s":     int(e["LST_INCR_ELAPSED"]),
-    "incr_size_gb":       to_float(e["LST_INCR_GB"]),
-    "memory_mb": {
-        "dar_backup": to_float(e["LST_DB_MB"]),
-        "dar":        to_float(e["LST_DAR_MB"]),
-        "par2":       to_float(e["LST_PAR2_MB"]),
-        "manager":    to_float(e["LST_MGR_MB"]),
-    },
-    "failures": int(e["LST_FAILURES"]),
-    "passed":   int(e["LST_FAILURES"]) == 0,
-}
-
-results_path = Path(e["LST_RESULTS_DIR"]) / "large-scale-results.jsonl"
-
-# ── Regression check against trailing history (read BEFORE appending this run) ──
-# Warns only — real hardware/environment variance makes a hard fail too noisy here.
-# This is a "look at this before tagging a release" signal, not a pass/fail gate.
-def load_history(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    records = []
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return records
-
-TREND_WINDOW = 5
-REGRESSION_FACTOR = 1.5
-
-history = [r for r in load_history(results_path) if r.get("passed")]
-recent = history[-TREND_WINDOW:]
-
-def trailing_avg(records: list[dict], key: str, mem_key: str | None = None) -> float | None:
-    values = []
-    for r in records:
-        v = r.get("memory_mb", {}).get(mem_key) if mem_key else r.get(key)
-        if isinstance(v, (int, float)):
-            values.append(v)
-    return sum(values) / len(values) if values else None
-
-def check_regression(label: str, current: float | None, baseline: float | None) -> None:
-    if current is None or baseline is None or baseline <= 0:
-        return
-    if current > baseline * REGRESSION_FACTOR:
-        print(
-            f"WARN  {label} ({current:.1f}) is {current / baseline:.1f}x the "
-            f"trailing {len(recent)}-run average ({baseline:.1f}) — worth a look "
-            f"before tagging a release.",
-            flush=True,
-        )
-
-if recent:
-    check_regression("FULL elapsed (s)", record["full_elapsed_s"], trailing_avg(recent, "full_elapsed_s"))
-    for tool in ("dar_backup", "dar", "par2", "manager"):
-        check_regression(
-            f"Peak {tool} memory (MB)",
-            record["memory_mb"][tool],
-            trailing_avg(recent, "", mem_key=tool),
-        )
-
-with open(results_path, "a") as fh:
-    fh.write(json.dumps(record, separators=(",", ":")) + "\n")
-
-repo_dir = e.get("LST_REPO_DIR", "")
-if repo_dir:
-    repo_path = Path(repo_dir) / "doc" / "test-report" / "large-scale-results.jsonl"
-    if repo_path.parent.is_dir():
-        with open(repo_path, "a") as fh:
-            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
-PYEOF
-    info "Structured result written to: ${RESULTS_DIR}/large-scale-results.jsonl"
-    if [[ -n "${effective_repo_dir}" ]]; then
-        info "Structured result mirrored to: ${effective_repo_dir}/doc/test-report/large-scale-results.jsonl"
-    fi
-    return 0
-}
-write_json_record || echo "WARNING: failed to write structured JSON record" >&2
-
 # Final status validation routing
+RUN_COMPLETED=1
+CURRENT_PHASE="completed"
 if [ "${FAILURES:-0}" -eq 0 ]; then
     echo -e "\n${GREEN}${BOLD}✓ ALL TESTS PASSED SUCCESSFULLY${RESET}\n"
     exit 0

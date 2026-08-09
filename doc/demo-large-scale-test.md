@@ -206,14 +206,40 @@ scale with however much data you point `SOURCE_GLOB` at.)
 ## Output
 
 - **`BASE_DIR/results/large-scale-results.jsonl`** — one JSON line per run:
-  versions, elapsed time and size per phase, peak memory per engine, pass/fail.
-  Always written, and always kept (unlike the run directory itself).
+  immutable image identity, source scale, elapsed time and exact archive size
+  per phase, peak memory per engine, individual lifecycle-check outcomes, and
+  overall pass/fail. Once the run workspace has been initialized, an `EXIT`
+  handler writes exactly one result for both completed and aborted runs. Input
+  or preflight failures that happen before a writable results directory exists
+  cannot be recorded.
 - **`BASE_DIR/results/summary-<timestamp>.txt`** — the full run transcript.
 - **`doc/test-report/large-scale-results.jsonl`** — the same JSONL line
   mirrored into this repo, if that directory exists and `--smoketest` wasn't
   used. Untracked until you `git add` it, so you decide what history to keep.
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
+
+New records use additive schema version 3. All schema-version-2 fields remain
+present for existing consumers and the older lines in the history remain
+valid. Additional provenance includes the full harness commit and dirty state,
+the requested image reference, immutable local image ID, registry digest when
+available, OCI image revision/version labels, harness script version, and the
+sha256 of the effective generated backup definition.
+
+`source_file_count` and `source_bytes` measure regular files selected by the
+definition's `-g` roots immediately before the FULL backup. Overlapping roots
+are deduplicated by absolute path and symlink targets are not followed. The
+definition hash identifies the exact selection and archive options without
+publishing private source paths; it is not a checksum of the source data.
+
+Individual checks use `passed`, `failed`, `skipped`, or `not_run`. This makes a
+disabled bitrot test distinguishable from a run that aborted before reaching
+it. Aborted records also contain `completed: false`, `aborted_phase`, and the
+original process `exit_code`.
+
+`overall_elapsed_s` starts when `scripts/large_scale_test.sh` starts, so it
+includes preflight and every lifecycle phase but excludes an optional image
+build performed earlier by the wrapper.
 
 ## Notes
 

@@ -7,6 +7,15 @@
 - embed the GPL license text at `/LICENSE` in the image
 - document how to print the embedded license
 - verify the embedded license SHA-256 and exact OCI license label during release
+- record schema-v3 large-scale-test evidence with immutable image provenance,
+  source scale, exact archive bytes, total runtime, and per-stage outcomes
+
+### Fixed
+
+- ensure initialized large-scale tests write exactly one JSONL result when they
+  complete, fail, abort, or receive an interrupt
+- fail PAR2 verification when no slice files exist instead of reporting a
+  vacuous pass
 
 ## 0.5.28 - 2026-07-08
 
