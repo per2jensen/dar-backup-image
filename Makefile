@@ -490,15 +490,9 @@ log-pushed-build-json: check_version
 	else \
 	  echo "ℹ️ No changes to commit — build history already up to date"; \
 	fi
-	@echo "📘 Updating README.md with latest build row..."
-	@FINAL_VERSION="$(FINAL_VERSION)" \
-	  DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
-	  DAR_VERSION="$(DAR_VERSION)" \
-	  GIT_REV="$(GIT_REV)" \
-	  DOCKERHUB_REPO="$(DOCKERHUB_REPO)" \
-	  DIGEST_ONLY="$(DIGEST_ONLY)" \
-	  NOTE=" - " \
-	  ./scripts/patch-readme-build.sh
+	@echo "📘 Regenerating README.md release table from build history..."
+	@python3 scripts/update_readme_releases.py
+	@python3 scripts/update_readme_releases.py --check
 	@sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md
 	@if ! git diff --quiet README.md; then \
 	  git add README.md; \

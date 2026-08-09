@@ -11,12 +11,15 @@
   source scale, exact archive bytes, total runtime, and per-stage outcomes
 - record schema-v4 reproducible random bitrot evidence, including affected
   slices and byte ranges, injection/repair timings, and PAR2 data-block counts
+- add a standalone generator and CI drift check for the README release table
 
 ### Changed
 
 - corrupt a random 2% range per backup phase, allow the range to cross DAR
   slice boundaries, and use buffered byte-accurate writes for faster injection
 - accept `BITROT_SEED`/`--bitrot-seed` to replay exact corruption selections
+- generate the complete README release table, including UTC release dates,
+  from canonical `doc/build-history.json` metadata during every release
 
 ### Fixed
 
@@ -24,6 +27,7 @@
   complete, fail, abort, or receive an interrupt
 - fail PAR2 verification when no slice files exist instead of reporting a
   vacuous pass
+- restore the accidentally removed `0.5.28` README release row
 
 ## 0.5.28 - 2026-07-08
 

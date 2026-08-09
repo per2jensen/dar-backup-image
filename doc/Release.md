@@ -43,6 +43,14 @@ The workflow will:
 10. Create the annotated git tag `vVERSION` and push it
 11. Create a GitHub Release with SBOM and SARIF as assets
 
+The README release table is regenerated entirely from `doc/build-history.json`
+during the workflow. It can also be refreshed or verified independently:
+
+```bash
+python3 scripts/update_readme_releases.py
+python3 scripts/update_readme_releases.py --check
+```
+
 > **Note:** Do NOT manually create the git tag before triggering the workflow —
 > the workflow creates it at the right moment after all steps have succeeded.
 

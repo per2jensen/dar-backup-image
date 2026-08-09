@@ -348,15 +348,9 @@ jobs:
              ${{ env.SARIF_FILE }} \
              ${{ env.SBOM_FILE }}
 
-          # Update README builds table
-          FINAL_VERSION="${{ env.FINAL_VERSION }}" \
-          DAR_BACKUP_VERSION="${{ steps.versions.outputs.DAR_BACKUP_VERSION }}" \
-          DAR_VERSION="${{ steps.versions.outputs.DAR_VERSION }}" \
-          GIT_REV="$(git rev-parse --short HEAD)" \
-          DOCKERHUB_REPO="${{ env.DOCKERHUB_REPO }}" \
-          DIGEST_ONLY="${DIGEST#*@}" \
-          NOTE=" - " \
-          ./scripts/patch-readme-build.sh
+          # Regenerate the complete README release table from canonical history.
+          python3 scripts/update_readme_releases.py
+          python3 scripts/update_readme_releases.py --check
 
           echo "🔄 Updating version examples in README.md to VERSION=${FINAL_VERSION}"
           sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=${FINAL_VERSION};/" README.md

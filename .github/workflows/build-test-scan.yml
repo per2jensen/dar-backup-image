@@ -31,6 +31,8 @@ jobs:
       image_ref: ${{ steps.meta.outputs.image_ref }}
     steps:
       - uses: actions/checkout@v7
+      - name: Verify generated README release table
+        run: python3 scripts/update_readme_releases.py --check
       - name: Read DAR_BACKUP_VERSION
         id: ver
         run: echo "v=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
