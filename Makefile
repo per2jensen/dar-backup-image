@@ -340,7 +340,7 @@ verify-labels:
 	  fi; \
 	done
 
-	@echo "🔎 Checking exact matches for version and ref.name…"
+	@echo "🔎 Checking exact matches for base digest, version, ref.name, and license…"
 	@set -e; \
 	exp_version="$(UBUNTU_DIGEST)"; \
 	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
@@ -365,6 +365,14 @@ verify-labels:
 	  echo "❌ org.opencontainers.image.ref.name mismatch"; \
 	  echo "   expected: '$$exp_ref'"; \
 	  echo "   actual:   '$$act_ref'"; \
+	  exit 1; \
+	fi; \
+	exp_license="GPL-3.0-or-later"; \
+	act_license="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.licenses" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
+	if [ "$$act_license" != "$$exp_license" ]; then \
+	  echo "❌ org.opencontainers.image.licenses mismatch"; \
+	  echo "   expected: '$$exp_license'"; \
+	  echo "   actual:   '$$act_license'"; \
 	  exit 1; \
 	fi; \
 	echo "✅ Labels match expected values."

@@ -1,4 +1,4 @@
-# dar-backup image for container backups and more
+# dar-backup image — reproducible backups and a long-term restore time capsule
 <a href="https://github.com/per2jensen/dar-backup-image/releases"><img alt="Tag" src="https://img.shields.io/github/v/tag/per2jensen/dar-backup-image"/></a>
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
 <a href="https://github.com/per2jensen/dar-backup-image/blob/main/doc/DETAILS.md#image-signing-and-supply-chain-verification">
@@ -22,39 +22,49 @@
 
 ## dar-backup-image
 
-`dar-backup-image` is a Docker image that bundles the powerful dar (Disk ARchiver) utility with the robust Python wrapper `dar-backup`. Together, they provide a flexible, automated, and verifiable backup solution suited for long-term data retention.
+`dar-backup-image` packages `dar-backup`, `dar`, PAR2, and their runtime dependencies into a reproducible Docker image.
 
-The image itself can probably also function as time capsule carrying `dar` and be ready for use, in a fairly distant future. It does require Docker container to be run though.
+It has **two equally important purposes**:
 
-This image makes it easy to run `dar-backup` in a clean, isolated container environment — perfect for use in cron jobs, systemd timers, or CI pipelines. Whether you're backing up from FUSE-based cloud storage or verifying years-old archives, this image delivers consistent, reproducible results without requiring dar or Python tooling on the host.
+1. **Run backups and restores today** in a clean, isolated environment without installing `dar`, Python tooling, or PAR2 on the host.
+2. **Preserve a known-working restore environment for the future** by saving a versioned image alongside your archives.
 
-At it's core is `dar-backup`, a Python-powered CLI that wraps dar and par2 for reliable full, differential, and incremental backups. It validates archives, performs restore tests, manages catalog databases, and optionally generates redundancy files to protect against bit rot.
+The second use is deliberate: the image is a **restore time capsule**. If you need to recover an archive years from now, you can use the packaged toolchain preserved with the backup instead of hunting for compatible packages or reconstructing an old software environment.
 
-🔧 Highlights
+For long-term archival use, save a **specific versioned image** rather than relying only on `:latest`. The mutable `:latest` tag is useful for current operations and receives regular security refreshes; a pinned and locally archived version is the artifact you want to retain with your backups.
 
-    Automated backup logic with dar-backup: tested, restore-verified, and redundancy-enhanced
+A helper script, [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh), is provided for this purpose. It checks the latest released image against [`doc/build-history.json`](doc/build-history.json) and saves the image as a compressed tar archive. Run it periodically and let the restore environment travel with the DAR archives to your backup server, USB copies, or other offsite storage.
 
-    Stateless and portable: no installation required on the host system
+The image also works well as an everyday backup runner for cron jobs, systemd timers, CI pipelines, and FUSE-based storage. Its default entrypoint is `dar-backup`; `dar`, `par2`, or an interactive shell can be invoked directly by overriding the entrypoint.
 
-    Ideal for FUSE filesystems: works without root, designed for user-space storage
+At its core, `dar-backup` wraps `dar` and PAR2 for reliable FULL, DIFF, and INCR backups. It validates archives, performs restore tests, manages catalog databases, and can generate redundancy files to protect archives against bit rot.
 
-    The image automatically loads its baked-in config (/etc/dar-backup/dar-backup.conf). No --config argument is required unless you need a custom one.
+### Highlights
 
-    Includes par2 for integrity protection
+- **Long-term restore time capsule** — preserve a known-working `dar-backup` / `dar` / PAR2 environment with your archives
+- **Reproducible backup runner** — no host installation of `dar`, Python tooling, or PAR2 required
+- **Versioned and auditable** — released images are tested, scanned, signed, and accompanied by an SBOM
+- **Stateless and portable** — archive the image itself and move it with your backup sets
+- **FUSE-friendly** — works without root and is suited to user-space mounted storage
+- **Built-in configuration** — automatically loads `/etc/dar-backup/dar-backup.conf` unless overridden
+- **Ready for automation** — usable from cron, systemd timers, and CI pipelines
 
-    Ready for CI / cron / systemd: just mount volumes and go
+> **Current operation vs. long-term preservation**
+>
+> Use `:latest` when you want the current tested and security-refreshed image.
+>
+> For disaster recovery years into the future, pin a version and save the image itself alongside your archives.
 
->The default entrypoint of this image is `dar-backup`, meaning any docker run invocation without a command will start dar-backup directly. You can also run dar, par2, or a shell interactively by overriding the entrypoint.
-
-Use `dar-backup-image` to centralize and simplify your backup operations — with restore confidence built in.
 
 ---
 
 ## Table of Contents
 
-- [dar-backup image for container backups and more](#dar-backup-image-for-container-backups-and-more)
+- [dar-backup image — reproducible backups and a long-term restore time capsule](#dar-backup-image--reproducible-backups-and-a-long-term-restore-time-capsule)
   - [dar-backup-image](#dar-backup-image)
+    - [Highlights](#highlights)
   - [Table of Contents](#table-of-contents)
+  - [Preserve the restore environment with your archives](#preserve-the-restore-environment-with-your-archives)
   - [Hands-on Demo: `dar-backup` in a Container](#hands-on-demo-dar-backup-in-a-container)
   - [`dar` versions](#dar-versions)
   - [Recent releases uploaded to Docker Hub](#recent-releases-uploaded-to-docker-hub)
@@ -119,6 +129,66 @@ Use `dar-backup-image` to centralize and simplify your backup operations — wit
 
 ---
 
+## Preserve the restore environment with your archives
+
+Long-term backups need more than durable data. They also need a practical way to run the software required to inspect, verify, repair, and restore that data.
+
+A DAR archive is intentionally portable, and `dar` itself remains the essential restore tool. The container adds another layer of resilience by preserving a complete, known-working environment containing:
+
+- `dar`
+- `dar-backup`
+- PAR2 tooling
+- Python and required runtime libraries
+- the image's baked-in configuration
+- build metadata identifying the exact component versions
+
+For a backup intended to survive many years, preserve the image **as data**, not merely as a Docker Hub tag.
+
+A typical workflow is:
+
+```bash
+# Pin a released image
+VERSION=0.5.27
+IMAGE=per2jensen/dar-backup:${VERSION}
+
+# Pull the exact version
+docker pull "$IMAGE"
+
+# Save it as a portable compressed artifact
+docker save "$IMAGE" | gzip > "dar-backup-image-${VERSION}.tar.gz"
+```
+
+Years later, on a machine with a compatible container runtime:
+
+```bash
+gunzip -c dar-backup-image-0.5.27.tar.gz | docker load
+docker run --rm --entrypoint dar per2jensen/dar-backup:0.5.27 --version
+```
+
+The supplied [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh) automates this process. It is intended to be run periodically from cron or a systemd timer and only saves a new image when a new release is available.
+
+The practical preservation model is therefore:
+
+```text
+DAR archive slices
+        +
+PAR2 recovery data
+        +
+dar_manager catalogs
+        +
+documentation
+        +
+saved versioned dar-backup image
+        =
+a self-contained recovery set
+```
+
+This does **not** mean Docker Hub should be treated as part of your disaster-recovery dependency chain. The opposite is the goal: save the image locally so recovery does not depend on Docker Hub, PyPI, Ubuntu repositories, the original host, or this GitHub repository still being available.
+
+The signed image digest, SBOM, build history, and Rekor record provide provenance for the preserved environment; the locally saved image provides availability.
+
+---
+
 ## Hands-on Demo: `dar-backup` in a Container
 
 Curious how it all works in practice?
@@ -168,11 +238,11 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 
 |Tag|`dar-backup`|`dar`|Git Revision|Docker Hub|Note|
 |---|------------|-----|------------|----------|----|
-| 0.5.28| 1.1.10| 2.7.21| df475fb|[tag:0.5.28](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.28/images/sha256:1f8df16b31f7e5d019c3024d190158ab4adf1ad51cfd4739d0c257208c5cb731)|  - |
 | 0.5.27| 1.1.9| 2.7.21| c5cc86a|[tag:0.5.27](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.27/images/sha256:3b40cfbce68cbdc311f0cec9e8e8e7eb012b929bfb8a4ae415058ebbd346420e)|  - |
 | 0.5.26| 1.1.8| 2.7.21| eef5f2d|[tag:0.5.26](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.26/images/sha256:eabf8f0f2bc805655b9258617eb2b76fe68b1160ac8ff8975c412b24b36575d9)|  - |
 | 0.5.25.1| 1.1.7| 2.7.21| 067b651|[tag:0.5.25.1](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25.1/images/sha256:092f1895dd31f99b4c240744ad2ffe800b233af509919dd94574325ee2f2038a)|  - |
 | 0.5.25| 1.1.7| 2.7.21| ef548a3|[tag:0.5.25](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25/images/sha256:031818b681e7a583389e1a72d7c9fb114d7beb855f9cf42f396862debfc2af5c)|  - |
+| 0.5.24| 1.1.5| 2.7.21| da2c9e2|[tag:0.5.24](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.24/images/sha256:0811f5e73bd5c17d204027888548f061049a063702600e55920f5bb7a5419d03)|  - |
 
 ---
 
@@ -269,9 +339,15 @@ with diagrams, worked examples, and a comparison table.
 
 ## License
 
-`dar-backup-image`is licensed under `GPL 3` or later.
+`dar-backup-image` is licensed under `GPL-3.0-or-later`.
 
-If you are unfamiliar with that license, take a look at the [LICENSE file in this repo](https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE)
+The complete license text is available in the [repository LICENSE file](https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE)
+and is embedded in every image at `/LICENSE`. Print it without installing or starting
+`dar-backup`:
+
+```bash
+docker run --rm --entrypoint cat per2jensen/dar-backup:latest /LICENSE
+```
 
 ---
 
@@ -447,6 +523,12 @@ Every build — whether a release or a scheduled refresh — is recorded in [bui
 | `:0.x.y`      | Versioned release following semantic versioning                              | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.22` |
 | `:0.x.y-N`    | Scheduled weekly refresh of release `0.x.y` (N increments each refresh)    | ✅ Yes     | `docker pull per2jensen/dar-backup:0.5.22-1` |
 | `:dev`        | Development version; may be broken or incomplete                            | ❌ No      | `docker run dar-backup:dev` |
+
+
+For normal day-to-day use, `:latest` is convenient because it tracks the most recently tested and refreshed image.
+
+For **long-term recovery**, do not preserve only the `:latest` reference. Save a specific versioned image, for example `:0.5.27`, as a Docker/OCI archive alongside the backup set. A mutable registry tag is a locator; the saved image is the recovery artifact.
+
 
 ### Weekly image refresh
 
@@ -955,9 +1037,9 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ## TODO
 
-- Prepare the image to be a restore tool for `dar` archives years from now
-  - Include `dar-backup` manual, to make it more useful as restore tool
-- More testing/verifying to solidify the image
+- Continue strengthening long-term restore documentation and recovery drills
+- Consider embedding an offline copy of the essential restore documentation in the image
+- Continue testing and verification to solidify the image
 
 ---
 

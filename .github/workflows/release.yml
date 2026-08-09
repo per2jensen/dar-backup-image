@@ -132,6 +132,36 @@ jobs:
             FINAL_VERSION=${{ env.FINAL_VERSION }} \
             verify-labels
 
+      - name: Verify embedded LICENSE and exact OCI license label
+        run: |
+          IMAGE="${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }}"
+          EXPECTED_LICENSE_SHA256="3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+          EXPECTED_LICENSE="GPL-3.0-or-later"
+
+          ACTUAL_LICENSE_SHA256=$(docker run --rm \
+            --entrypoint sha256sum \
+            "${IMAGE}" \
+            /LICENSE)
+          ACTUAL_LICENSE_SHA256="${ACTUAL_LICENSE_SHA256%% *}"
+          if [[ "${ACTUAL_LICENSE_SHA256}" != "${EXPECTED_LICENSE_SHA256}" ]]; then
+            echo "❌ /LICENSE SHA-256 mismatch"
+            echo "   expected: '${EXPECTED_LICENSE_SHA256}'"
+            echo "   actual:   '${ACTUAL_LICENSE_SHA256}'"
+            exit 1
+          fi
+
+          ACTUAL_LICENSE=$(docker inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}' \
+            "${IMAGE}")
+          if [[ "${ACTUAL_LICENSE}" != "${EXPECTED_LICENSE}" ]]; then
+            echo "❌ org.opencontainers.image.licenses mismatch"
+            echo "   expected: '${EXPECTED_LICENSE}'"
+            echo "   actual:   '${ACTUAL_LICENSE}'"
+            exit 1
+          fi
+
+          echo "✅ /LICENSE SHA-256 and org.opencontainers.image.licenses=${ACTUAL_LICENSE} verified"
+
       # -----------------------------------------------------------------------
       # 6. SBOM (CycloneDX) — generated from the local image before push
       # -----------------------------------------------------------------------

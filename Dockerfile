@@ -161,6 +161,7 @@ RUN set -e; \
             
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf
 COPY entrypoint.sh /entrypoint.sh
+COPY LICENSE /LICENSE
 RUN set -e; \
     chmod +x /entrypoint.sh
 

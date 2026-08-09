@@ -1,5 +1,13 @@
 # dar-backup-image Changelog
 
+## Unreleased
+
+### Added
+
+- embed the GPL license text at `/LICENSE` in the image
+- document how to print the embedded license
+- verify the embedded license SHA-256 and exact OCI license label during release
+
 ## 0.5.28 - 2026-07-08
 
 ### BUGFIX
