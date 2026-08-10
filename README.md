@@ -174,6 +174,10 @@ image.
     - [Releasing a New Version](#releasing-a-new-version)
     - [Recommended Workflow](#recommended-workflow)
   - [TODO](#todo)
+    - [Version 1.0](#version-10)
+    - [Version 1.1](#version-11)
+    - [Version 1.2](#version-12)
+    - [Other tasks](#other-tasks)
   - [Software this project benefits from](#software-this-project-benefits-from)
 
 ---
@@ -1095,9 +1099,25 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ## TODO
 
-- Continue strengthening long-term restore documentation and recovery drills
-- Consider embedding an offline copy of the essential restore documentation in the image
-- Continue testing and verification to solidify the image
+### Version 1.0
+
+- Evaluate the current documentation and decide whether it is sufficient for 1.0
+- Perform additional torture testing and verification to solidify the image
+- Determine whether test coverage is suitable for a 1.0 release
+- Harden the release workflow
+
+### Version 1.1
+
+- Integrate DAR 2.8
+- Investigate and document compatibility between 1.0 and 1.1 backup archives and restore environments
+
+### Version 1.2
+
+- Investigate DAR's encryption features
+
+### Other tasks
+
+- Investigate deterministic generated test cases so test runs can be reproduced across versions and during debugging
 
 ---
 
