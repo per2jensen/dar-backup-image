@@ -23,6 +23,11 @@ make dev-nuke
 make  dev
 make  test
 
+# Confirm the saved image is self-documenting and its bundle is intact
+docker run --rm dar-backup:dev docs --list
+docker run --rm dar-backup:dev docs --verify
+docker run --rm dar-backup:dev info
+
 ```
 
 ### Release

@@ -12,6 +12,11 @@
 - record schema-v4 reproducible random bitrot evidence, including affected
   slices and byte ranges, injection/repair timings, and PAR2 data-block counts
 - add a standalone generator and CI drift check for the README release table
+- preserve the installed dar-backup metadata manual, licenses, and every
+  packaged documentation file inside the image
+- preserve the image repository README as the hashed offline `image` topic
+- add configuration-free `docs` and `info` image commands, stable embedded
+  documentation paths, an integrity manifest, and OCI discovery labels
 
 ### Changed
 
@@ -20,6 +25,8 @@
 - accept `BITROT_SEED`/`--bitrot-seed` to replay exact corruption selections
 - generate the complete README release table, including UTC release dates,
   from canonical `doc/build-history.json` metadata during every release
+- collect documentation only after the existing dar-backup installation has
+  completed, without changing its proven `pip install` deployment path
 
 ### Fixed
 

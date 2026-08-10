@@ -1,10 +1,28 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-set -e
+set -euo pipefail
 
 # Ensure dar-backup virtualenv is active
 export PATH="/opt/venv/bin:$PATH"
+
+# Documentation and image metadata must remain available without backup
+# configuration, writable volumes, root privileges, or network access.
+case "${1:-}" in
+  docs)
+    shift
+    exec dar-backup-image-docs "$@"
+    ;;
+  info)
+    shift
+    exec dar-backup-image-info "$@"
+    ;;
+esac
+
+# A bare image invocation is a discovery operation, not an incomplete backup.
+if [[ "$#" -eq 0 ]]; then
+  exec dar-backup-image-docs --list
+fi
 
 # === Defaults ===
 DEFAULT_UID=1000                # UID for daruser (default container user)

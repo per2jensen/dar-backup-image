@@ -58,10 +58,13 @@ LABEL_ARGS = \
   --label org.opencontainers.image.title="dar-backup" \
   --label org.opencontainers.image.version="$(FINAL_VERSION)" \
   --label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" \
+  --label org.opencontainers.image.documentation="https://github.com/per2jensen/dar-backup-image/blob/main/README.md" \
   --label org.opencontainers.image.url="https://hub.docker.com/r/per2jensen/dar-backup" \
   --label org.opencontainers.image.licenses="GPL-3.0-or-later" \
   --label org.opencontainers.image.authors="Per Jensen <dar-backup@pm.me>" \
   --label org.opencontainers.image.ref.name="$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
+  --label org.dar-backup.documentation.command="docs" \
+  --label org.dar-backup.documentation.path="/usr/share/doc/dar-backup" \
   --label org.dar-backup.version="$(DAR_BACKUP_VERSION)" \
   --label org.dar.version="$(DAR_VERSION)"
 
@@ -320,6 +323,7 @@ verify-labels:
 	                  org.opencontainers.image.base.version \
 	                  org.opencontainers.image.created \
 	                  org.opencontainers.image.description \
+	                  org.opencontainers.image.documentation \
 	                  org.opencontainers.image.licenses \
 	                  org.opencontainers.image.ref.name \
 	                  org.opencontainers.image.revision \
@@ -327,6 +331,8 @@ verify-labels:
 	                  org.opencontainers.image.title \
 	                  org.opencontainers.image.url \
 	                  org.opencontainers.image.version \
+	                  org.dar-backup.documentation.command \
+	                  org.dar-backup.documentation.path \
 	                  org.dar-backup.version \
 	                  org.dar.version)
 

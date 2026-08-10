@@ -39,6 +39,54 @@ The image also works well as an everyday backup runner for cron jobs, systemd ti
 
 At its core, `dar-backup` wraps `dar` and PAR2 for reliable FULL, DIFF, and INCR backups. It validates archives, performs restore tests, manages catalog databases, and can generate redundancy files to protect archives against bit rot.
 
+### Bundled documentation
+
+The image preserves documentation from the installed `dar-backup`
+distribution. It works without network access, backup configuration, or
+mounted volumes, so a saved image remains self-documenting years later.
+
+```bash
+IMAGE=per2jensen/dar-backup:latest
+
+# Discover the documentation (a bare invocation does the same thing)
+docker run --rm "$IMAGE" docs
+docker run --rm "$IMAGE"
+
+# Display a topic bundled by dar-backup
+docker run --rm "$IMAGE" docs overview
+docker run --rm "$IMAGE" docs getting-started
+
+# Show paths, component versions, provenance, and project links
+docker run --rm "$IMAGE" docs --path
+docker run --rm "$IMAGE" info
+
+# Verify every recorded documentation SHA-256
+docker run --rm "$IMAGE" docs --verify
+```
+
+Use `docs --list` to see the topics available in a particular image. Topic
+names follow the documentation actually present in its installation; for example,
+the expanded `dar_backup/doc/` collection first appears with dar-backup
+1.1.11.
+
+The stable filesystem location is `/usr/share/doc/dar-backup/`. It contains:
+
+- `image/README.md` — this image repository's exact build-context README
+- `README.md` — the Markdown description embedded in package metadata
+- `doc/` — every file included under `dar_backup/doc/` or `dar_backup/docs/`
+- `licenses/` and raw `METADATA`
+- `INDEX.md` and the integrity/provenance record `MANIFEST.json`
+
+`/usr/share/doc/dar-backup-image/README.md` and `/README.md` link to the
+embedded image operating guide for simple filesystem discovery. Use
+`docs image` to print it and `docs overview` for the dar-backup overview.
+The standalone executables `dar-backup-image-docs` and
+`dar-backup-image-info` remain usable when the container entrypoint is
+overridden. The OCI labels `org.opencontainers.image.documentation`,
+`org.dar-backup.documentation.command`, and
+`org.dar-backup.documentation.path` provide discovery without starting the
+image.
+
 ### Highlights
 
 - **Long-term restore time capsule** — preserve a known-working `dar-backup` / `dar` / PAR2 environment with your archives
@@ -62,6 +110,7 @@ At its core, `dar-backup` wraps `dar` and PAR2 for reliable FULL, DIFF, and INCR
 
 - [dar-backup image — reproducible backups and a long-term restore time capsule](#dar-backup-image--reproducible-backups-and-a-long-term-restore-time-capsule)
   - [dar-backup-image](#dar-backup-image)
+    - [Bundled documentation](#bundled-documentation)
     - [Highlights](#highlights)
   - [Table of Contents](#table-of-contents)
   - [Preserve the restore environment with your archives](#preserve-the-restore-environment-with-your-archives)
@@ -835,13 +884,16 @@ Example output:
   "org.opencontainers.image.base.version": "24.04",
   "org.opencontainers.image.created": "2026-05-17T20:03:16Z",
   "org.opencontainers.image.description": "Container for DAR-based backups using `dar-backup`",
+  "org.opencontainers.image.documentation": "https://github.com/per2jensen/dar-backup-image/blob/main/README.md",
   "org.opencontainers.image.licenses": "GPL-3.0-or-later",
   "org.opencontainers.image.ref.name": "per2jensen/dar-backup:0.5.24",
   "org.opencontainers.image.revision": "d5bf339",
   "org.opencontainers.image.source": "https://github.com/per2jensen/dar-backup-image",
   "org.opencontainers.image.title": "dar-backup",
   "org.opencontainers.image.url": "https://hub.docker.com/r/per2jensen/dar-backup",
-  "org.opencontainers.image.version": "0.5.24"
+  "org.opencontainers.image.version": "0.5.24",
+  "org.dar-backup.documentation.command": "docs",
+  "org.dar-backup.documentation.path": "/usr/share/doc/dar-backup"
 }
 ```
 

@@ -93,6 +93,23 @@ RUN set -e; \
     echo "✅ DAR feature verification passed"
 
 
+# Generate the offline documentation only after DAR is built so README or
+# documentation-command edits do not invalidate the expensive DAR layer.
+COPY scripts/image_docs.py /tmp/image_docs.py
+COPY README.md /tmp/image-README.md
+RUN set -eu; \
+    if [ -n "$DAR_BACKUP_VERSION" ]; then \
+      /opt/venv/bin/python3 /tmp/image_docs.py install \
+        --output-dir /opt/image-docs \
+        --image-readme /tmp/image-README.md \
+        --expected-version "$DAR_BACKUP_VERSION"; \
+    else \
+      /opt/venv/bin/python3 /tmp/image_docs.py install \
+        --output-dir /opt/image-docs \
+        --image-readme /tmp/image-README.md; \
+    fi
+
+
 # Cleanup builder stage to reduce layer size
 RUN set -e; \
     pip uninstall -y pip setuptools wheel || true \
@@ -162,8 +179,13 @@ RUN set -e; \
 COPY dar-backup.conf /etc/dar-backup/dar-backup.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY LICENSE /LICENSE
+COPY --from=builder /opt/image-docs /usr/share/doc/dar-backup
+COPY scripts/image_docs.py /usr/local/bin/dar-backup-image-docs
 RUN set -e; \
-    chmod +x /entrypoint.sh
+    chmod +x /entrypoint.sh /usr/local/bin/dar-backup-image-docs \
+  && ln -s dar-backup-image-docs /usr/local/bin/dar-backup-image-info \
+  && ln -s /usr/share/doc/dar-backup/image /usr/share/doc/dar-backup-image \
+  && ln -s /usr/share/doc/dar-backup-image/README.md /README.md
 
 # Replace ubuntu user with daruser (UID 1000)
 RUN set -e; \
