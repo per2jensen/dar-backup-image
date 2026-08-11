@@ -16,6 +16,8 @@ from typing import Any, Mapping, Sequence
 
 
 MAX_SEED = (1 << 64) - 1
+DEFAULT_EDGE_BYTES = 1_048_576
+VALID_MODES = {"contiguous", "fragmented", "edges"}
 VALID_STATUSES = {"passed", "failed", "skipped", "not_run", "in_progress"}
 SLICE_PATTERN = re.compile(r"\.(\d+)\.dar$")
 PAR2_BLOCK_PATTERN = re.compile(
@@ -82,6 +84,7 @@ def _build_segments(
     start_index: int,
     start_offset: int,
     length_bytes: int,
+    region_index: int = 0,
 ) -> list[dict[str, Any]] | None:
     """Map a logical corruption interval onto one or more physical slices.
 
@@ -91,6 +94,7 @@ def _build_segments(
         start_index: Zero-based slice containing the interval start.
         start_offset: Byte offset within the starting slice.
         length_bytes: Total bytes to corrupt across slices.
+        region_index: Zero-based corruption-region identifier.
 
     Returns:
         Segment dictionaries, or ``None`` if the archive ends before the range.
@@ -108,6 +112,8 @@ def _build_segments(
         raise ValueError("start_offset is outside the starting slice")
     if length_bytes <= 0:
         raise ValueError("length_bytes must be positive")
+    if region_index < 0:
+        raise ValueError("region_index must be non-negative")
 
     segments: list[dict[str, Any]] = []
     remaining = length_bytes
@@ -119,6 +125,7 @@ def _build_segments(
             segments.append(
                 {
                     "segment_index": len(segments),
+                    "region_index": region_index,
                     "slice": slice_paths[index].name,
                     "path": str(slice_paths[index]),
                     "slice_number": _slice_number(slice_paths[index]),
@@ -134,32 +141,21 @@ def _build_segments(
     return None
 
 
-def select_corruption(
-    seed: int,
-    phase: str,
+def _inspect_slices(
     slice_paths: Sequence[Path],
-    corruption_percent: int = 2,
-) -> dict[str, Any]:
-    """Select a reproducible corruption interval that may cross slice boundaries.
+) -> tuple[list[Path], list[int]]:
+    """Validate, naturally order, and measure DAR slices.
 
     Args:
-        seed: Run-level unsigned 64-bit random seed.
-        phase: Stable phase label used to derive independent random choices.
         slice_paths: DAR slice paths belonging to one archive.
-        corruption_percent: Maximum corruption percentage for every affected slice.
 
     Returns:
-        JSON-serializable selection metadata and physical slice segments.
+        Numerically ordered paths and their sizes in bytes.
 
     Raises:
-        OSError: If a slice cannot be inspected.
-        ValueError: If inputs are invalid or no safe interval can be selected.
+        OSError: If slice metadata cannot be read.
+        ValueError: If paths are missing, duplicated, empty, or malformed.
     """
-    _validate_seed(seed)
-    if not isinstance(corruption_percent, int) or isinstance(corruption_percent, bool):
-        raise ValueError("corruption_percent must be an integer")
-    if corruption_percent <= 0 or corruption_percent >= 100:
-        raise ValueError("corruption_percent must be between 1 and 99")
     if not slice_paths:
         raise ValueError("at least one DAR slice is required")
 
@@ -175,7 +171,93 @@ def select_corruption(
         if size <= 0:
             raise ValueError(f"DAR slice is empty: {path}")
         slice_sizes.append(size)
+    return ordered_paths, slice_sizes
 
+
+def _positive_composition(
+    total: int, parts: int, generator: random.Random
+) -> list[int]:
+    """Split an integer into reproducible positive parts.
+
+    Args:
+        total: Positive total to distribute.
+        parts: Number of positive result values.
+        generator: Deterministic random source.
+
+    Returns:
+        Positive integers whose sum equals ``total``.
+
+    Raises:
+        ValueError: If the total cannot supply every requested part.
+    """
+    if total <= 0:
+        raise ValueError("composition total must be positive")
+    if parts <= 0 or parts > total:
+        raise ValueError("composition parts must be between 1 and total")
+    if parts == 1:
+        return [total]
+    cuts = sorted(generator.sample(range(1, total), parts - 1))
+    boundaries = [0, *cuts, total]
+    return [
+        boundaries[index + 1] - boundaries[index]
+        for index in range(parts)
+    ]
+
+
+def _weak_composition(
+    total: int, parts: int, generator: random.Random
+) -> list[int]:
+    """Split a non-negative integer into reproducible non-negative parts.
+
+    Args:
+        total: Non-negative total to distribute.
+        parts: Number of result values.
+        generator: Deterministic random source.
+
+    Returns:
+        Non-negative integers whose sum equals ``total``.
+
+    Raises:
+        ValueError: If the total or part count is invalid.
+    """
+    if total < 0:
+        raise ValueError("composition total must be non-negative")
+    if parts <= 0:
+        raise ValueError("composition parts must be positive")
+    if parts == 1:
+        return [total]
+    bars = sorted(generator.sample(range(total + parts - 1), parts - 1))
+    values: list[int] = []
+    previous = -1
+    for bar in bars:
+        values.append(bar - previous - 1)
+        previous = bar
+    values.append(total + parts - 2 - previous)
+    return values
+
+
+def _select_contiguous(
+    seed: int,
+    phase: str,
+    ordered_paths: Sequence[Path],
+    slice_sizes: Sequence[int],
+    corruption_percent: int,
+) -> dict[str, Any]:
+    """Select one reproducible interval that may cross slice boundaries.
+
+    Args:
+        seed: Run-level unsigned 64-bit seed.
+        phase: Lifecycle phase label.
+        ordered_paths: Numerically ordered DAR slices.
+        slice_sizes: Corresponding slice sizes.
+        corruption_percent: Safe byte budget relative to the starting slice.
+
+    Returns:
+        JSON-serializable contiguous selection.
+
+    Raises:
+        ValueError: If a safe interval cannot be constructed.
+    """
     phase_random = _phase_random(seed, phase)
     archive_bytes = sum(slice_sizes)
 
@@ -213,9 +295,11 @@ def select_corruption(
         return {
             "seed": seed,
             "phase": phase.lower(),
+            "mode": "contiguous",
             "corruption_percent": corruption_percent,
             "logical_offset_bytes": logical_offset,
             "length_bytes": length_bytes,
+            "region_count": 1,
             "segments": segments,
         }
 
@@ -234,15 +318,231 @@ def select_corruption(
     )
     if segments is None:
         raise ValueError("unable to construct a safe corruption interval")
-    logical_offset = sum(slice_sizes[:start_index]) + start_offset
     return {
         "seed": seed,
         "phase": phase.lower(),
+        "mode": "contiguous",
         "corruption_percent": corruption_percent,
-        "logical_offset_bytes": logical_offset,
+        "logical_offset_bytes": sum(slice_sizes[:start_index]) + start_offset,
         "length_bytes": length_bytes,
+        "region_count": 1,
         "segments": segments,
     }
+
+
+def _select_fragmented(
+    seed: int,
+    phase: str,
+    ordered_paths: Sequence[Path],
+    slice_sizes: Sequence[int],
+    corruption_percent: int,
+) -> dict[str, Any]:
+    """Spread one slice's corruption budget across 2-10 separated regions.
+
+    Args:
+        seed: Run-level unsigned 64-bit seed.
+        phase: Lifecycle phase label.
+        ordered_paths: Numerically ordered DAR slices.
+        slice_sizes: Corresponding slice sizes.
+        corruption_percent: Exact byte budget relative to the selected slice.
+
+    Returns:
+        JSON-serializable fragmented selection.
+
+    Raises:
+        ValueError: If no slice can hold at least two separated regions.
+    """
+    generator = _phase_random(seed, phase)
+    viable: list[tuple[int, int]] = []
+    for index, size in enumerate(slice_sizes):
+        budget = max(1, size * corruption_percent // 100)
+        maximum_regions = min(10, budget, size - budget + 1)
+        if maximum_regions >= 2:
+            viable.append((index, maximum_regions))
+    if not viable:
+        raise ValueError("no DAR slice can hold two separated corruption regions")
+
+    start_index, maximum_regions = generator.choice(viable)
+    region_count = generator.randint(2, maximum_regions)
+    slice_size = slice_sizes[start_index]
+    length_bytes = max(1, slice_size * corruption_percent // 100)
+    region_lengths = _positive_composition(length_bytes, region_count, generator)
+
+    # Reserve one byte between adjacent regions, then distribute all remaining
+    # clean bytes across the leading, internal, and trailing gaps.
+    free_bytes = slice_size - length_bytes - (region_count - 1)
+    gaps = _weak_composition(free_bytes, region_count + 1, generator)
+    for gap_index in range(1, region_count):
+        gaps[gap_index] += 1
+
+    segments: list[dict[str, Any]] = []
+    offset = gaps[0]
+    for region_index, region_length in enumerate(region_lengths):
+        segments.append(
+            {
+                "segment_index": region_index,
+                "region_index": region_index,
+                "slice": ordered_paths[start_index].name,
+                "path": str(ordered_paths[start_index]),
+                "slice_number": _slice_number(ordered_paths[start_index]),
+                "slice_bytes": slice_size,
+                "offset_bytes": offset,
+                "length_bytes": region_length,
+            }
+        )
+        offset += region_length + gaps[region_index + 1]
+
+    return {
+        "seed": seed,
+        "phase": phase.lower(),
+        "mode": "fragmented",
+        "corruption_percent": corruption_percent,
+        "logical_offset_bytes": None,
+        "length_bytes": length_bytes,
+        "region_count": region_count,
+        "segments": segments,
+    }
+
+
+def _select_edges(
+    seed: int,
+    phase: str,
+    ordered_paths: Sequence[Path],
+    slice_sizes: Sequence[int],
+    corruption_percent: int,
+    edge_bytes: int,
+) -> dict[str, Any]:
+    """Select bounded windows at the archive's first and final slice edges.
+
+    Args:
+        seed: Run-level seed recorded with the deterministic selection.
+        phase: Lifecycle phase label.
+        ordered_paths: Numerically ordered DAR slices.
+        slice_sizes: Corresponding slice sizes.
+        corruption_percent: Per-slice safety cap for edge windows.
+        edge_bytes: Maximum bytes to corrupt at each edge.
+
+    Returns:
+        JSON-serializable edge selection.
+
+    Raises:
+        ValueError: If a slice is too small for safe edge windows.
+    """
+    if edge_bytes <= 0:
+        raise ValueError("edge_bytes must be positive")
+
+    first_path = ordered_paths[0]
+    final_path = ordered_paths[-1]
+    first_size = slice_sizes[0]
+    final_size = slice_sizes[-1]
+    segments: list[dict[str, Any]] = []
+
+    if first_path == final_path:
+        total_budget = min(
+            edge_bytes * 2,
+            max(1, first_size * corruption_percent // 100),
+        )
+        if total_budget < 2 or total_budget >= first_size:
+            raise ValueError("single DAR slice is too small for two edge regions")
+        first_length = total_budget // 2
+        final_length = total_budget - first_length
+    else:
+        first_length = min(
+            edge_bytes, max(1, first_size * corruption_percent // 100)
+        )
+        final_length = min(
+            edge_bytes, max(1, final_size * corruption_percent // 100)
+        )
+        if first_length >= first_size or final_length >= final_size:
+            raise ValueError("DAR slice is too small for safe edge corruption")
+
+    edge_values = (
+        (first_path, first_size, 0, first_length),
+        (final_path, final_size, final_size - final_length, final_length),
+    )
+    for region_index, (path, size, offset, length) in enumerate(edge_values):
+        segments.append(
+            {
+                "segment_index": region_index,
+                "region_index": region_index,
+                "slice": path.name,
+                "path": str(path),
+                "slice_number": _slice_number(path),
+                "slice_bytes": size,
+                "offset_bytes": offset,
+                "length_bytes": length,
+            }
+        )
+
+    return {
+        "seed": seed,
+        "phase": phase.lower(),
+        "mode": "edges",
+        "corruption_percent": corruption_percent,
+        "edge_bytes": edge_bytes,
+        "logical_offset_bytes": None,
+        "length_bytes": first_length + final_length,
+        "region_count": 2,
+        "segments": segments,
+    }
+
+
+def select_corruption(
+    seed: int,
+    phase: str,
+    slice_paths: Sequence[Path],
+    corruption_percent: int = 2,
+    mode: str = "contiguous",
+    edge_bytes: int = DEFAULT_EDGE_BYTES,
+) -> dict[str, Any]:
+    """Select reproducible corruption regions for one supported test mode.
+
+    Args:
+        seed: Run-level unsigned 64-bit random seed.
+        phase: Stable phase label used to derive independent random choices.
+        slice_paths: DAR slice paths belonging to one archive.
+        corruption_percent: Maximum corruption percentage for every affected slice.
+        mode: ``contiguous``, ``fragmented``, or ``edges``.
+        edge_bytes: Maximum window at each boundary in ``edges`` mode.
+
+    Returns:
+        JSON-serializable selection metadata and physical slice segments.
+
+    Raises:
+        OSError: If a slice cannot be inspected.
+        ValueError: If inputs are invalid or no safe interval can be selected.
+    """
+    _validate_seed(seed)
+    if not isinstance(phase, str) or not phase.strip():
+        raise ValueError("phase must be a non-empty string")
+    if not isinstance(corruption_percent, int) or isinstance(corruption_percent, bool):
+        raise ValueError("corruption_percent must be an integer")
+    if corruption_percent <= 0 or corruption_percent >= 100:
+        raise ValueError("corruption_percent must be between 1 and 99")
+    if not isinstance(mode, str) or mode not in VALID_MODES:
+        raise ValueError(f"mode must be one of: {', '.join(sorted(VALID_MODES))}")
+    if not isinstance(edge_bytes, int) or isinstance(edge_bytes, bool):
+        raise ValueError("edge_bytes must be an integer")
+    if edge_bytes <= 0:
+        raise ValueError("edge_bytes must be positive")
+
+    ordered_paths, slice_sizes = _inspect_slices(slice_paths)
+    if mode == "contiguous":
+        return _select_contiguous(
+            seed, phase, ordered_paths, slice_sizes, corruption_percent
+        )
+    if mode == "fragmented":
+        return _select_fragmented(
+            seed, phase, ordered_paths, slice_sizes, corruption_percent
+        )
+    return _select_edges(
+        seed,
+        phase,
+        ordered_paths,
+        slice_sizes,
+        corruption_percent,
+        edge_bytes,
+    )
 
 
 def parse_par2_block_counts(output: str) -> tuple[int, int]:
@@ -382,9 +682,12 @@ def initialize_phase_evidence(
     evidence = _load_evidence(path)
     evidence[phase.lower()] = {
         "seed": selection.get("seed"),
+        "mode": selection.get("mode", "contiguous"),
         "corruption_percent": selection.get("corruption_percent"),
+        "edge_bytes": selection.get("edge_bytes"),
         "logical_offset_bytes": selection.get("logical_offset_bytes"),
         "length_bytes": selection.get("length_bytes"),
+        "region_count": selection.get("region_count", 1),
         "buffer_bytes": buffer_bytes,
         "injection_elapsed_ms": None,
         "repair_elapsed_ms": None,
@@ -480,6 +783,71 @@ def update_segment_evidence(
     _save_evidence(path, evidence)
 
 
+def update_slice_evidence(
+    path: Path,
+    phase: str,
+    slice_number: int,
+    found_blocks: int,
+    total_blocks: int,
+    repair_elapsed_ms: int,
+    repair_status: str,
+) -> None:
+    """Record one PAR2 repair result on every region in an affected slice.
+
+    Args:
+        path: Per-run evidence JSON file.
+        phase: Lifecycle phase key.
+        slice_number: Numeric DAR slice repaired once by PAR2.
+        found_blocks: PAR2 data blocks found before repair.
+        total_blocks: Total PAR2 data blocks protecting the slice.
+        repair_elapsed_ms: Repair-command duration in milliseconds.
+        repair_status: Repair status string.
+
+    Raises:
+        OSError: If evidence cannot be read or written.
+        TypeError: If evidence is not JSON serializable.
+        ValueError: If inputs or existing evidence are invalid.
+    """
+    if not isinstance(slice_number, int) or isinstance(slice_number, bool):
+        raise ValueError("slice_number must be an integer")
+    if slice_number <= 0:
+        raise ValueError("slice_number must be positive")
+    if total_blocks <= 0 or found_blocks < 0 or found_blocks > total_blocks:
+        raise ValueError("PAR2 block counts are invalid")
+    if repair_elapsed_ms < 0:
+        raise ValueError("repair_elapsed_ms must be non-negative")
+    if repair_status not in VALID_STATUSES:
+        raise ValueError(f"Invalid repair status: {repair_status!r}")
+
+    evidence = _load_evidence(path)
+    phase_evidence = evidence.get(phase.lower())
+    if not isinstance(phase_evidence, dict):
+        raise ValueError(f"No initialized bitrot evidence for phase {phase!r}")
+    segments = phase_evidence.get("segments")
+    if not isinstance(segments, list):
+        raise ValueError(f"No bitrot segments for phase {phase!r}")
+
+    matching_segments = [
+        segment
+        for segment in segments
+        if isinstance(segment, dict) and segment.get("slice_number") == slice_number
+    ]
+    if not matching_segments:
+        raise ValueError(
+            f"No bitrot segments for slice {slice_number} in phase {phase!r}"
+        )
+    updates = {
+        "par2_data_blocks_found": found_blocks,
+        "par2_data_blocks_total": total_blocks,
+        "par2_data_blocks_damaged": total_blocks - found_blocks,
+        "repair_elapsed_ms": repair_elapsed_ms,
+        "repair_status": repair_status,
+    }
+    for segment in matching_segments:
+        segment.update(updates)
+    _save_evidence(path, evidence)
+
+
 def _parse_selection(value: str) -> dict[str, Any]:
     """Decode a selection passed between helper CLI commands.
 
@@ -517,6 +885,10 @@ def _build_parser() -> argparse.ArgumentParser:
     select_parser.add_argument("--seed", type=int, required=True)
     select_parser.add_argument("--phase", required=True)
     select_parser.add_argument("--percent", type=int, default=2)
+    select_parser.add_argument(
+        "--mode", choices=sorted(VALID_MODES), default="contiguous"
+    )
+    select_parser.add_argument("--edge-bytes", type=int, default=DEFAULT_EDGE_BYTES)
     select_parser.add_argument("slices", nargs="+")
 
     segments_parser = subparsers.add_parser("segments")
@@ -547,6 +919,15 @@ def _build_parser() -> argparse.ArgumentParser:
     segment_parser.add_argument("--total", type=int, required=True)
     segment_parser.add_argument("--repair-elapsed-ms", type=int, required=True)
     segment_parser.add_argument("--repair-status", required=True)
+
+    slice_parser = subparsers.add_parser("update-slice")
+    slice_parser.add_argument("--file", type=Path, required=True)
+    slice_parser.add_argument("--phase", required=True)
+    slice_parser.add_argument("--slice-number", type=int, required=True)
+    slice_parser.add_argument("--found", type=int, required=True)
+    slice_parser.add_argument("--total", type=int, required=True)
+    slice_parser.add_argument("--repair-elapsed-ms", type=int, required=True)
+    slice_parser.add_argument("--repair-status", required=True)
     return parser
 
 
@@ -572,6 +953,8 @@ def main() -> int:
             arguments.phase,
             [Path(value) for value in arguments.slices],
             arguments.percent,
+            arguments.mode,
+            arguments.edge_bytes,
         )
         print(json.dumps(selection, separators=(",", ":")))
         return 0
@@ -588,7 +971,9 @@ def main() -> int:
                     str(segment[key])
                     for key in (
                         "segment_index",
+                        "region_index",
                         "path",
+                        "slice_number",
                         "slice_bytes",
                         "offset_bytes",
                         "length_bytes",
@@ -627,6 +1012,17 @@ def main() -> int:
             arguments.file,
             arguments.phase,
             arguments.index,
+            arguments.found,
+            arguments.total,
+            arguments.repair_elapsed_ms,
+            arguments.repair_status,
+        )
+        return 0
+    if arguments.command == "update-slice":
+        update_slice_evidence(
+            arguments.file,
+            arguments.phase,
+            arguments.slice_number,
             arguments.found,
             arguments.total,
             arguments.repair_elapsed_ms,

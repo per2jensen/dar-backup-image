@@ -16,6 +16,10 @@
 #   SLICE_SIZE=20G COMPRESSION=9 BITROT=false ./run_large_scale_test.sh
 # 4. Replay the exact random bitrot choices from an earlier result:
 #   BITROT_SEED=123456789 ./run_large_scale_test.sh
+# 5. Spread the 2% corruption budget over reproducible separated regions:
+#   BITROT_MODE=fragmented ./run_large_scale_test.sh
+# 6. Corrupt the beginning of slice 1 and the end of the final slice:
+#   BITROT_MODE=edges ./run_large_scale_test.sh
 #
 # BASE_DIR must live at least two directories deep (see scripts/large_scale_test.sh
 # for why), and SOURCE_GLOB must resolve to real data under BASE_DIR's own
@@ -48,6 +52,7 @@ SLICE_SIZE="${SLICE_SIZE:-10G}"                         # dar -s slice size
 COMPRESSION="${COMPRESSION:-6}"                         # dar -z compression level (1-9)
 BITROT="${BITROT:-true}"                                # set to "false" to skip the bitrot-inject/par2-repair phases
 BITROT_SEED="${BITROT_SEED:-}"                          # optional unsigned 64-bit replay seed; empty generates and records a new seed
+BITROT_MODE="${BITROT_MODE:-contiguous}"                # contiguous (default), fragmented, or edges
 DEFINITION="${DEFINITION:-}"                            # full backup-definition body; overrides SOURCE_GLOB/SLICE_SIZE/COMPRESSION entirely when set (see examples above)
 
 # large_scale_test.sh requires the definition's -R to match the mount root it
@@ -66,6 +71,7 @@ fi
 ARGS=(--base "${BASE_DIR}" --image "${IMAGE}")
 [[ "$BITROT" == "true" ]] && ARGS+=(--bitrot)
 [[ "$BITROT" == "true" && -n "$BITROT_SEED" ]] && ARGS+=(--bitrot-seed "$BITROT_SEED")
+[[ "$BITROT" == "true" ]] && ARGS+=(--bitrot-mode "$BITROT_MODE")
 
 if [[ -z "$DEFINITION" ]]; then
     DEFINITION="$(cat << EOF

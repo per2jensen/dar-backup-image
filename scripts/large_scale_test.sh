@@ -25,12 +25,15 @@ SLICE_SIZE="10G"                                    # --slice: dar -s slice size
 PAR2_RATIO=5                                        # --par2-ratio: PAR2 ERROR_CORRECTION_PERCENT written into the generated config
 DO_BITROT=0                                         # --bitrot: when 1, runs do_bitrot_test (corrupt + par2 repair) on FULL, DIFF, and INCR
 BITROT_SEED=""                                      # --bitrot-seed: optional unsigned 64-bit seed; generated once per run when omitted
+BITROT_MODE="contiguous"                            # --bitrot-mode: contiguous (default), fragmented, or edges
+BITROT_MODE_EXPLICIT=0                              # Tracks whether --bitrot-mode was supplied so it can require --bitrot
 BITROT_PERCENT=2                                    # Fixed percentage of one selected slice corrupted per bitrot phase
 BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while preserving exact byte offsets and lengths
+BITROT_EDGE_BYTES=1048576                           # Maximum corruption window at each archive edge in edges mode
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="13"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="14"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -95,6 +98,7 @@ while [[ $# -gt 0 ]]; do
         --par2-ratio) PAR2_RATIO="$2";         shift 2 ;;
         --bitrot)     DO_BITROT=1;             shift   ;;
         --bitrot-seed) BITROT_SEED="$2";       shift 2 ;;
+        --bitrot-mode) BITROT_MODE="$2"; BITROT_MODE_EXPLICIT=1; shift 2 ;;
         --keep)       KEEP=1;                  shift   ;;
         --smoketest)  SMOKETEST=1;             shift   ;;
         --timeout)    TIMEOUT="$2";            shift 2 ;;
@@ -106,6 +110,11 @@ done
 
 [[ -z "$DEFINITION_CONTENT" ]] && { echo "ERROR: --definition is required"; exit 1; }
 [[ $DO_BITROT -eq 0 && -n "$BITROT_SEED" ]] && { echo "ERROR: --bitrot-seed requires --bitrot" >&2; exit 1; }
+[[ $DO_BITROT -eq 0 && $BITROT_MODE_EXPLICIT -eq 1 ]] && { echo "ERROR: --bitrot-mode requires --bitrot" >&2; exit 1; }
+case "$BITROT_MODE" in
+    contiguous|fragmented|edges) ;;
+    *) echo "ERROR: --bitrot-mode must be contiguous, fragmented, or edges" >&2; exit 1 ;;
+esac
 
 if [[ $DO_BITROT -eq 0 ]]; then
     FULL_BITROT_STATUS="skipped"
@@ -356,7 +365,7 @@ RUN_VARIABLES=(
     DATESTAMP DATE_OF_RUN SCRIPT_VERSION RUN_STARTED_EPOCH
     IMAGE DEFINITION_ROOT MOUNT_ROOT
     BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE PAR2_RATIO
-    DO_BITROT BITROT_SEED BITROT_PERCENT BITROT_BUFFER_BYTES
+    DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES BITROT_EDGE_BYTES
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
     DAR_BACKUP_VERSION GIT_COMMIT HARNESS_GIT_COMMIT HARNESS_GIT_DIRTY REPO_DIR
     IMAGE_ID IMAGE_REPO_DIGEST IMAGE_REVISION IMAGE_VERSION DAR_VERSION PAR2_VERSION
@@ -701,8 +710,9 @@ do_bitrot_test() {
     local helper="${REPO_DIR}/scripts/large_scale_bitrot.py"
     local -a slice_files=()
     local -a segment_lines=()
-    local -a segment_indices=()
     local -a segment_paths=()
+    local -a segment_slice_numbers=()
+    local -A affected_slice_seen=()
     local selection_json segment_output
 
     banner "Bitrot test on ${archive_base}"
@@ -719,8 +729,10 @@ do_bitrot_test() {
         --seed "$BITROT_SEED" \
         --phase "$phase" \
         --percent "$BITROT_PERCENT" \
+        --mode "$BITROT_MODE" \
+        --edge-bytes "$BITROT_EDGE_BYTES" \
         "${slice_files[@]}"); then
-        fail "Unable to select a safe random bitrot range"
+        fail "Unable to select safe bitrot regions"
         return 1
     fi
     if ! python3 "$helper" init \
@@ -738,23 +750,23 @@ do_bitrot_test() {
     fi
     mapfile -t segment_lines <<< "$segment_output"
     if [[ ${#segment_lines[@]} -eq 0 ]]; then
-        fail "Random bitrot selection contained no segments"
+        fail "Bitrot selection contained no segments"
         mark_bitrot_phase_failed "$phase"
         return 1
     fi
 
-    info "Injecting ${BITROT_PERCENT}% bitrot with seed ${BITROT_SEED} across ${#segment_lines[@]} slice(s)..."
+    info "Injecting bitrot mode=${BITROT_MODE}, seed=${BITROT_SEED}, segments=${#segment_lines[@]}..."
     local injection_started_ns injection_elapsed_ms
     injection_started_ns=$(date +%s%N)
-    local line segment_index slice_path slice_bytes offset_bytes length_bytes
+    local line segment_index region_index slice_path slice_number slice_bytes offset_bytes length_bytes
     for line in "${segment_lines[@]}"; do
-        IFS=$'\t' read -r segment_index slice_path slice_bytes offset_bytes length_bytes <<< "$line"
-        if [[ -z "$segment_index" || -z "$slice_path" || -z "$offset_bytes" || -z "$length_bytes" ]]; then
+        IFS=$'\t' read -r segment_index region_index slice_path slice_number slice_bytes offset_bytes length_bytes <<< "$line"
+        if [[ -z "$segment_index" || -z "$region_index" || -z "$slice_path" || -z "$slice_number" || -z "$offset_bytes" || -z "$length_bytes" ]]; then
             fail "Malformed bitrot segment from selection helper"
             mark_bitrot_phase_failed "$phase"
             return 1
         fi
-        info "Corrupting $(basename "$slice_path"): offset=${offset_bytes}, bytes=${length_bytes}, slice_bytes=${slice_bytes}"
+        info "Corrupting $(basename "$slice_path"): region=${region_index}, offset=${offset_bytes}, bytes=${length_bytes}, slice_bytes=${slice_bytes}"
         if ! dd if=/dev/urandom of="$slice_path" \
             bs=1M iflag=fullblock,count_bytes oflag=seek_bytes \
             seek="$offset_bytes" count="$length_bytes" \
@@ -763,8 +775,11 @@ do_bitrot_test() {
             mark_bitrot_phase_failed "$phase"
             return 1
         fi
-        segment_indices+=("$segment_index")
-        segment_paths+=("$slice_path")
+        if [[ -z "${affected_slice_seen[$slice_path]+present}" ]]; then
+            affected_slice_seen["$slice_path"]=1
+            segment_paths+=("$slice_path")
+            segment_slice_numbers+=("$slice_number")
+        fi
     done
     injection_elapsed_ms=$(( ($(date +%s%N) - injection_started_ns) / 1000000 ))
     if ! update_bitrot_phase_evidence "$phase" \
@@ -797,7 +812,7 @@ do_bitrot_test() {
     repair_all_started_ns=$(date +%s%N)
     for array_index in "${!segment_paths[@]}"; do
         slice_path="${segment_paths[$array_index]}"
-        segment_index="${segment_indices[$array_index]}"
+        slice_number="${segment_slice_numbers[$array_index]}"
         par2_file="${PAR2_DIR}/$(basename "$slice_path").par2"
         if [[ ! -f "$par2_file" ]]; then
             fail "PAR2 file missing for affected slice: $(basename "$slice_path")"
@@ -823,10 +838,10 @@ do_bitrot_test() {
             return 1
         fi
         IFS=$'\t' read -r found_blocks total_blocks <<< "$block_counts"
-        if ! python3 "$helper" update-segment \
+        if ! python3 "$helper" update-slice \
             --file "$BITROT_EVIDENCE_FILE" \
             --phase "$phase" \
-            --index "$segment_index" \
+            --slice-number "$slice_number" \
             --found "$found_blocks" \
             --total "$total_blocks" \
             --repair-elapsed-ms "$repair_elapsed_ms" \

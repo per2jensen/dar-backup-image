@@ -20,6 +20,9 @@
 
 ### Changed
 
+- add selectable contiguous, fragmented, and archive-edge bitrot modes while
+  keeping contiguous 2% corruption as the default and repairing each affected
+  DAR slice only once
 - corrupt a random 2% range per backup phase, allow the range to cross DAR
   slice boundaries, and use buffered byte-accurate writes for faster injection
 - accept `BITROT_SEED`/`--bitrot-seed` to replay exact corruption selections

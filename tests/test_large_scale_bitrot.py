@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,186 @@ def test_select_corruption_same_seed_reproduces_exact_range(tmp_path: Path) -> N
 
     assert first == second
     assert first["seed"] == 123456789
+    assert first["mode"] == "contiguous"
+    assert first["region_count"] == 1
     assert first["length_bytes"] == 2_000
+
+
+def test_select_corruption_fragmented_spreads_exact_budget_reproducibly(
+    tmp_path: Path,
+) -> None:
+    """Fragmented mode creates separated regions with an exact 2% byte total.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (100_000, 100_000, 100_000))
+
+    first = BITROT_MODULE.select_corruption(
+        24680, "full", paths, mode="fragmented"
+    )
+    second = BITROT_MODULE.select_corruption(
+        24680, "full", reversed(paths), mode="fragmented"
+    )
+
+    assert first == second
+    assert first["mode"] == "fragmented"
+    assert 2 <= first["region_count"] <= 10
+    assert len(first["segments"]) == first["region_count"]
+    assert sum(item["length_bytes"] for item in first["segments"]) == 2_000
+    assert len({item["slice_number"] for item in first["segments"]}) == 1
+    for previous, current in zip(first["segments"], first["segments"][1:]):
+        assert (
+            previous["offset_bytes"] + previous["length_bytes"]
+            < current["offset_bytes"]
+        )
+
+
+def test_select_corruption_fragmented_tiny_slice_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """Fragmented mode rejects input that cannot hold two safe regions.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (50,))
+
+    with pytest.raises(ValueError, match="two separated corruption regions"):
+        BITROT_MODULE.select_corruption(1, "full", paths, mode="fragmented")
+
+
+def test_select_corruption_edges_targets_numeric_first_and_final_slices(
+    tmp_path: Path,
+) -> None:
+    """Edges mode targets offset zero and EOF using numeric slice ordering.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = []
+    for number in (10, 2, 1):
+        path = tmp_path / f"archive.{number}.dar"
+        path.write_bytes(b"\0" * 200_000)
+        paths.append(path)
+
+    selection = BITROT_MODULE.select_corruption(5, "full", paths, mode="edges")
+
+    first, final = selection["segments"]
+    assert selection["mode"] == "edges"
+    assert selection["region_count"] == 2
+    assert first["slice_number"] == 1
+    assert first["offset_bytes"] == 0
+    assert final["slice_number"] == 10
+    assert final["offset_bytes"] + final["length_bytes"] == final["slice_bytes"]
+    assert first["length_bytes"] == 4_000
+    assert final["length_bytes"] == 4_000
+
+
+def test_select_corruption_edges_single_slice_uses_two_non_overlapping_regions(
+    tmp_path: Path,
+) -> None:
+    """Edges mode safely places both windows in a one-slice archive.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (100_000,))
+
+    selection = BITROT_MODULE.select_corruption(9, "diff", paths, mode="edges")
+
+    first, final = selection["segments"]
+    assert first["slice_number"] == final["slice_number"] == 1
+    assert first["offset_bytes"] == 0
+    assert final["offset_bytes"] + final["length_bytes"] == 100_000
+    assert first["offset_bytes"] + first["length_bytes"] < final["offset_bytes"]
+    assert first["length_bytes"] + final["length_bytes"] == 2_000
+
+
+def test_select_corruption_edges_tiny_single_slice_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """Edges mode rejects a slice that cannot hold two safe windows.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (50,))
+
+    with pytest.raises(ValueError, match="too small for two edge regions"):
+        BITROT_MODULE.select_corruption(1, "full", paths, mode="edges")
+
+
+def test_select_corruption_unknown_mode_raises_value_error(tmp_path: Path) -> None:
+    """Selection rejects unsupported bitrot modes at its public entry point.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (100_000,))
+
+    with pytest.raises(ValueError, match="mode must be one of"):
+        BITROT_MODULE.select_corruption(1, "full", paths, mode="unknown")
+
+
+def test_select_corruption_edges_empty_phase_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """Deterministic edges mode still requires a valid lifecycle phase.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (100_000,))
+
+    with pytest.raises(ValueError, match="phase must be a non-empty string"):
+        BITROT_MODULE.select_corruption(1, "", paths, mode="edges")
+
+
+def test_helper_cli_emits_harness_segment_fields_for_fragmented_mode(
+    tmp_path: Path,
+) -> None:
+    """The real helper CLI supplies every tab-delimited field Bash consumes.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (100_000,))
+    selected = subprocess.run(
+        [
+            "python3",
+            str(MODULE_PATH),
+            "select",
+            "--seed",
+            "17",
+            "--phase",
+            "full",
+            "--mode",
+            "fragmented",
+            str(paths[0]),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    decoded = json.loads(selected.stdout)
+
+    segments = subprocess.run(
+        [
+            "python3",
+            str(MODULE_PATH),
+            "segments",
+            "--selection",
+            selected.stdout.strip(),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    lines = segments.stdout.splitlines()
+    assert len(lines) == decoded["region_count"]
+    assert all(len(line.split("\t")) == 7 for line in lines)
 
 
 def test_select_corruption_boundary_start_crosses_two_slices_safely(
@@ -166,6 +346,68 @@ def test_evidence_updates_record_metrics_without_absolute_slice_path(
     assert segment["par2_data_blocks_total"] == 2000
     assert segment["par2_data_blocks_damaged"] == 41
     assert "path" not in segment
+
+
+def test_update_slice_evidence_updates_every_region_in_repaired_slice(
+    tmp_path: Path,
+) -> None:
+    """One PAR2 result is attached to all fragmented regions in its slice.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    slices = _create_slices(tmp_path, (100_000,))
+    selection = BITROT_MODULE.select_corruption(
+        37, "full", slices, mode="fragmented"
+    )
+    evidence_path = tmp_path / "evidence.json"
+    BITROT_MODULE.initialize_phase_evidence(
+        evidence_path, "full", selection, buffer_bytes=1_048_576
+    )
+
+    BITROT_MODULE.update_slice_evidence(
+        evidence_path,
+        "full",
+        slice_number=1,
+        found_blocks=1950,
+        total_blocks=2000,
+        repair_elapsed_ms=400,
+        repair_status="passed",
+    )
+
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["full"]["mode"] == "fragmented"
+    assert evidence["full"]["region_count"] == len(selection["segments"])
+    for segment in evidence["full"]["segments"]:
+        assert segment["par2_data_blocks_damaged"] == 50
+        assert segment["repair_status"] == "passed"
+
+
+def test_update_slice_evidence_unknown_slice_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """A PAR2 result cannot be recorded against an unaffected slice.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    slices = _create_slices(tmp_path, (100_000,))
+    selection = BITROT_MODULE.select_corruption(3, "full", slices)
+    evidence_path = tmp_path / "evidence.json"
+    BITROT_MODULE.initialize_phase_evidence(
+        evidence_path, "full", selection, buffer_bytes=1_048_576
+    )
+
+    with pytest.raises(ValueError, match="No bitrot segments for slice 2"):
+        BITROT_MODULE.update_slice_evidence(
+            evidence_path,
+            "full",
+            slice_number=2,
+            found_blocks=1950,
+            total_blocks=2000,
+            repair_elapsed_ms=400,
+            repair_status="passed",
+        )
 
 
 def test_update_phase_evidence_uninitialized_phase_raises_value_error(
