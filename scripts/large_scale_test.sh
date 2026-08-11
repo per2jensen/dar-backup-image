@@ -14,7 +14,7 @@ set -euo pipefail
 
 RUN_STARTED_EPOCH=$(date +%s)                       # Wall-clock start used for overall_elapsed_s, including preflight and every lifecycle phase
 DATESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')             # Run identifier: used in RUN_DIR, LOGFILE, SUMMARY filenames, and the JSONL record
-DATE_OF_RUN=$(date '+%Y-%m-%d')                    # Calendar date only (pinned once at startup); matches the date dar-backup encodes in archive filenames
+DATE_OF_RUN=$(date '+%Y-%m-%d')                    # Calendar date only (pinned once at startup) for run-level result reporting; archive dates may advance across midnight
 BASE_DIR="/data/tmp/image-large-scale-test"         # --base: root directory for runs/, results/, and the diff-primer directory. Must be at least two directories deep and have MIN_FREE_MULTIPLIER x source-size free space
 IMAGE="dar-backup:dev"                              # --image: the dar-backup Docker image under test; must already be built (e.g. `make dev`)
 DEFINITION_ROOT=""                                  # Set after option parsing from the definition's `-R <path>` line; must equal MOUNT_ROOT (see validation below)
@@ -30,7 +30,7 @@ BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while pres
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="12"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="13"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -888,19 +888,14 @@ init_manager_db() {
 # ── find archive base for a backup type ───────────────────────────────────────
 find_archive_base() {
     local type="$1"
-    
-    # Explicitly construct the exact expected filename structure
-    local expected_base="${DEFINITION_NAME}_${type}_${DATE_OF_RUN}"
-    local expected_file="${BACKUP_DIR}/${expected_base}.1.dar"
 
-    # Verify the file is actually present on disk before claiming success
-    if [[ -f "$expected_file" ]]; then
-        echo "$expected_base"
-    else
-        # If it doesn't exist, log why directly to stderr so it bypasses command substitutions
-        echo "  FAIL  Expected slice file not found at: ${expected_file}" >&2
-        echo ""
-    fi
+    # Each backup invocation chooses its own calendar date. Discover the exact
+    # archive written in this run's private directory so midnight rollovers do
+    # not make a successful phase look missing.
+    python3 "${REPO_DIR}/scripts/large_scale_archive.py" \
+        --backup-dir "$BACKUP_DIR" \
+        --definition-name "$DEFINITION_NAME" \
+        --backup-type "$type"
 }
 
 calc_max_rss() {
@@ -1149,8 +1144,10 @@ else
     exit 1
 fi
 
-FULL_BASE=$(find_archive_base "FULL")
-[[ -z "${FULL_BASE}" ]] && { fail "No FULL base found"; exit 1; }
+if ! FULL_BASE=$(find_archive_base "FULL"); then
+    fail "No unique FULL base found"
+    exit 1
+fi
 FULL_SLICES=$(count_slices "$FULL_BASE")
 
 CURRENT_PHASE="full_verification"
@@ -1176,8 +1173,10 @@ else
     exit 1
 fi
 
-DIFF_BASE=$(find_archive_base "DIFF")
-[[ -z "${DIFF_BASE}" ]] && { fail "No DIFF base found"; exit 1; }
+if ! DIFF_BASE=$(find_archive_base "DIFF"); then
+    fail "No unique DIFF base found"
+    exit 1
+fi
 DIFF_SLICES=$(count_slices "$DIFF_BASE")
 CURRENT_PHASE="diff_verification"
 if check_dar_integrity "$DIFF_BASE" "DIFF"; then DIFF_ARCHIVE_STATUS="passed"; else DIFF_ARCHIVE_STATUS="failed"; fi
@@ -1205,8 +1204,10 @@ else
     exit 1
 fi
 
-INCR_BASE=$(find_archive_base "INCR")
-[[ -z "${INCR_BASE}" ]] && { fail "No INCR base found"; exit 1; }
+if ! INCR_BASE=$(find_archive_base "INCR"); then
+    fail "No unique INCR base found"
+    exit 1
+fi
 INCR_SLICES=$(count_slices "$INCR_BASE")
 CURRENT_PHASE="incr_verification"
 if check_dar_integrity "$INCR_BASE" "INCR"; then INCR_ARCHIVE_STATUS="passed"; else INCR_ARCHIVE_STATUS="failed"; fi

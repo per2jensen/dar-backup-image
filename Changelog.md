@@ -30,6 +30,8 @@
 
 ### Fixed
 
+- discover each large-scale-test archive by its unique phase-specific first
+  slice so runs crossing midnight do not reject successful DIFF/INCR backups
 - ensure initialized large-scale tests write exactly one JSONL result when they
   complete, fail, abort, or receive an interrupt
 - fail PAR2 verification when no slice files exist instead of reporting a
