@@ -1,0 +1,196 @@
+══════════════════════════════════════════
+  dar-backup large-scale test  2026-08-11_20-14-21
+══════════════════════════════════════════
+
+══════════════════════════════════════════
+  Run configuration
+══════════════════════════════════════════
+  DATESTAMP              = 2026-08-11_20-14-21
+  DATE_OF_RUN            = 2026-08-11
+  SCRIPT_VERSION         = 14
+  RUN_STARTED_EPOCH      = 1786472061
+  IMAGE                  = dar-backup:dev
+  DEFINITION_ROOT        = /data
+  MOUNT_ROOT             = /data
+  BASE_DIR               = /data/tmp/image-large-scale-test
+  DEFINITION_NAME        = large-scale-test
+  DEFINITION_CONTENT     = -R /data
+-z1
+-am
+--cache-directory-tagging
+-g SteamLibrary
+  SLICE_SIZE             = 10G
+  PAR2_RATIO             = 5
+  DO_BITROT              = 1
+  BITROT_SEED            = 16949451046064025028
+  BITROT_MODE            = fragmented
+  BITROT_PERCENT         = 2
+  BITROT_BUFFER_BYTES    = 1048576
+  BITROT_EDGE_BYTES      = 1048576
+  KEEP                   = 0
+  SMOKETEST              = 0
+  TIMEOUT                = 86400
+  MIN_FREE_MULTIPLIER    = 2
+  DAR_BACKUP_VERSION     = 1.1.10
+  GIT_COMMIT             = 1445870
+  HARNESS_GIT_COMMIT     = 14458704a66c05ed9284f0bd601d45169961e5cf
+  HARNESS_GIT_DIRTY      = 0
+  REPO_DIR               = /home/pj/git/dar-backup-image
+  IMAGE_ID               = sha256:d6a866188d4200602a0ebafa2a916dfd39f1e818cb5b7a1ed8ca59bce6c13f9c
+  IMAGE_REPO_DIGEST      = 
+  IMAGE_REVISION         = 1445870
+  IMAGE_VERSION          = dev
+  DAR_VERSION            = 2.7.21
+  PAR2_VERSION           = par2cmdline version 0.8.1
+  PYTHON_VERSION         = Python 3.12.3
+  OS_DESC                = Ubuntu 24.04.4 LTS
+  KERNEL                 = 7.0.0-28-generic
+  RUN_DIR                = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21
+  BACKUP_DIR             = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/backups
+  PAR2_DIR               = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/par2
+  RESTORE_DIR            = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/restore
+  BACKUP_D_DIR           = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/backup.d
+  RESULTS_DIR            = /data/tmp/image-large-scale-test/results
+  METRICS_DB             = /data/tmp/image-large-scale-test/results/dar-backup-metrics.db
+  LOGFILE                = /data/tmp/image-large-scale-test/results/large-scale-test-2026-08-11_20-14-21.dar-backup.log
+  SUMMARY                = /data/tmp/image-large-scale-test/results/summary-2026-08-11_20-14-21.txt
+  CONFIG_FILE            = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/dar-backup.conf
+  DARRC                  = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/.darrc
+  RSS_LOGFILE            = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/rss.log
+  CID_FILE               = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/current-container.cid
+  BITROT_EVIDENCE_FILE   = /data/tmp/image-large-scale-test/runs/2026-08-11_20-14-21/bitrot-evidence.json
+  DIFF_PRIMER_DIR        = /data/tmp/image-large-scale-test/diff-primer
+  INFO  Creating diff-primer data...
+  INFO  Disk-space preflight OK: source ~486.57 GB, need ~973.15 GB (2x), have ~1139.08 GB free under '/data/tmp/image-large-scale-test'.
+  INFO  Using .darrc bundled in dar-backup:dev
+  PASS  manager --create-db succeeded
+
+══════════════════════════════════════════
+  Phase 1 — FULL backup
+══════════════════════════════════════════
+  PASS  FULL backup completed in 20821s
+  INFO  Running dar -t on FULL...
+  PASS  dar -t passed: FULL
+  PASS  Manifest present
+  PASS  par2 verify passed all slices: FULL
+
+══════════════════════════════════════════
+  Bitrot test on large-scale-test_FULL_2026-08-11
+══════════════════════════════════════════
+  INFO  Injecting bitrot mode=fragmented, seed=16949451046064025028, segments=7...
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=0, offset=2418766461, bytes=15274703, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=1, offset=4296555277, bytes=21881965, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=2, offset=4330422549, bytes=68436739, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=3, offset=4919340264, bytes=2468577, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=4, offset=8542521086, bytes=12609450, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=5, offset=8663607226, bytes=39394010, slice_bytes=10737418240
+  INFO  Corrupting large-scale-test_FULL_2026-08-11.10.dar: region=6, offset=8874437059, bytes=54682920, slice_bytes=10737418240
+  PASS  dar -t correctly detected corruption
+  INFO  Repairing 1 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 1 affected slice(s)
+  PASS  dar -t passed after repair
+
+══════════════════════════════════════════
+  Phase 2 — DIFF backup
+══════════════════════════════════════════
+  INFO  Updating diff-primer data...
+  PASS  DIFF backup completed in 49s
+  INFO  Running dar -t on DIFF...
+  PASS  dar -t passed: DIFF
+  PASS  Manifest present
+  PASS  par2 verify passed all slices: DIFF
+
+══════════════════════════════════════════
+  Bitrot test on large-scale-test_DIFF_2026-08-12
+══════════════════════════════════════════
+  INFO  Injecting bitrot mode=fragmented, seed=16949451046064025028, segments=10...
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=0, offset=17369580, bytes=682881, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=1, offset=69609482, bytes=877473, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=2, offset=88061393, bytes=2080182, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=3, offset=216094676, bytes=283130, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=4, offset=227587668, bytes=715648, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=5, offset=230985852, bytes=27470, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=6, offset=257576567, bytes=246257, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=7, offset=277271597, bytes=362471, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=8, offset=284427124, bytes=286406, slice_bytes=341542419
+  INFO  Corrupting large-scale-test_DIFF_2026-08-12.1.dar: region=9, offset=295517867, bytes=1268930, slice_bytes=341542419
+  PASS  dar -t correctly detected corruption
+  INFO  Repairing 1 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 1 affected slice(s)
+  PASS  dar -t passed after repair
+
+══════════════════════════════════════════
+  Phase 2b — DIFF contents verification
+══════════════════════════════════════════
+  PASS  Modified file count OK (118)
+  PASS  New file count OK
+
+══════════════════════════════════════════
+  Phase 2c — INCR backup
+══════════════════════════════════════════
+  INFO  Waiting ~2-3 minutes before mutating data for INCR (keeps primer mtimes cleanly separated in the log)...
+  INFO  Updating diff-primer data for INCR...
+  PASS  INCR backup completed in 30s
+  INFO  Running dar -t on INCR...
+  PASS  dar -t passed: INCR
+  PASS  Manifest present
+  PASS  par2 verify passed all slices: INCR
+
+══════════════════════════════════════════
+  Bitrot test on large-scale-test_INCR_2026-08-12
+══════════════════════════════════════════
+  INFO  Injecting bitrot mode=fragmented, seed=16949451046064025028, segments=8...
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=0, offset=53689556, bytes=71543, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=1, offset=56259273, bytes=573259, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=2, offset=103985689, bytes=698067, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=3, offset=123533974, bytes=1388939, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=4, offset=164763405, bytes=1706836, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=5, offset=184703705, bytes=1487965, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=6, offset=199523883, bytes=124414, slice_bytes=343639849
+  INFO  Corrupting large-scale-test_INCR_2026-08-12.1.dar: region=7, offset=339570425, bytes=821773, slice_bytes=343639849
+  PASS  dar -t correctly detected corruption
+  INFO  Repairing 1 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 1 affected slice(s)
+  PASS  dar -t passed after repair
+
+══════════════════════════════════════════
+  Phase 2c — INCR contents verification
+══════════════════════════════════════════
+  PASS  Modified file count OK (119)
+  PASS  New file count OK
+  INFO  Capturing sha256 checksums of current primer files for restore verification...
+
+══════════════════════════════════════════
+  Phase 3a — Point-In-Time Restore Validation (latest state)
+══════════════════════════════════════════
+  INFO  Cleaning restore target directory to satisfy manager safety checks...
+  INFO  Invoking manager to process PITR extraction for diff-primer data...
+  PASS  Restore sequence completed execution via manager
+  PASS  link_original.txt correctly absent from latest-state restore
+  PASS  link_target1.txt correctly absent from latest-state restore
+  PASS  Hard Link Inodes match (1026864)
+  PASS  INCR-tier new file present in latest-state restore
+
+══════════════════════════════════════════
+  Phase 3a — Content checksum verification
+══════════════════════════════════════════
+  PASS  All 119 restored file(s) match source sha256 checksums
+
+══════════════════════════════════════════
+  Summary
+══════════════════════════════════════════
+dar-backup test pass: 2026-08-11_20-14-21
+FULL elapsed: 20821s (~398.89 GB)
+DIFF elapsed: 49s (~0.32 GB)
+INCR elapsed: 30s (~0.32 GB)
+Peak Engine Memory Consumption:
+  ├── dar-backup : 89.8 MB
+  ├── dar backend: 446.2 MB
+  ├── par2 engine: 145.2 MB
+  └── db manager : 40.8 MB
+Failures:      0
+
+✓ ALL TESTS PASSED SUCCESSFULLY
+
+
+
