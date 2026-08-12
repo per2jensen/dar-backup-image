@@ -27,6 +27,15 @@ UBUNTU_DIGEST := $(shell docker pull ubuntu:$(UBUNTU_VERSION) -q >/dev/null 2>&1
 
 DAR_BACKUP_VERSION ?= $(shell cat DAR_BACKUP_VERSION)
 DAR_VERSION ?= $(shell cat DAR_VERSION)
+DAR_BACKUP_INSTALL_SOURCE ?= pypi
+DAR_BACKUP_LOCAL_DIST ?=
+DAR_BACKUP_LOCAL_WHEEL ?= dar_backup-$(DAR_BACKUP_VERSION)-py3-none-any.whl
+
+ifeq ($(DAR_BACKUP_INSTALL_SOURCE),local)
+DAR_BACKUP_CONTEXT_ARGS = --build-context dar_backup_dist="$(DAR_BACKUP_LOCAL_DIST)"
+else
+DAR_BACKUP_CONTEXT_ARGS =
+endif
 
 FINAL_IMAGE_NAME = dar-backup
 DOCKERHUB_REPO = per2jensen/dar-backup
@@ -65,6 +74,7 @@ LABEL_ARGS = \
   --label org.opencontainers.image.ref.name="$(DOCKERHUB_REPO):$(FINAL_VERSION)" \
   --label org.dar-backup.documentation.command="docs" \
   --label org.dar-backup.documentation.path="/usr/share/doc/dar-backup" \
+  --label org.dar-backup.install-source="$(DAR_BACKUP_INSTALL_SOURCE)" \
   --label org.dar-backup.version="$(DAR_BACKUP_VERSION)" \
   --label org.dar.version="$(DAR_VERSION)"
 
@@ -77,7 +87,8 @@ LABEL_ARGS = \
 .PHONY: all all-dev dev-rebuild final final-noscan release clean clean-all push tag login dev dev-clean labels help \
 	check_version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
 	check-docker-creds test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools \
-	grype-db-status grype-db-update scan-final verify-labels
+	grype-db-status grype-db-update scan-final verify-labels validate-dar-backup-install \
+	check-publish-install-source
 
 
 check_version:
@@ -98,6 +109,39 @@ check_version:
 	fi
 
 
+validate-dar-backup-install:
+	@set -euo pipefail; \
+	case "$(DAR_BACKUP_INSTALL_SOURCE)" in \
+	  pypi) \
+	    if [ -n "$(DAR_BACKUP_LOCAL_DIST)" ]; then \
+	      echo "❌ DAR_BACKUP_LOCAL_DIST is only valid when DAR_BACKUP_INSTALL_SOURCE=local" >&2; \
+	      exit 2; \
+	    fi; \
+	    ;; \
+	  local) \
+	    if [ -z "$(DAR_BACKUP_LOCAL_DIST)" ]; then \
+	      echo "❌ DAR_BACKUP_LOCAL_DIST is required for a local build" >&2; \
+	      exit 2; \
+	    fi; \
+	    if [ ! -d "$(DAR_BACKUP_LOCAL_DIST)" ]; then \
+	      echo "❌ Local distribution directory does not exist: $(DAR_BACKUP_LOCAL_DIST)" >&2; \
+	      exit 2; \
+	    fi; \
+	    case "$(DAR_BACKUP_LOCAL_WHEEL)" in \
+	      ''|*[!A-Za-z0-9._+-]*) \
+	        echo "❌ DAR_BACKUP_LOCAL_WHEEL must be a safe wheel basename" >&2; \
+	        exit 2; \
+	        ;; \
+	    esac; \
+	    python3 scripts/validate_dar_backup_wheel.py \
+	      --wheel "$(DAR_BACKUP_LOCAL_DIST)/$(DAR_BACKUP_LOCAL_WHEEL)" \
+	      --expected-version "$(DAR_BACKUP_VERSION)" >/dev/null; \
+	    ;; \
+	  *) \
+	    echo "❌ DAR_BACKUP_INSTALL_SOURCE must be 'pypi' or 'local'" >&2; \
+	    exit 2; \
+	    ;; \
+	esac
 sbom-sarif: install-tools
 	@echo "🔍 SBOM + scan for $(IMAGE_REF)"
 	@mkdir -p "$(GRYPE_CACHE_DIR)"
@@ -218,31 +262,55 @@ dev-clean: check_version
 # Full nuke: deletes *all* caches and forces a completely fresh build.
 # Note: passes DAR_BACKUP_VERSION (not VERSION) to match the Dockerfile ARG name,
 # and includes LABEL_ARGS so the nuked image is labeled consistently with 'make dev'.
-dev-nuke:
+dev-nuke: validate-dar-backup-install
 	@echo "🧨 Full nuke: Pruning ALL Docker build caches and images (this may take a while)..."
 	-$(DOCKER) builder prune -a -f
 	-$(DOCKER) image prune -a -f
 	@echo "Rebuilding image from scratch..."
+	@set -euo pipefail; \
+	package_sha="not-applicable"; \
+	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
+	  package_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
+	    --wheel "$(DAR_BACKUP_LOCAL_DIST)/$(DAR_BACKUP_LOCAL_WHEEL)" \
+	    --expected-version "$(DAR_BACKUP_VERSION)")"; \
+	fi; \
 	$(DOCKER) build --no-cache -f Dockerfile \
-		--build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
-		--build-arg DAR_VERSION=$(DAR_VERSION) \
-		--build-arg UBUNTU_DIGEST=$(UBUNTU_DIGEST) \
-		$(LABEL_ARGS) \
-		-t dar-backup:$(FINAL_VERSION) .
+	  $(DAR_BACKUP_CONTEXT_ARGS) \
+	  --build-arg DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
+	  --build-arg DAR_BACKUP_INSTALL_SOURCE="$(DAR_BACKUP_INSTALL_SOURCE)" \
+	  --build-arg DAR_BACKUP_LOCAL_WHEEL="$(DAR_BACKUP_LOCAL_WHEEL)" \
+	  --build-arg DAR_BACKUP_LOCAL_WHEEL_SHA256="$$package_sha" \
+	  --build-arg DAR_VERSION="$(DAR_VERSION)" \
+	  --build-arg UBUNTU_DIGEST="$(UBUNTU_DIGEST)" \
+	  $(LABEL_ARGS) \
+	  --label org.dar-backup.wheel.sha256="$$package_sha" \
+	  -t dar-backup:$(FINAL_VERSION) .
 
 
 dev-rebuild: dev-nuke dev
 
 
 # Dev image build (always produce a fully labeled dar-backup:dev)
-dev: validate
+dev: validate validate-dar-backup-install
 	@echo "Building development image (cached & labeled): $(FINAL_VERSION)"
+	@set -euo pipefail; \
+	package_sha="not-applicable"; \
+	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
+	  package_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
+	    --wheel "$(DAR_BACKUP_LOCAL_DIST)/$(DAR_BACKUP_LOCAL_WHEEL)" \
+	    --expected-version "$(DAR_BACKUP_VERSION)")"; \
+	fi; \
 	$(DOCKER) build -f Dockerfile \
-	  --build-arg VERSION=$(FINAL_VERSION) \
-	  --build-arg DAR_VERSION=$(DAR_VERSION) \
-	  --build-arg DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
-	  --build-arg UBUNTU_DIGEST=$(UBUNTU_DIGEST) \
+	  $(DAR_BACKUP_CONTEXT_ARGS) \
+	  --build-arg VERSION="$(FINAL_VERSION)" \
+	  --build-arg DAR_VERSION="$(DAR_VERSION)" \
+	  --build-arg DAR_BACKUP_VERSION="$(DAR_BACKUP_VERSION)" \
+	  --build-arg DAR_BACKUP_INSTALL_SOURCE="$(DAR_BACKUP_INSTALL_SOURCE)" \
+	  --build-arg DAR_BACKUP_LOCAL_WHEEL="$(DAR_BACKUP_LOCAL_WHEEL)" \
+	  --build-arg DAR_BACKUP_LOCAL_WHEEL_SHA256="$$package_sha" \
+	  --build-arg UBUNTU_DIGEST="$(UBUNTU_DIGEST)" \
 	  $(LABEL_ARGS) \
+	  --label org.dar-backup.wheel.sha256="$$package_sha" \
 	  -t dar-backup:dev \
 	  .
 
@@ -333,7 +401,9 @@ verify-labels:
 	                  org.opencontainers.image.version \
 	                  org.dar-backup.documentation.command \
 	                  org.dar-backup.documentation.path \
+	                  org.dar-backup.install-source \
 	                  org.dar-backup.version \
+	                  org.dar-backup.wheel.sha256 \
 	                  org.dar.version)
 
 	@for label in $(LABELS); do \
@@ -346,7 +416,7 @@ verify-labels:
 	  fi; \
 	done
 
-	@echo "🔎 Checking exact matches for base digest, version, ref.name, and license…"
+	@echo "🔎 Checking exact matches for base digest, version, ref.name, license, and package source…"
 	@set -e; \
 	exp_version="$(UBUNTU_DIGEST)"; \
 	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
@@ -356,7 +426,6 @@ verify-labels:
 	  echo "   actual:   '$$act_version'"; \
 	  exit 1; \
 	fi; \
-
 	exp_version="$(FINAL_VERSION)"; \
 	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
 	if [ "$$act_version" != "$$exp_version" ]; then \
@@ -379,6 +448,28 @@ verify-labels:
 	  echo "❌ org.opencontainers.image.licenses mismatch"; \
 	  echo "   expected: '$$exp_license'"; \
 	  echo "   actual:   '$$act_license'"; \
+	  exit 1; \
+	fi; \
+	exp_install_source="$(DAR_BACKUP_INSTALL_SOURCE)"; \
+	act_install_source="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.dar-backup.install-source" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
+	if [ "$$act_install_source" != "$$exp_install_source" ]; then \
+	  echo "❌ org.dar-backup.install-source mismatch"; \
+	  echo "   expected: '$$exp_install_source'"; \
+	  echo "   actual:   '$$act_install_source'"; \
+	  exit 1; \
+	fi; \
+	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
+	  exp_wheel_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
+	    --wheel "$(DAR_BACKUP_LOCAL_DIST)/$(DAR_BACKUP_LOCAL_WHEEL)" \
+	    --expected-version "$(DAR_BACKUP_VERSION)")"; \
+	else \
+	  exp_wheel_sha="not-applicable"; \
+	fi; \
+	act_wheel_sha="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.dar-backup.wheel.sha256" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
+	if [ "$$act_wheel_sha" != "$$exp_wheel_sha" ]; then \
+	  echo "❌ org.dar-backup.wheel.sha256 mismatch"; \
+	  echo "   expected: '$$exp_wheel_sha'"; \
+	  echo "   actual:   '$$act_wheel_sha'"; \
 	  exit 1; \
 	fi; \
 	echo "✅ Labels match expected values."
@@ -637,7 +728,16 @@ check-docker-creds:
 	echo "🔐 Docker credentials are present."
 
 
-push: check_version check-docker-creds
+check-publish-install-source:
+	@install_source="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.dar-backup.install-source" }}' \
+	  $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null)"; \
+	if [ "$$install_source" != "pypi" ]; then \
+	  echo "❌ Refusing to publish $(DOCKERHUB_REPO):$(FINAL_VERSION): installation source is '$${install_source:-missing}', not 'pypi'." >&2; \
+	  exit 2; \
+	fi
+
+
+push: check_version check-publish-install-source check-docker-creds
 	@if $(DOCKER) manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
 	else \

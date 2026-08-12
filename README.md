@@ -87,10 +87,13 @@ overridden. The OCI labels `org.opencontainers.image.documentation`,
 `org.dar-backup.documentation.path` provide discovery without starting the
 image.
 
+The image contains man pages for `dar` and `par2` which make the image self-documenting for all commands used to restore or backup.
+
 ### Highlights
 
 - **Long-term restore time capsule** — preserve a known-working `dar-backup` / `dar` / PAR2 environment with your archives
 - **Reproducible backup runner** — no host installation of `dar`, Python tooling, or PAR2 required
+- **Self-documenting** — all `dar-backup`, `dar-backup-image`, `dar` and `par2` documentation is included and easily discoverable by future users
 - **Versioned and auditable** — released images are tested, scanned, signed, and accompanied by an SBOM
 - **Stateless and portable** — archive the image itself and move it with your backup sets
 - **FUSE-friendly** — works without root and is suited to user-space mounted storage
@@ -167,12 +170,9 @@ image.
     - [List contents of a backup](#list-contents-of-a-backup)
     - [Restore](#restore)
   - [Using the Makefile](#using-the-makefile)
-    - [Common Targets](#common-targets)
-    - [dar and dar-backup versions](#dar-and-dar-backup-versions)
-    - [Testing Locally Built Images](#testing-locally-built-images)
     - [Testing Released Images from Docker Hub](#testing-released-images-from-docker-hub)
     - [Releasing a New Version](#releasing-a-new-version)
-    - [Recommended Workflow](#recommended-workflow)
+    - [Recommended Release Workflow](#recommended-release-workflow)
   - [TODO](#todo)
     - [Version 1.0](#version-10)
     - [Version 1.1](#version-11)
@@ -558,13 +558,7 @@ For details on behavior, UID/GID handling, and usage examples, see the comments 
 
 ## How to test
 
-```bash
-# Build development image
-make dev
-
-# Run FULL, DIFF and INCR backups in a temp directory
-make test
-```
+See [dev.md](dev.md) for development-image build and test instructions.
 
 ## Image Tags
 
@@ -627,16 +621,10 @@ The mapping between physical directories on your file system and the expected di
 
 ## Usage Example
 
-Determine if you want to built an image yourself, or use one of mine from Docker Hub.
+Determine whether you want to build an image yourself or use one from Docker
+Hub. Development-image build instructions are in [dev.md](dev.md).
 
 ```bash
-# Build a local development image
-$ make dev
-
-# Check it exists
-$ docker images | grep "dar-backup"
-dar-backup              dev           e72a7fd82a4b   19 seconds ago   174MB
-
 # Use your own locally built image
 export IMAGE=dar-backup:dev
 
@@ -983,50 +971,8 @@ dar-backup --restore <archive_name>
 
 ## Using the Makefile
 
-The `Makefile` automates building, testing, and releasing the `dar-backup-image` Docker images.  
-It supports **local development builds**, **final version tagging**, and **release workflows** (including Docker Hub pushes).
-
-### Common Targets
-
-| Target                        | What It Does                                                                                         |
-|-------------------------------|------------------------------------------------------------------------------------------------------|
-| `make dev`                    | Builds a **development image** (`dar-backup:dev`) using the local Dockerfile and configuration.      |
-| `make test`                   | Builds `dar-backup:dev` and runs the full pytest suite against it.                   |
-| `make FINAL_VERSION=x.y.z final` | Tags the current `dar-backup:dev` as `dar-backup:x.y.z` and verifies version/labels.                        |
-| `make FINAL_VERSION=x.y.z test`  | Builds (or re-tags) `dar-backup:x.y.z`, then runs pytest against it.                                      |
-| `make IMAGE=per2jensen/dar-backup:x.y.z test-pulled` | Pulls the specified released image from Docker Hub and tests it (skips local build).                                 |
-| `make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c dry-run-release` | Creates a detached worktree, builds the image as `dar-backup:x.y.z`, runs tests, verifies labels, but does **not** push to Hub. |
-| `make FINAL_VERSION=x.y.z DAR_BACKUP_VERSION=a.b.c release`         | Builds, verifies, tests, and **pushes the final image** to Docker Hub, also updating `doc/build-history.json` and `READNE.md`.                   |
-| `make size-report`            | Displays a normalized report of image layer sizes (for auditing image size).                       |
-| `make dev-nuke`               | Cleans all cached layers and build artifacts (forces a full fresh build next time).                 |
-
-### dar and dar-backup versions
-
-The versions of `dar` and `dar-backup` used in the image is controlled by the values in the two files
-
-| File | Note |
-|------|------|
-|DAR_VERSION|For example `2.7.19`|
-|DAR_BACKUP_VERSION|For example `1.0.0.1`|
-
-The values are read by the Makefile and by for example the `build-test-scan.yml`action.
-
----
-
-### Testing Locally Built Images
-
-During development, build and test the local `dar-backup:dev` image:
-
-```bash
-make dev       # Build dar-backup:dev
-make test      # Run tests against dar-backup:dev
-```
-
-To test a specific local version (tagged dar-backup:x.y.z):
-
-```bash
-make FINAL_VERSION=0.5.15 test
-```
+See [dev.md](dev.md) for the canonical development-image build and test
+instructions, including how to install `dar-backup` from a local wheel.
 
 ### Testing Released Images from Docker Hub
 
@@ -1070,18 +1016,12 @@ When ready, trigger the release by dispatching the workflow from GitHub Actions 
 
 > **Note:** Do NOT manually create the git tag before triggering the workflow — it is created automatically after all steps succeed.
 
-### Recommended Workflow
+### Recommended Release Workflow
 
-During development:
-
-```bash
-make dev && make test
-```
-
-Before release — validate locally:
+Follow [dev.md](dev.md) to build and test a PyPI-sourced development image.
+Before release, validate locally:
 
 ```bash
-make dev-nuke
 make FINAL_VERSION=x.y.z final          # validate your local final image
 make FINAL_VERSION=x.y.z dry-run-release
 ```

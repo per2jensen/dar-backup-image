@@ -668,6 +668,10 @@ def _list_documentation(
     lines.extend(
         [
             "",
+            "Command manuals (inside an interactive shell):",
+            "  man dar",
+            "  man par2",
+            "",
             "Usage: docs <topic>",
             "       docs --path",
             "       docs --verify",

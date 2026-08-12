@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # dar-backup image with modern DAR (2.7.18) built from source.
@@ -5,16 +6,25 @@
 ARG UBUNTU_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 
+# Empty fallback overridden by Make's named context for local-wheel builds.
+FROM scratch AS dar_backup_dist
+
+
 # === Builder Stage ===
 FROM ubuntu:24.04@${UBUNTU_DIGEST} AS builder
 
 ARG DAR_BACKUP_VERSION
+ARG DAR_BACKUP_INSTALL_SOURCE=pypi
+ARG DAR_BACKUP_LOCAL_WHEEL
+ARG DAR_BACKUP_LOCAL_WHEEL_SHA256
 ARG DAR_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive PATH="/opt/venv/bin:$PATH" DAR_DIR=/usr/local
 
-# Install build deps (Python for dar-backup, toolchain for DAR)
-RUN set -e; \
+# Install build deps (Python for dar-backup, toolchain for DAR). The named
+# context is empty for PyPI builds and is mounted read-only for local builds.
+RUN --mount=type=bind,from=dar_backup_dist,target=/tmp/dar-backup-dist,ro \
+    set -eu; \
     apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip gettext-base ca-certificates tzdata file gnupg \
       build-essential autoconf automake libtool pkg-config binutils \
@@ -22,11 +32,44 @@ RUN set -e; \
       librsync-dev libcurl4-gnutls-dev libargon2-dev \
       bzip2 zlib1g-dev libbz2-dev liblzo2-dev liblzma-dev libzstd-dev liblz4-dev \
       groff doxygen graphviz upx \
-  && python3 -m venv /opt/venv \
-  && if [ -n "$DAR_BACKUP_VERSION" ]; then \
-       pip install "dar-backup==$DAR_BACKUP_VERSION" --no-cache-dir; \
-     else \
-       pip install dar-backup --no-cache-dir; \
+  && /usr/bin/python3 -m venv /opt/venv \
+  && case "$DAR_BACKUP_INSTALL_SOURCE" in \
+       pypi) \
+         /opt/venv/bin/python3 -m pip install \
+           "dar-backup==$DAR_BACKUP_VERSION" --no-cache-dir; \
+         ;; \
+       local) \
+         if [ -z "$DAR_BACKUP_LOCAL_WHEEL" ]; then \
+           echo "ERROR: DAR_BACKUP_LOCAL_WHEEL is required for a local build" >&2; \
+           exit 2; \
+         fi; \
+         wheel_path="/tmp/dar-backup-dist/$DAR_BACKUP_LOCAL_WHEEL"; \
+         if [ ! -f "$wheel_path" ]; then \
+           echo "ERROR: Local dar-backup wheel not found: $wheel_path" >&2; \
+           exit 2; \
+         fi; \
+         if [ -z "$DAR_BACKUP_LOCAL_WHEEL_SHA256" ]; then \
+           echo "ERROR: DAR_BACKUP_LOCAL_WHEEL_SHA256 is required for a local build" >&2; \
+           exit 2; \
+         fi; \
+         actual_sha256="$(sha256sum "$wheel_path")"; \
+         actual_sha256="${actual_sha256%% *}"; \
+         if [ "$actual_sha256" != "$DAR_BACKUP_LOCAL_WHEEL_SHA256" ]; then \
+           echo "ERROR: Local dar-backup wheel changed after validation" >&2; \
+           exit 2; \
+         fi; \
+         /opt/venv/bin/python3 -m pip install "$wheel_path" --no-cache-dir; \
+         ;; \
+       *) \
+         echo "ERROR: DAR_BACKUP_INSTALL_SOURCE must be 'pypi' or 'local'" >&2; \
+         exit 2; \
+         ;; \
+     esac \
+  && installed_version="$(/opt/venv/bin/python3 -c \
+       'from importlib.metadata import version; print(version("dar-backup"))')" \
+  && if [ "$installed_version" != "$DAR_BACKUP_VERSION" ]; then \
+       echo "ERROR: Installed dar-backup version '$installed_version' does not match '$DAR_BACKUP_VERSION'" >&2; \
+       exit 2; \
      fi
 
 
@@ -109,6 +152,17 @@ RUN set -eu; \
         --image-readme /tmp/image-README.md; \
     fi
 
+# Generate command-specific registration files for bash-completion's lazy
+# loader. Keeping this in the builder avoids retaining generation tooling solely
+# for runtime shell initialization.
+RUN set -eu; \
+    mkdir -p /opt/bash-completion \
+  && for command in dar-backup cleanup manager; do \
+       /opt/venv/bin/register-python-argcomplete "$command" \
+         > "/opt/bash-completion/$command"; \
+       test -s "/opt/bash-completion/$command"; \
+     done
+
 
 # Cleanup builder stage to reduce layer size
 RUN set -e; \
@@ -145,17 +199,67 @@ COPY --from=builder /etc/ld.so.conf.d/local.conf /etc/ld.so.conf.d/local.conf
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/
 RUN set -e; \
     ln -sf libthreadar.so.1000 /usr/lib/x86_64-linux-gnu/libthreadar.so  && ldconfig \
+  && printf '%s\n' \
+       'path-include=/usr/share/man/man1/par2.1.gz' \
+       'path-include=/usr/share/man/man1/par2create.1.gz' \
+       'path-include=/usr/share/man/man1/par2repair.1.gz' \
+       'path-include=/usr/share/man/man1/par2verify.1.gz' \
+       > /etc/dpkg/dpkg.cfg.d/zz-dar-backup-par2-man \
   && apt-get update && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends \
        python3-minimal python3-venv gettext-base par2 util-linux ca-certificates tzdata libc-bin \
+       bash-completion man-db less \
        zlib1g libbz2-1.0 liblz4-1 liblzma5 libzstd1 liblzo2-2 libargon2-1 \
        libgcrypt20 libgpgme11 libkrb5-3 librsync2 libext2fs2 \
        libcurl3-gnutls locales \
   && locale-gen en_US.UTF-8 da_DK.UTF-8 fr_FR.UTF-8 es_ES.UTF-8 de_DE.UTF-8 \
   && update-locale LANG=en_US.UTF-8 \
   && ldconfig \
+  && mkdir -p /opt/par2-man/man1 \
+  && for manual in par2 par2create par2repair par2verify; do \
+       manual_path="/usr/share/man/man1/${manual}.1.gz"; \
+       if [ ! -f "$manual_path" ]; then \
+         echo "ERROR: PAR2 manual was not installed: $manual_path" >&2; \
+         exit 2; \
+       fi; \
+       cp "$manual_path" /opt/par2-man/man1/; \
+     done \
+  && rm -f /etc/dpkg/dpkg.cfg.d/zz-dar-backup-par2-man \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-  && rm -rf /usr/share/doc /usr/share/man /usr/share/locale
+  && rm -rf /usr/share/doc /usr/share/man /usr/share/locale \
+  && mkdir -p /usr/share/man/man1 \
+  && cp /opt/par2-man/man1/*.1.gz /usr/share/man/man1/ \
+  && rm -rf /opt/par2-man
+
+
+# Retain the manuals built from the verified DAR source plus the PAR2 manuals,
+# and install the generated argcomplete registrations. Ubuntu's
+# /etc/bash.bashrc ships with completion disabled, so enable the standard
+# loader for all interactive users.
+COPY --from=builder /usr/local/share/man/man1/ /usr/local/share/man/man1/
+COPY --from=builder /opt/bash-completion/ /usr/share/bash-completion/completions/
+RUN set -e; \
+    man_diversion="$(dpkg-divert --list /usr/bin/man)"; \
+    if [ -n "$man_diversion" ]; then \
+      rm -f /usr/bin/man; \
+      dpkg-divert --quiet --remove --rename /usr/bin/man; \
+    fi; \
+    printf '%s\n' \
+      '' \
+      '# Enable system-wide programmable completion in interactive shells.' \
+      'if ! declare -F _completion_loader >/dev/null && [ -r /usr/share/bash-completion/bash_completion ]; then' \
+      '  . /usr/share/bash-completion/bash_completion' \
+      'fi' \
+      >> /etc/bash.bashrc \
+  && test -x /usr/bin/man \
+  && test -f /usr/local/share/man/man1/dar.1 \
+  && MANPAGER=cat PAGER=cat man dar | grep -q 'creates, tests, lists, extracts' \
+  && for command in par2 par2create par2repair par2verify; do \
+       command -v "$command" >/dev/null; \
+       "$command" --help >/dev/null; \
+       test -f "/usr/share/man/man1/${command}.1.gz"; \
+       MANPAGER=cat PAGER=cat man "$command" >/dev/null; \
+     done
 
 
 # Refresh linker cache so libdar64 is found

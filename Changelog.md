@@ -4,6 +4,17 @@
 
 ### Added
 
+- support development-image builds from a validated external `dar-backup`
+  wheel, with installation-source and wheel SHA-256 provenance labels
+- add `dev.md` as the canonical development-image build guide
+- register `dar-backup`, `cleanup`, and `manager` completion system-wide for
+  interactive Bash shells
+- install the real man system and retain all manuals generated from the
+  verified DAR source
+- retain the manuals for the installed `par2`, `par2create`, `par2repair`, and
+  `par2verify` commands
+- advertise the installed `dar` and `par2` manuals on the image documentation
+  front page
 - embed the GPL license text at `/LICENSE` in the image
 - document how to print the embedded license
 - verify the embedded license SHA-256 and exact OCI license label during release
@@ -20,6 +31,8 @@
 
 ### Changed
 
+- keep PyPI installation as the default and refuse to publish images built
+  from local development wheels
 - add selectable contiguous, fragmented, and archive-edge bitrot modes while
   keeping contiguous 2% corruption as the default and repairing each affected
   DAR slice only once

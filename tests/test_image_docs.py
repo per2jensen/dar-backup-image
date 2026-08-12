@@ -285,6 +285,25 @@ def test_docs_topic_prints_exact_embedded_document(tmp_path: Path) -> None:
     assert output.getvalue() == "# Getting started\n\nExact package documentation.\n"
 
 
+def test_docs_list_includes_command_manual_hints(tmp_path: Path) -> None:
+    """The documentation front page advertises installed command manuals.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    distribution = _create_distribution(tmp_path / "site-packages")
+    output_dir = tmp_path / "bundle"
+    build_documentation_bundle(distribution, output_dir, "1.1.11")
+    output = io.StringIO()
+
+    status = run_docs_command([], output_dir, output)
+
+    assert status == 0
+    assert "Command manuals (inside an interactive shell):" in output.getvalue()
+    assert "  man dar\n" in output.getvalue()
+    assert "  man par2\n" in output.getvalue()
+
+
 def test_docs_unknown_topic_fails_clearly(tmp_path: Path) -> None:
     """An unknown topic is rejected instead of becoming a filesystem path.
 
@@ -391,4 +410,7 @@ def test_container_bare_invocation_is_documentation_discovery(image: str) -> Non
     result = _docker_run(image)
 
     assert result.returncode == 0, result.stderr
+    assert "Command manuals (inside an interactive shell):" in result.stdout
+    assert "  man dar\n" in result.stdout
+    assert "  man par2\n" in result.stdout
     assert "Usage: docs <topic>" in result.stdout
