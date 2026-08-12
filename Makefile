@@ -45,6 +45,11 @@ IMAGE_REF        ?= $(FINAL_IMAGE_NAME):$(FINAL_VERSION)
 GRYPE_FAIL_ON    ?= High
 GRYPE_DB_AUTO_UPDATE ?= false
 GRYPE_CACHE_DIR  ?= $(HOME)/.cache/grype
+ANCHORE_TOOL_VERSIONS_FILE ?= config/anchore-tool-versions.env
+ANCHORE_TOOLS_BIN_DIR ?= $(HOME)/.local/bin
+
+-include $(ANCHORE_TOOL_VERSIONS_FILE)
+export PATH := $(ANCHORE_TOOLS_BIN_DIR):$(PATH)
 
 SBOM_FILE := sbom-$(FINAL_IMAGE_NAME)-$(FINAL_VERSION).cyclonedx.json
 GRYPE_TXT := grype-report-$(FINAL_IMAGE_NAME)-$(FINAL_VERSION).txt
@@ -88,7 +93,7 @@ LABEL_ARGS = \
 	check_version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
 	check-docker-creds test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools \
 	grype-db-status grype-db-update scan-final verify-labels validate-dar-backup-install \
-	check-publish-install-source
+	check-publish-install-source check-anchore-tool-versions
 
 
 check_version:
@@ -192,7 +197,7 @@ sbom-sarif-docker: check_version
 	@$(DOCKER) run --rm \
 	  -e SYFT_CHECK_FOR_APP_UPDATE=false \
 	  -v /var/run/docker.sock:/var/run/docker.sock \
-	  anchore/syft:latest \
+	  anchore/syft:$(SYFT_VERSION) \
 	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o cyclonedx-json > $(SBOM)
 
 	# Vulnerability scan via Grype
@@ -201,7 +206,7 @@ sbom-sarif-docker: check_version
 	  -e GRYPE_CHECK_FOR_APP_UPDATE=false \
 	  -v /var/run/docker.sock:/var/run/docker.sock \
 	  -v $(PWD)/$(GRYPE_CACHE_DIR):/home/anchore/.cache \
-	  anchore/grype:latest \
+	  anchore/grype:$(GRYPE_VERSION) \
 	  $(FINAL_IMAGE_NAME):$(FINAL_VERSION) -o sarif > $(SARIF)
 
 	@echo "✅ Generated files:"
@@ -210,11 +215,14 @@ sbom-sarif-docker: check_version
 
 
 install-tools:
-	@command mkdir -p "$(HOME)"/.local/bin
-	@command -v syft >/dev/null 2>&1 || { echo "Installing syft"; \
-	  curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b  "$(HOME)"/.local/bin; }
-	@command -v grype >/dev/null 2>&1 || { echo "Installing grype"; \
-	  curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "$(HOME)"/.local/bin; }
+	@python3 scripts/anchore_tools.py \
+	  --versions-file "$(ANCHORE_TOOL_VERSIONS_FILE)" \
+	  install --bin-dir "$(ANCHORE_TOOLS_BIN_DIR)"
+
+check-anchore-tool-versions:
+	@python3 scripts/anchore_tools.py \
+	  --versions-file "$(ANCHORE_TOOL_VERSIONS_FILE)" \
+	  check-latest
 
 grype-db-status:
 	@GRYPE_CHECK_FOR_APP_UPDATE=false grype db status

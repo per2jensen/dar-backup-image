@@ -257,23 +257,18 @@ jobs:
       - name: Compute Grype cache key
         id: cache-key
         run: |
-          VER=$(curl -sL https://raw.githubusercontent.com/anchore/grype/main/VERSION)
-          echo "ver=$VER" >> $GITHUB_OUTPUT
           echo "week=$(date +%G-%V)" >> $GITHUB_OUTPUT
 
       - name: Cache Grype DB
         uses: actions/cache@v6
         with:
           path: ~/.cache/grype
-          key: grype-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.ver }}-${{ steps.cache-key.outputs.week }}
+          key: grype-db-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('config/anchore-tool-versions.env') }}-${{ steps.cache-key.outputs.week }}
           restore-keys: |
-            grype-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.ver }}-
             grype-db-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Install Syft
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-      - name: Install Grype
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+      - name: Install pinned Syft and Grype
+        run: sudo python3 scripts/anchore_tools.py install --bin-dir /usr/local/bin
 
       - name: Update Grype DB (optional)
         if: env.GRYPE_DB_AUTO_UPDATE == 'true'
@@ -299,84 +294,47 @@ jobs:
 
       - name: Scan with Grype (fail on high/critical)
         run: |
-          set -e
-          grype "sbom:sbom-cyclonedx.json" -o table --fail-on High | tee grype-report.txt
+          set -euo pipefail
+          grype "sbom:sbom-cyclonedx.json" -o table | tee grype-report.txt
           grype "sbom:sbom-cyclonedx.json" -o sarif > grype.sarif
+          grype "sbom:sbom-cyclonedx.json" -o json > grype-results.json
+          grype "sbom:sbom-cyclonedx.json" -o table --fail-on High > /dev/null
 
       - name: Upload SBOM
-        if: always()
+        if: ${{ always() && hashFiles('sbom-cyclonedx.json') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: sbom-cyclonedx
           path: sbom-cyclonedx.json
 
       - name: Upload Grype report
-        if: always()
+        if: ${{ always() && hashFiles('grype-report.txt') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: grype-report
           path: grype-report.txt
 
       - name: Upload SARIF
-        if: always()
+        if: ${{ always() && hashFiles('grype.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v4.37.3
         with:
           sarif_file: grype.sarif
 
-      - name: Job summary
-        if: always()
-        run: |
-          comps=$(jq '.components|length' sbom-cyclonedx.json || echo 0)
-          vulns=$(grype "sbom:sbom-cyclonedx.json" -o json | jq '.matches|length' || echo 0)
-          {
-            echo "### SBOM / Vulnerabilities"
-            echo "- Image: ${{ needs.build.outputs.image_ref }}"
-            echo "- Components: $comps"
-            echo "- Vulnerabilities (all severities): $vulns"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
       - name: Summarize SBOM and vulnerabilities by severity
         if: always()
         run: |
-          comps=$(jq '.components|length' sbom-cyclonedx.json || echo 0)
-
-          grype "sbom:sbom-cyclonedx.json" -o json > grype-results.json
-
-          total=$(jq '.matches | length' grype-results.json)
-          critical=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-results.json)
-          high=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' grype-results.json)
-          medium=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' grype-results.json)
-          low=$(jq '[.matches[] | select(.vulnerability.severity == "Low")] | length' grype-results.json)
-          negligible=$(jq '[.matches[] | select(.vulnerability.severity == "Negligible")] | length' grype-results.json)
-          unknown=$(jq '[.matches[] | select(.vulnerability.severity == "Unknown")] | length' grype-results.json)
-
-          jq -n --arg image "${{ needs.build.outputs.image_ref }}" \
-                --argjson comps "$comps" \
-                --argjson total "$total" \
-                --argjson critical "$critical" \
-                --argjson high "$high" \
-                --argjson medium "$medium" \
-                --argjson low "$low" \
-                --argjson negligible "$negligible" \
-                --argjson unknown "$unknown" \
-                '{
-                  sbom_vuln_scan: {
-                    image: $image,
-                    components: $comps,
-                    vulnerabilities: {
-                      total: $total,
-                      by_severity: {
-                        critical: $critical,
-                        high: $high,
-                        medium: $medium,
-                        low: $low,
-                        negligible: $negligible,
-                        unknown: $unknown
-                      }
-                    }
-                  }
-                }' > ci-summary/sbom.json
+          if command -v grype >/dev/null 2>&1 \
+             && test -s sbom-cyclonedx.json \
+             && ! test -s grype-results.json; then
+            grype "sbom:sbom-cyclonedx.json" -o json > grype-results.json \
+              || rm -f grype-results.json
+          fi
+          python3 scripts/write_sbom_summary.py \
+            --image "${{ needs.build.outputs.image_ref }}" \
+            --sbom sbom-cyclonedx.json \
+            --grype-results grype-results.json \
+            --output ci-summary/sbom.json \
+            --markdown-output "$GITHUB_STEP_SUMMARY"
 
 
       - name: Upload ci-summary

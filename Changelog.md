@@ -15,6 +15,10 @@
   `par2verify` commands
 - advertise the installed `dar` and `par2` manuals on the image documentation
   front page
+- install checksum-verified, centrally pinned Syft and Grype releases with
+  bounded retries and a weekly update reminder
+- preserve a clear unavailable scan summary when upstream tool installation or
+  SBOM generation fails, without cascading missing-file errors
 - embed the GPL license text at `/LICENSE` in the image
 - document how to print the embedded license
 - verify the embedded license SHA-256 and exact OCI license label during release

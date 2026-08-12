@@ -138,3 +138,22 @@ an image unless the value is `pypi`.
 Release and dry-run-release workflows therefore continue to use the pinned
 PyPI package. Build and test a clean PyPI-sourced development image before
 starting a release workflow.
+
+## Updating Syft and Grype
+
+Syft and Grype releases are pinned centrally in
+`config/anchore-tool-versions.env`. CI and `make install-tools` download only
+those exact release archives, verify their published SHA-256 checksums, and
+confirm the installed executable versions.
+
+A scheduled workflow checks for newer stable Anchore releases every Monday and
+fails with the current and latest versions when an update is available. To
+upgrade, edit the two pins, then validate and install them locally:
+
+```bash
+python3 scripts/anchore_tools.py validate
+make install-tools
+make check-anchore-tool-versions
+```
+
+Commit the pin change only after the normal test and scan workflows pass.

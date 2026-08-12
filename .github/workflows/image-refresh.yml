@@ -100,12 +100,8 @@ jobs:
       # -----------------------------------------------------------------------
       # 3. Toolchain
       # -----------------------------------------------------------------------
-      - name: Install Syft and Grype
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-            | sh -s -- -b /usr/local/bin
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-            | sh -s -- -b /usr/local/bin
+      - name: Install pinned Syft and Grype
+        run: sudo python3 scripts/anchore_tools.py install --bin-dir /usr/local/bin
 
       - uses: sigstore/cosign-installer@v3
 
