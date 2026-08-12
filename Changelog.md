@@ -50,6 +50,8 @@
 
 ### Fixed
 
+- test documentation completion against files actually present in the selected
+  `dar-backup` wheel while verifying shell registration independently
 - discover each large-scale-test archive by its unique phase-specific first
   slice so runs crossing midnight do not reject successful DIFF/INCR backups
 - ensure initialized large-scale tests write exactly one JSONL result when they

@@ -79,20 +79,122 @@ printf '%s\n' "${{COMPREPLY[@]}}"
     return _run_bash(image, command, interactive=True)
 
 
-def test_container_doc_completion_lists_packaged_topics(image: str) -> None:
-    """A fresh interactive shell completes packaged documentation names.
+def _complete_option_prefix(
+    image: str,
+    prefix: str,
+) -> subprocess.CompletedProcess[str]:
+    """Request dar-backup option completions from a fresh shell.
+
+    Args:
+        image: Docker image reference under test.
+        prefix: Partial option name to complete.
+
+    Returns:
+        Completed Docker subprocess containing one candidate per output line.
+    """
+    command = f"""
+_completion_loader dar-backup >/dev/null 2>&1 || true
+COMP_WORDS=(dar-backup {prefix!r})
+COMP_CWORD=1
+COMP_LINE={f'dar-backup {prefix}'!r}
+COMP_POINT=${{#COMP_LINE}}
+_python_argcomplete dar-backup {prefix!r}
+printf '%s\n' "${{COMPREPLY[@]}}"
+"""
+    return _run_bash(image, command, interactive=True)
+
+
+def _packaged_doc_topics(
+    image: str,
+    prefix: str,
+) -> subprocess.CompletedProcess[str]:
+    """List documentation topics physically present in the installed package.
+
+    Args:
+        image: Docker image reference under test.
+        prefix: Documentation prefix used to filter package files.
+
+    Returns:
+        Completed Docker subprocess containing one package topic per line.
+    """
+    script = """
+from pathlib import Path
+import sys
+
+import dar_backup
+
+doc_dir = Path(dar_backup.__file__).parent / "doc"
+topics = sorted(
+    path.stem
+    for path in doc_dir.glob("*.md")
+    if path.stem.startswith(sys.argv[1])
+)
+print("\\n".join(topics))
+"""
+    return subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "/opt/venv/bin/python3",
+            image,
+            "-c",
+            script,
+            prefix,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _nonempty_lines(output: str) -> set[str]:
+    """Convert command output into a set of nonempty lines.
+
+    Args:
+        output: Captured command output.
+
+    Returns:
+        Stripped, nonempty output lines.
+    """
+    return {line.strip() for line in output.splitlines() if line.strip()}
+
+
+def test_container_option_completion_is_registered(image: str) -> None:
+    """A fresh interactive shell loads dar-backup option completion.
 
     Args:
         image: Docker image fixture.
     """
-    result = _complete_doc_prefix(image, "restoring")
+    result = _complete_option_prefix(image, "--ver")
 
     assert result.returncode == 0, result.stderr
-    assert set(result.stdout.splitlines()) >= {
-        "restoring",
-        "restoring-advanced",
-        "restoring-pitr",
-    }
+    assert "--version" in _nonempty_lines(result.stdout)
+
+
+def test_container_doc_completion_matches_packaged_topics(image: str) -> None:
+    """Documentation completion exactly reflects files in the installed wheel.
+
+    Args:
+        image: Docker image fixture.
+    """
+    packaged_result = _packaged_doc_topics(image, "restoring")
+    completion_result = _complete_doc_prefix(image, "restoring")
+
+    assert packaged_result.returncode == 0, packaged_result.stderr
+    assert completion_result.returncode == 0, completion_result.stderr
+
+    packaged_topics = _nonempty_lines(packaged_result.stdout)
+    completed_topics = _nonempty_lines(completion_result.stdout)
+    assert completed_topics == packaged_topics
+
+    if "restoring" in packaged_topics:
+        assert packaged_topics >= {
+            "restoring",
+            "restoring-advanced",
+            "restoring-pitr",
+        }
 
 
 def test_container_doc_completion_unknown_prefix_returns_no_topic(image: str) -> None:
@@ -104,7 +206,7 @@ def test_container_doc_completion_unknown_prefix_returns_no_topic(image: str) ->
     result = _complete_doc_prefix(image, "definitely-not-a-doc")
 
     assert result.returncode == 0, result.stderr
-    assert not result.stdout.strip()
+    assert not _nonempty_lines(result.stdout)
 
 
 @pytest.mark.parametrize("manual_name", DAR_MANUALS)
