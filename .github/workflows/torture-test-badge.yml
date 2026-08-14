@@ -1,0 +1,57 @@
+name: Update torture-test badge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - doc/test-report/large-scale-results.jsonl
+      - scripts/write_torture_test_badge.py
+  schedule:
+    - cron: '43 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: torture-test-badge-main
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  update-badge:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Refresh checkout before generation
+        run: git pull --rebase origin main
+
+      - name: Generate badge endpoint
+        run: |
+          python3 scripts/write_torture_test_badge.py \
+            --history doc/test-report/large-scale-results.jsonl \
+            --output doc/test-report/torture-test-badge.json
+
+      - name: Commit badge change
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -- doc/test-report/torture-test-badge.json
+          if git diff --cached --quiet; then
+            echo "Badge endpoint is unchanged."
+            exit 0
+          fi
+          git commit -m "CI update: torture-test badge"
+          git push origin HEAD:main

@@ -14,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 VALID_STATUSES = {"passed", "failed", "skipped", "not_run"}
 TREND_WINDOW = 5
 REGRESSION_FACTOR = 1.5
+ADVERTISE_MIN_SOURCE_BYTES = 100 * 1024**3
 
 
 def _required(environment: Mapping[str, str], key: str) -> str:
@@ -186,7 +187,7 @@ def _status(environment: Mapping[str, str], key: str) -> str:
 
 
 def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
-    """Build one backward-compatible schema-v4 result record.
+    """Build one backward-compatible schema-v5 result record.
 
     Args:
         environment: Environment values exported by ``large_scale_test.sh``.
@@ -203,12 +204,25 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     completed = _required_bool(environment, "LST_COMPLETED")
     failures = _required_int(environment, "LST_FAILURES")
     exit_code = _required_int(environment, "LST_EXIT_CODE")
+    advertise_requested = _required_bool(environment, "LST_ADVERTISE_REQUESTED")
+    source_bytes = _optional_int(environment, "LST_SOURCE_BYTES")
     aborted_phase = None if completed else _required(environment, "LST_CURRENT_PHASE")
+    passed = completed and exit_code == 0 and failures == 0
+    advertise = (
+        advertise_requested
+        and passed
+        and source_bytes is not None
+        and source_bytes > ADVERTISE_MIN_SOURCE_BYTES
+    )
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "datestamp": _required(environment, "LST_DATESTAMP"),
         "date": _required(environment, "LST_DATE"),
+        # Stable publication envelope; all other engineering fields may evolve.
+        "advertise": advertise,
+        "test_name": _required(environment, "LST_TEST_NAME"),
+        "advertise_class": _required(environment, "LST_ADVERTISE_CLASS"),
         # Retained unchanged for schema-v2 consumers.
         "git_commit": _required(environment, "LST_GIT_COMMIT"),
         "dar_backup_version": _required(environment, "LST_DAR_BACKUP_VER"),
@@ -230,7 +244,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
             "manager": _optional_float(environment, "LST_MGR_MB"),
         },
         "failures": failures,
-        "passed": completed and exit_code == 0 and failures == 0,
+        "passed": passed,
         # Schema-v3 provenance and exact measurements.
         "script_version": _required_int(environment, "LST_SCRIPT_VERSION"),
         "harness_git_commit": _required(environment, "LST_HARNESS_GIT_COMMIT"),
@@ -241,7 +255,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         "image_revision": _optional_string(environment, "LST_IMAGE_REVISION"),
         "image_version": _optional_string(environment, "LST_IMAGE_VERSION"),
         "source_file_count": _optional_int(environment, "LST_SOURCE_FILE_COUNT"),
-        "source_bytes": _optional_int(environment, "LST_SOURCE_BYTES"),
+        "source_bytes": source_bytes,
         "backup_definition_sha256": _optional_string(
             environment, "LST_BACKUP_DEFINITION_SHA256"
         ),

@@ -62,6 +62,9 @@ Every value the script uses is an environment variable with the shown default
 | `BITROT` | `true` | Set `false` to skip the corrupt/detect/repair phases |
 | `BITROT_SEED` | *(generated)* | Optional unsigned 64-bit seed that exactly replays the random bitrot selections |
 | `BITROT_MODE` | `contiguous` | `contiguous` for one random 2% range, `fragmented` for the same budget across 2–10 separated regions, or `edges` for bounded windows at the start of slice 1 and end of the numerically final slice |
+| `ADVERTISE` | `false` | Set `true` to request badge publication; the harness still requires a successful run whose measured source is greater than 100 GiB |
+| `TEST_NAME` | `Large scale torture test` | Human-readable public badge label stored with the result |
+| `ADVERTISE_CLASS` | *(image version or revision)* | Public tested version/class; set explicitly for specialized engineering tests |
 | `DEFINITION` | *(unset)* | Full backup-definition body — see [Full backup-definition control](#full-backup-definition-control) |
 
 **The one thing that trips people up**: `BASE_DIR`'s top-level directory
@@ -140,6 +143,9 @@ Anything you pass on the command line is forwarded straight through to
 |---|---|
 | `--keep` | Don't delete the run directory (archives, par2 files, restore output) afterward |
 | `--smoketest` | Don't mirror this run's JSONL result into the tracked repo history file |
+| `--advertise` | Request badge publication; cannot override failed, incomplete, or source-size-ineligible results |
+| `--test-name NAME` | Override the human-readable public test name |
+| `--advertise-class CLASS` | Override the tested public version/classification |
 | `--par2-ratio N` | PAR2 error-correction percentage (default 5) |
 | `--bitrot-seed N` | Replay the random bitrot selections made with seed N |
 | `--bitrot-mode MODE` | Select `contiguous` (default), `fragmented`, or `edges` corruption |
@@ -226,8 +232,8 @@ scale with however much data you point `SOURCE_GLOB` at.)
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
 
-New records use additive schema version 4. All schema-version-2 and -3 fields
-remain present for existing consumers and the older lines in the history
+New records use additive schema version 5. All schema-version-2 through -4
+fields remain present for existing consumers and the older lines in the history
 remain valid. Additional provenance includes the full harness commit and dirty
 state, the requested image reference, immutable local image ID, registry digest
 when available, OCI image revision/version labels, harness script version, and
@@ -243,6 +249,13 @@ so an interrupted run retains the last completed bitrot step. Use the recorded
 seed as `BITROT_SEED` (or `--bitrot-seed`) and the recorded mode as
 `BITROT_MODE` (or `--bitrot-mode`) to reproduce the same choices against an
 identical archive layout.
+
+Schema v5 adds the intentionally small publication envelope: `advertise`,
+`test_name`, and `advertise_class`. `advertise` becomes true only when
+publication was explicitly requested, the run completed successfully with no
+failures, and `source_bytes` is strictly greater than 100 GiB. The remaining
+engineering fields may continue evolving independently; badge presentation
+uses them only when their recognized values are available and valid.
 
 `source_file_count` and `source_bytes` measure regular files selected by the
 definition's `-g` roots immediately before the FULL backup. Overlapping roots

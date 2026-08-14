@@ -1,4 +1,4 @@
-"""Tests for schema-v4 large-scale test result records."""
+"""Tests for schema-v5 large-scale test result records."""
 
 from __future__ import annotations
 
@@ -28,6 +28,9 @@ def _base_environment() -> dict[str, str]:
     environment = {
         "LST_DATESTAMP": "2026-08-09_12-00-00",
         "LST_DATE": "2026-08-09",
+        "LST_ADVERTISE_REQUESTED": "1",
+        "LST_TEST_NAME": "Large scale torture test",
+        "LST_ADVERTISE_CLASS": "v0.8.0-rc1",
         "LST_GIT_COMMIT": "1234567",
         "LST_DAR_BACKUP_VER": "1.2.3",
         "LST_DAR_VER": "2.7.21",
@@ -92,7 +95,7 @@ def _base_environment() -> dict[str, str]:
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v4_to_both_histories(
+def test_write_result_completed_run_appends_schema_v5_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -117,7 +120,10 @@ def test_write_result_completed_run_appends_schema_v4_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 4
+    assert local_record["schema_version"] == 5
+    assert local_record["advertise"] is True
+    assert local_record["test_name"] == "Large scale torture test"
+    assert local_record["advertise_class"] == "v0.8.0-rc1"
     assert local_record["passed"] is True
     assert local_record["completed"] is True
     assert local_record["aborted_phase"] is None
@@ -191,6 +197,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
         )
     )
     assert stored_record["passed"] is False
+    assert stored_record["advertise"] is False
     assert stored_record["completed"] is False
     assert stored_record["aborted_phase"] == "full_backup"
     assert stored_record["exit_code"] == 17
@@ -204,7 +211,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
 def test_write_result_existing_schema_v2_history_remains_readable(
     tmp_path: Path,
 ) -> None:
-    """Appending schema v4 preserves an existing schema-v2 JSONL record.
+    """Appending schema v5 preserves an existing schema-v2 JSONL record.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -225,11 +232,11 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 4
+    assert records[1]["schema_version"] == 5
 
 
 def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
-    """Schema v4 embeds per-phase bitrot and PAR2 block evidence.
+    """Schema v5 embeds per-phase bitrot and PAR2 block evidence.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -255,7 +262,7 @@ def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> No
 
     record = build_record(environment)
 
-    assert record["schema_version"] == 4
+    assert record["schema_version"] == 5
     assert record["bitrot_evidence"] == evidence
 
 
@@ -273,4 +280,77 @@ def test_build_record_malformed_bitrot_evidence_raises_value_error(
     environment["LST_BITROT_EVIDENCE_FILE"] = str(evidence_path)
 
     with pytest.raises(ValueError, match="Malformed JSON evidence"):
+        build_record(environment)
+
+
+def test_build_record_advertise_requested_success_above_100_gib_is_eligible() -> None:
+    """An opted-in successful run above the strict threshold is advertisable."""
+    environment = _base_environment()
+    environment["LST_SOURCE_BYTES"] = str(100 * 1024**3 + 1)
+
+    record = build_record(environment)
+
+    assert record["advertise"] is True
+
+
+def test_build_record_advertise_not_requested_is_not_eligible() -> None:
+    """A qualifying run remains private unless publication was requested."""
+    environment = _base_environment()
+    environment["LST_ADVERTISE_REQUESTED"] = "0"
+
+    record = build_record(environment)
+
+    assert record["advertise"] is False
+
+
+def test_build_record_source_exactly_100_gib_is_not_eligible() -> None:
+    """The advertised source-size rule uses a strict greater-than boundary."""
+    environment = _base_environment()
+    environment["LST_SOURCE_BYTES"] = str(100 * 1024**3)
+
+    record = build_record(environment)
+
+    assert record["advertise"] is False
+
+
+def test_build_record_missing_source_size_is_not_eligible() -> None:
+    """A run without measured source bytes cannot be advertised."""
+    environment = _base_environment()
+    environment["LST_SOURCE_BYTES"] = ""
+
+    record = build_record(environment)
+
+    assert record["advertise"] is False
+
+
+def test_build_record_failed_run_is_not_eligible() -> None:
+    """An opted-in run with a recorded failure cannot be advertised."""
+    environment = _base_environment()
+    environment["LST_FAILURES"] = "1"
+    environment["LST_EXIT_CODE"] = "1"
+
+    record = build_record(environment)
+
+    assert record["passed"] is False
+    assert record["advertise"] is False
+
+
+def test_build_record_custom_publication_identity_is_preserved() -> None:
+    """Specialized tests retain their explicit public name and class."""
+    environment = _base_environment()
+    environment["LST_TEST_NAME"] = "DAR 2.7 restore using DAR 2.8"
+    environment["LST_ADVERTISE_CLASS"] = "2.7-to-2.8-restore"
+
+    record = build_record(environment)
+
+    assert record["test_name"] == "DAR 2.7 restore using DAR 2.8"
+    assert record["advertise_class"] == "2.7-to-2.8-restore"
+
+
+def test_build_record_empty_publication_name_raises_value_error() -> None:
+    """An empty stable publication-envelope name is rejected."""
+    environment = _base_environment()
+    environment["LST_TEST_NAME"] = ""
+
+    with pytest.raises(ValueError, match="LST_TEST_NAME"):
         build_record(environment)

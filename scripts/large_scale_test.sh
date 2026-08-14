@@ -30,10 +30,13 @@ BITROT_MODE_EXPLICIT=0                              # Tracks whether --bitrot-mo
 BITROT_PERCENT=2                                    # Fixed percentage of one selected slice corrupted per bitrot phase
 BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while preserving exact byte offsets and lengths
 BITROT_EDGE_BYTES=1048576                           # Maximum corruption window at each archive edge in edges mode
+ADVERTISE_REQUESTED=0                               # --advertise: requests publication; the result writer still enforces success and source-size eligibility
+TEST_NAME="Large scale torture test"                 # --test-name: human-readable badge label stored with every result
+ADVERTISE_CLASS=""                                  # --advertise-class: tested version/class; defaults from image metadata after preflight
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="14"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="15"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -99,6 +102,9 @@ while [[ $# -gt 0 ]]; do
         --bitrot)     DO_BITROT=1;             shift   ;;
         --bitrot-seed) BITROT_SEED="$2";       shift 2 ;;
         --bitrot-mode) BITROT_MODE="$2"; BITROT_MODE_EXPLICIT=1; shift 2 ;;
+        --advertise)  ADVERTISE_REQUESTED=1; shift ;;
+        --test-name)  TEST_NAME="$2"; shift 2 ;;
+        --advertise-class) ADVERTISE_CLASS="$2"; shift 2 ;;
         --keep)       KEEP=1;                  shift   ;;
         --smoketest)  SMOKETEST=1;             shift   ;;
         --timeout)    TIMEOUT="$2";            shift 2 ;;
@@ -109,6 +115,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$DEFINITION_CONTENT" ]] && { echo "ERROR: --definition is required"; exit 1; }
+[[ -z "$TEST_NAME" ]] && { echo "ERROR: --test-name must not be empty" >&2; exit 1; }
 [[ $DO_BITROT -eq 0 && -n "$BITROT_SEED" ]] && { echo "ERROR: --bitrot-seed requires --bitrot" >&2; exit 1; }
 [[ $DO_BITROT -eq 0 && $BITROT_MODE_EXPLICIT -eq 1 ]] && { echo "ERROR: --bitrot-mode requires --bitrot" >&2; exit 1; }
 case "$BITROT_MODE" in
@@ -179,6 +186,15 @@ preflight() {
     IMAGE_VERSION=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$IMAGE" 2>/dev/null || true)
     [[ "$IMAGE_REVISION" == "<no value>" ]] && IMAGE_REVISION=""
     [[ "$IMAGE_VERSION" == "<no value>" ]] && IMAGE_VERSION=""
+    if [[ -z "$ADVERTISE_CLASS" ]]; then
+        if [[ -n "$IMAGE_VERSION" ]]; then
+            ADVERTISE_CLASS="$IMAGE_VERSION"
+        elif [[ -n "$IMAGE_REVISION" ]]; then
+            ADVERTISE_CLASS="$IMAGE_REVISION"
+        else
+            ADVERTISE_CLASS="$GIT_COMMIT"
+        fi
+    fi
     DAR_BACKUP_VERSION=$(docker inspect -f '{{ index .Config.Labels "org.dar-backup.version" }}' "$IMAGE" 2>/dev/null || echo "unknown")
     DAR_VERSION=$(docker inspect -f '{{ index .Config.Labels "org.dar.version" }}' "$IMAGE" 2>/dev/null || echo "unknown")
     PAR2_VERSION=$(docker run --rm --entrypoint /usr/bin/par2 "$IMAGE" --version 2>/dev/null | head -1 || echo "unknown")
@@ -366,6 +382,7 @@ RUN_VARIABLES=(
     IMAGE DEFINITION_ROOT MOUNT_ROOT
     BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE PAR2_RATIO
     DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES BITROT_EDGE_BYTES
+    ADVERTISE_REQUESTED TEST_NAME ADVERTISE_CLASS
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
     DAR_BACKUP_VERSION GIT_COMMIT HARNESS_GIT_COMMIT HARNESS_GIT_DIRTY REPO_DIR
     IMAGE_ID IMAGE_REPO_DIGEST IMAGE_REVISION IMAGE_VERSION DAR_VERSION PAR2_VERSION
@@ -1001,6 +1018,9 @@ write_json_record() {
     RESULT_WRITTEN=1
     LST_DATESTAMP="${DATESTAMP:-}" \
     LST_DATE="${DATE_OF_RUN:-}" \
+    LST_ADVERTISE_REQUESTED="${ADVERTISE_REQUESTED:-0}" \
+    LST_TEST_NAME="${TEST_NAME:-Large scale torture test}" \
+    LST_ADVERTISE_CLASS="${ADVERTISE_CLASS:-unknown}" \
     LST_GIT_COMMIT="${GIT_COMMIT:-unknown}" \
     LST_DAR_BACKUP_VER="${DAR_BACKUP_VERSION:-unknown}" \
     LST_DAR_VER="${DAR_VERSION:-unknown}" \

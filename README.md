@@ -1,6 +1,7 @@
 # dar-backup image — reproducible backups and a long-term restore time capsule
 <a href="https://github.com/per2jensen/dar-backup-image/releases"><img alt="Tag" src="https://img.shields.io/github/v/tag/per2jensen/dar-backup-image"/></a>
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
+[![Large scale torture test](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/test-report/torture-test-badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/test-report/large-scale-results.jsonl)
 <a href="https://github.com/per2jensen/dar-backup-image/blob/main/doc/DETAILS.md#image-signing-and-supply-chain-verification">
   <img alt="cosign badge" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/cosign_badge.json"/>
 </a>

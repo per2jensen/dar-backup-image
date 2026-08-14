@@ -4,6 +4,8 @@
 
 ### Added
 
+- publish an evidence-backed Shields badge for explicitly approved successful
+  torture tests over 100 GiB, using a defensive schema-v5 JSONL consumer
 - support development-image builds from a validated external `dar-backup`
   wheel, with installation-source and wheel SHA-256 provenance labels
 - add `dev.md` as the canonical development-image build guide
