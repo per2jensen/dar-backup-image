@@ -90,7 +90,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image
-        run: docker pull "${{ needs.build.outputs.image_ref }}"
+        run: ./scripts/docker-pull-retry.sh "${{ needs.build.outputs.image_ref }}"
 
       - name: Ensure image exists
         run: docker image inspect "${{ needs.build.outputs.image_ref }}" > /dev/null
@@ -161,7 +161,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image
-        run: docker pull "${{ needs.build.outputs.image_ref }}"
+        run: ./scripts/docker-pull-retry.sh "${{ needs.build.outputs.image_ref }}"
 
       - name: Ensure image exists
         run: docker image inspect "${{ needs.build.outputs.image_ref }}" > /dev/null
@@ -252,7 +252,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image
-        run: docker pull "${{ needs.build.outputs.image_ref }}"
+        run: ./scripts/docker-pull-retry.sh "${{ needs.build.outputs.image_ref }}"
 
       - name: Compute Grype cache key
         id: cache-key

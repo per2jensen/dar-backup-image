@@ -76,6 +76,8 @@
   the backup/restore comparison flow without hiding unrelated report failures
 - run the FULL restore comparison once and correctly verify that the INCR
   restore no longer preserves the deliberately broken hard link
+- retry transient GHCR image-pull failures with bounded backoff in every
+  image-consuming build/test/scan job
 
 ## 0.5.28 - 2026-07-08
 
