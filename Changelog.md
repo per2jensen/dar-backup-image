@@ -1,8 +1,13 @@
 # dar-backup-image Changelog
 
-## Unreleased
+## 0.9.1 - not released
+
+## 0.9.0 - 2026-08-16
 
 ### Added
+
+- Nearing a 1.0 release - I am keeping it at 0.9.x for some time, will
+  then run an -rc or two and hopefully reach 1.0 without too many issues
 
 - add optional complete archive-root PITR restoration to the large-scale test,
   selected automatically through 25 GiB by default, forceable at any size, or
