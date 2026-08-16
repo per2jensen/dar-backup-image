@@ -72,6 +72,10 @@
 - fail PAR2 verification when no slice files exist instead of reporting a
   vacuous pass
 - restore the accidentally removed `0.5.28` README release row
+- accept and verify the expected PITR tombstone result for deleted paths in
+  the backup/restore comparison flow without hiding unrelated report failures
+- run the FULL restore comparison once and correctly verify that the INCR
+  restore no longer preserves the deliberately broken hard link
 
 ## 0.5.28 - 2026-07-08
 

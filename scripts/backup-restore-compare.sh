@@ -14,18 +14,15 @@
 
 set -euo pipefail
 
-export WORKDIR="$(pwd)/.e2e"
+WORKDIR="$(pwd)/.e2e"
+export WORKDIR
 DATA_DIR="$WORKDIR/data"
 BACKUP_DIR="$WORKDIR/backups"
 BACKUP_D_DIR="$WORKDIR/backup.d"
 RESTORE_DIR="$WORKDIR/restore"
 LIST_RESTORE_DIR="$WORKDIR/restore-list"
 DATE="$(date +%Y-%m-%d)"
-echo "Using 'DATE': $DATE"
 IMAGE="${IMAGE:-dar-backup:dev}"
-
-rm -fr "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR" "$LIST_RESTORE_DIR"
-mkdir -p "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR" "$LIST_RESTORE_DIR"
 
 # ---------- helpers ----------
 assert_deleted() { test ! -e "$1" || { echo "expected deleted: $1"; exit 1; }; }
@@ -35,6 +32,11 @@ assert_symlink_target() { local t; t=$(readlink "$1"); [ "$t" = "$2" ] || { echo
 assert_same_inode() { # hardlink check: same inode == preserved hardlink
   local i1 i2; i1=$(stat -c '%i' "$1"); i2=$(stat -c '%i' "$2")
   [ "$i1" = "$i2" ] || { echo "hardlink lost: $1 ($i1) vs $2 ($i2)"; exit 1; }
+}
+
+assert_different_inode() { # independent-file check: different inode == hardlink broken
+  local i1 i2; i1=$(stat -c '%i' "$1"); i2=$(stat -c '%i' "$2")
+  [ "$i1" != "$i2" ] || { echo "hardlink incorrectly preserved: $1 ($i1) vs $2 ($i2)"; return 1; }
 }
 
 assert_mode() { # octal mode compare
@@ -85,25 +87,59 @@ pitr_report () {
       --log-stdout --verbose
 }
 
+validate_pitr_report () {
+  local restore_path="$1"
+  local expect_deleted="$2"
+  local report_status="$3"
+  local report_output="$4"
+
+  if [[ "$expect_deleted" != "0" && "$expect_deleted" != "1" ]]; then
+    >&2 echo "ERROR: expect_deleted must be 0 or 1, got: $expect_deleted"
+    return 2
+  fi
+  if ! [[ "$report_status" =~ ^[0-9]+$ ]]; then
+    >&2 echo "ERROR: PITR report status must be a non-negative integer, got: $report_status"
+    return 2
+  fi
+  if ! grep -Fq -- "$restore_path" <<< "$report_output"; then
+    >&2 echo "ERROR: PITR report did not mention expected path: $restore_path"
+    return 1
+  fi
+
+  if [[ "$expect_deleted" = "1" ]]; then
+    if [[ "$report_status" -ne 1 ]]; then
+      >&2 echo "ERROR: PITR report for deleted path returned $report_status, expected 1: $restore_path"
+      return 1
+    fi
+    if ! grep -Fq -- "recorded the path as removed" <<< "$report_output"; then
+      >&2 echo "ERROR: PITR report did not confirm the expected deletion: $restore_path"
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ "$report_status" -ne 0 ]]; then
+    >&2 echo "ERROR: PITR report failed for present path with status $report_status: $restore_path"
+    return 1
+  fi
+}
+
 pitr_report_expect () {
   local when="$1"
   local restore_path="$2"
   local expect_deleted="${3:-0}"
   local report_output
+  local report_status
 
   echo "==> PITR report: $restore_path (when: $when)"
-  report_output="$(pitr_report "$when" "$restore_path" 2>&1)"
-  echo "$report_output"
-
-  if ! printf '%s\n' "$report_output" | grep -Fq "$restore_path"; then
-    echo "❌ PITR report did not mention expected path: $restore_path"
-    exit 1
+  if report_output="$(pitr_report "$when" "$restore_path" 2>&1)"; then
+    report_status=0
+  else
+    report_status=$?
   fi
+  printf '%s\n' "$report_output"
 
-  if [[ "$expect_deleted" = "1" ]]; then
-    # Current PITR report output doesn't explicitly label deletions; path presence is the confirmation here.
-    true
-  fi
+  validate_pitr_report "$restore_path" "$expect_deleted" "$report_status" "$report_output"
 }
 
 add_initial_dataset () {
@@ -157,7 +193,7 @@ list_contents () {
   archive_basename="$1"  # e.g., default_FULL_${DATE}, default_DIFF_${DATE}, default_INCR_${DATE}  
   echo "Contents of archive set: $archive_basename"
   dump_restore_state
-  docker run --rm   -e RUN_AS_UID=$(id -u) \
+  docker run --rm -e RUN_AS_UID="$(id -u)" \
     -v "$DATA_DIR":/data \
     -v "$BACKUP_DIR":/backups \
     -v "$LIST_RESTORE_DIR":/restore \
@@ -227,8 +263,14 @@ restore_and_compare () {
     echo "✅ Restore matches source for $ARCHIVE_BASENAME"
   fi
 }
-# Create `default` backup definition in $BACKUP_D_DIR
-cat > "$BACKUP_D_DIR/default" <<EOF
+
+main () {
+  echo "Using 'DATE': $DATE"
+  rm -fr "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR" "$LIST_RESTORE_DIR"
+  mkdir -p "$DATA_DIR" "$BACKUP_DIR" "$BACKUP_D_DIR" "$RESTORE_DIR" "$LIST_RESTORE_DIR"
+
+  # Create `default` backup definition in $BACKUP_D_DIR
+  cat > "$BACKUP_D_DIR/default" <<EOF
 -am
 -R /
 -g data/
@@ -239,43 +281,42 @@ cat > "$BACKUP_D_DIR/default" <<EOF
 --cache-directory-tagging
 EOF
 
-# ---------- dataset + FULL ----------
-echo "==> Creating dataset"
-add_initial_dataset
+  # ---------- dataset + FULL ----------
+  echo "==> Creating dataset"
+  add_initial_dataset
 
-echo "==> FULL backup"
-dump_restore_state
-scripts/run-backup.sh -t FULL  
-PITR_WHEN_FULL="$(date '+%Y-%m-%d %H:%M:%S')"
-restore_and_compare "default_FULL_${DATE}"
-restore_and_compare "default_FULL_${DATE}"
-# Hardlink must be preserved in FULL
-assert_same_inode "$RESTORE_DIR/data/bin-256k.dat" "$RESTORE_DIR/data/bin-256k.hardlink"
-# Symlink target must point to hello.txt initially
-assert_symlink_target "$RESTORE_DIR/data/sub/link-to-hello" "../hello.txt"
+  echo "==> FULL backup"
+  dump_restore_state
+  scripts/run-backup.sh -t FULL
+  PITR_WHEN_FULL="$(date '+%Y-%m-%d %H:%M:%S')"
+  restore_and_compare "default_FULL_${DATE}"
+  # Hardlink must be preserved in FULL
+  assert_same_inode "$RESTORE_DIR/data/bin-256k.dat" "$RESTORE_DIR/data/bin-256k.hardlink"
+  # Symlink target must point to hello.txt initially
+  assert_symlink_target "$RESTORE_DIR/data/sub/link-to-hello" "../hello.txt"
 
+  # ---------- mutate + DIFF ----------
+  echo "==> Add more data (R1) and DIFF backup"
+  add_more_data_round1
+  dump_restore_state
+  scripts/run-backup.sh -t DIFF
+  PITR_WHEN_DIFF="$(date '+%Y-%m-%d %H:%M:%S')"
+  restore_and_compare "default_DIFF_${DATE}"
+  assert_deleted "$RESTORE_DIR/data/sub/inner/note.md"
+  # Symlink retarget must be applied
+  assert_symlink_target "$RESTORE_DIR/data/sub/link-to-hello" "../alt.txt"
 
-# ---------- mutate + DIFF ----------
-echo "==> Add more data (R1) and DIFF backup"
-add_more_data_round1
-dump_restore_state
-scripts/run-backup.sh -t DIFF 
-PITR_WHEN_DIFF="$(date '+%Y-%m-%d %H:%M:%S')"
-restore_and_compare "default_DIFF_${DATE}"
-assert_deleted "$RESTORE_DIR/data/sub/inner/note.md"
-# Symlink retarget must be applied
-assert_symlink_target "$RESTORE_DIR/data/sub/link-to-hello" "../alt.txt"
+  # ---------- mutate + INCR ----------
+  echo "==> Add more data (R2) and INCR backup"
+  add_more_data_round2
+  dump_restore_state
+  scripts/run-backup.sh -t INCR
+  PITR_WHEN_INCR="$(date '+%Y-%m-%d %H:%M:%S')"
+  restore_and_compare "default_INCR_${DATE}"
+  # We deliberately broke the hardlink in round2; ensure they are now different inodes
+  assert_different_inode "$RESTORE_DIR/data/bin-256k.dat" "$RESTORE_DIR/data/bin-256k.hardlink"
+}
 
-# ---------- mutate + INCR ----------
-echo "==> Add more data (R2) and INCR backup"
-add_more_data_round2
-dump_restore_state
-scripts/run-backup.sh -t INCR
-PITR_WHEN_INCR="$(date '+%Y-%m-%d %H:%M:%S')"
-restore_and_compare "default_INCR_${DATE}"
-# We deliberately broke the hardlink in round2; ensure they are now different inodes
-DAT_INODE=$(stat -c '%i' "$RESTORE_DIR/data/bin-256k.dat")
-HARDLINK_INODE=$(stat -c '%i' "$RESTORE_DIR/data/bin-256k.hardlink")
-if [ "$DAT_INODE" = "$HARDLINK_INODE " ]; then
-  echo "hardlink incorrectly preserved after round2 change"; exit 1
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
