@@ -296,6 +296,67 @@ def _all_available_checks_passed(value: Any) -> bool:
     return bool(statuses) and all(status == "passed" for status in statuses)
 
 
+def _full_restore_component(record: Mapping[str, Any]) -> str | None:
+    """Build a badge claim from internally consistent full-restore evidence.
+
+    Args:
+        record: Advertised schema-v6 result record.
+
+    Returns:
+        A concise success component, or ``None`` when evidence is absent,
+        incomplete, skipped, failed, or contradictory.
+
+    Raises:
+        ValueError: If ``record`` is ``None``.
+    """
+    if record is None:
+        raise ValueError("record must not be None")
+    evidence = safe_get(record, "checks", "full_restore")
+    if not isinstance(evidence, Mapping):
+        return None
+    if evidence.get("performed") is not True:
+        return None
+    if any(
+        evidence.get(key) != "passed"
+        for key in ("execution", "content_comparison", "overall")
+    ):
+        return None
+
+    restored_file_count = evidence.get("restored_file_count")
+    restored_bytes = evidence.get("restored_bytes")
+    threshold_bytes = evidence.get("threshold_bytes")
+    evidence_source_bytes = evidence.get("source_bytes")
+    record_source_bytes = record.get("source_bytes")
+    positive_integers = (
+        restored_file_count,
+        restored_bytes,
+        threshold_bytes,
+        evidence_source_bytes,
+        record_source_bytes,
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in positive_integers
+    ):
+        return None
+    if evidence_source_bytes != record_source_bytes:
+        return None
+
+    mode = evidence.get("mode")
+    decision_reason = evidence.get("decision_reason")
+    if mode == "auto":
+        if decision_reason != "source_within_threshold":
+            return None
+        if evidence_source_bytes > threshold_bytes:
+            return None
+    elif mode == "forced":
+        if decision_reason != "forced_by_user":
+            return None
+    else:
+        return None
+    return "Full restore ✓"
+
+
 def _date_component(record: Mapping[str, Any]) -> str | None:
     """Extract a valid ISO calendar date.
 
@@ -374,6 +435,7 @@ def build_badge_payload(record: Mapping[str, Any] | None) -> dict[str, Any]:
             _bitrot_component(record),
             "PAR2 ✓" if _all_available_checks_passed(safe_get(record, "checks", "par2_verify")) else None,
             "PITR ✓" if safe_get(record, "checks", "pitr_restore", "overall") == "passed" else None,
+            _full_restore_component(record),
             _date_component(record),
         )
         if component is not None

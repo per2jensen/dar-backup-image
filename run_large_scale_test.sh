@@ -20,8 +20,10 @@
 #   BITROT_MODE=fragmented ./run_large_scale_test.sh
 # 6. Corrupt the beginning of slice 1 and the end of the final slice:
 #   BITROT_MODE=edges ./run_large_scale_test.sh
-# 7. Request publication if the completed run passes and exceeds 100 GiB:
+# 7. Request publication if the completed run passes and is at least 100 GiB:
 #   ADVERTISE=true ADVERTISE_CLASS=v0.5.29 ./run_large_scale_test.sh
+# 8. Force a complete archive-root restore even for a very large source:
+#   FULL_RESTORE_MODE=forced ./run_large_scale_test.sh
 #
 # BASE_DIR must live at least two directories deep (see scripts/large_scale_test.sh
 # for why), and SOURCE_GLOB must resolve to real data under BASE_DIR's own
@@ -58,12 +60,19 @@ BITROT_MODE="${BITROT_MODE:-contiguous}"                # contiguous (default), 
 ADVERTISE="${ADVERTISE:-false}"                         # true requests badge publication; success and size are still enforced by the harness
 TEST_NAME="${TEST_NAME:-Large scale torture test}"      # human-readable badge label recorded with the result
 ADVERTISE_CLASS="${ADVERTISE_CLASS:-}"                  # tested version/class; empty derives it from the image metadata
+FULL_RESTORE_MODE="${FULL_RESTORE_MODE:-auto}"          # auto at/below threshold, forced at any size, or disabled
+FULL_RESTORE_THRESHOLD_GIB="${FULL_RESTORE_THRESHOLD_GIB:-25}" # inclusive auto-mode source-size limit in GiB
 DEFINITION="${DEFINITION:-}"                            # full backup-definition body; overrides SOURCE_GLOB/SLICE_SIZE/COMPRESSION entirely when set (see examples above)
 
 case "$ADVERTISE" in
     true|false) ;;
     *) echo "ERROR: ADVERTISE must be 'true' or 'false', got '${ADVERTISE}'" >&2; exit 1 ;;
 esac
+case "$FULL_RESTORE_MODE" in
+    auto|forced|disabled) ;;
+    *) echo "ERROR: FULL_RESTORE_MODE must be 'auto', 'forced', or 'disabled', got '${FULL_RESTORE_MODE}'" >&2; exit 1 ;;
+esac
+[[ "$FULL_RESTORE_THRESHOLD_GIB" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: FULL_RESTORE_THRESHOLD_GIB must be a positive integer, got '${FULL_RESTORE_THRESHOLD_GIB}'" >&2; exit 1; }
 
 # large_scale_test.sh requires the definition's -R to match the mount root it
 # derives from BASE_DIR's own top-level directory (e.g. "/data/tmp/foo" ->
@@ -85,6 +94,8 @@ ARGS=(--base "${BASE_DIR}" --image "${IMAGE}")
 [[ "$ADVERTISE" == "true" ]] && ARGS+=(--advertise)
 ARGS+=(--test-name "$TEST_NAME")
 [[ -n "$ADVERTISE_CLASS" ]] && ARGS+=(--advertise-class "$ADVERTISE_CLASS")
+ARGS+=(--full-restore-mode "$FULL_RESTORE_MODE")
+ARGS+=(--full-restore-threshold-gib "$FULL_RESTORE_THRESHOLD_GIB")
 
 if [[ -z "$DEFINITION" ]]; then
     DEFINITION="$(cat << EOF

@@ -54,6 +54,8 @@ def test_wrapper_advertise_options_are_forwarded_to_harness(tmp_path: Path) -> N
             "ADVERTISE_CLASS": "2.7-to-2.8",
             "BASE_DIR": "/data/tmp/test",
             "SOURCE_GLOB": "source",
+            "FULL_RESTORE_MODE": "forced",
+            "FULL_RESTORE_THRESHOLD_GIB": "40",
         }
     )
 
@@ -66,6 +68,8 @@ def test_wrapper_advertise_options_are_forwarded_to_harness(tmp_path: Path) -> N
     assert "--advertise" in arguments
     assert arguments[arguments.index("--test-name") + 1] == "Cross-version restore"
     assert arguments[arguments.index("--advertise-class") + 1] == "2.7-to-2.8"
+    assert arguments[arguments.index("--full-restore-mode") + 1] == "forced"
+    assert arguments[arguments.index("--full-restore-threshold-gib") + 1] == "40"
 
 
 def test_wrapper_invalid_advertise_value_fails_before_harness(tmp_path: Path) -> None:
@@ -84,3 +88,75 @@ def test_wrapper_invalid_advertise_value_fails_before_harness(tmp_path: Path) ->
 
     assert result.returncode != 0
     assert "ADVERTISE must be 'true' or 'false'" in result.stderr
+
+
+def test_wrapper_default_full_restore_is_auto_at_25_gib(tmp_path: Path) -> None:
+    """The wrapper forwards the documented automatic complete-restore defaults.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    wrapper = _isolated_wrapper(tmp_path)
+    environment = os.environ.copy()
+    environment.update({"BUILD_IMAGE": "false", "BITROT": "false"})
+    environment.pop("FULL_RESTORE_MODE", None)
+    environment.pop("FULL_RESTORE_THRESHOLD_GIB", None)
+
+    result = subprocess.run(
+        [str(wrapper)], env=environment, capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    arguments = result.stdout.splitlines()[1:]
+    assert arguments[arguments.index("--full-restore-mode") + 1] == "auto"
+    assert arguments[arguments.index("--full-restore-threshold-gib") + 1] == "25"
+
+
+def test_wrapper_invalid_full_restore_mode_fails_before_harness(
+    tmp_path: Path,
+) -> None:
+    """An unknown full-restore mode is rejected instead of silently skipped.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    wrapper = _isolated_wrapper(tmp_path)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BUILD_IMAGE": "false",
+            "FULL_RESTORE_MODE": "sometimes",
+        }
+    )
+
+    result = subprocess.run(
+        [str(wrapper)], env=environment, capture_output=True, text=True
+    )
+
+    assert result.returncode != 0
+    assert "FULL_RESTORE_MODE must be 'auto', 'forced', or 'disabled'" in result.stderr
+
+
+def test_wrapper_invalid_full_restore_threshold_fails_before_harness(
+    tmp_path: Path,
+) -> None:
+    """A non-positive automatic threshold is rejected before harness execution.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    wrapper = _isolated_wrapper(tmp_path)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BUILD_IMAGE": "false",
+            "FULL_RESTORE_THRESHOLD_GIB": "0",
+        }
+    )
+
+    result = subprocess.run(
+        [str(wrapper)], env=environment, capture_output=True, text=True
+    )
+
+    assert result.returncode != 0
+    assert "FULL_RESTORE_THRESHOLD_GIB must be a positive integer" in result.stderr

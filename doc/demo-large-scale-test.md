@@ -18,9 +18,11 @@ Key features demonstrated:
 - Reproducible bitrot simulation with contiguous, fragmented, and archive-edge
   modes: confirm `dar -t` detects the damage, repair every affected slice once
   with its own PAR2 set, and confirm `dar -t` passes again
-- Point-in-Time Recovery restore of the latest state via `manager
+- Point-in-Time Recovery restore of the latest primer state via `manager
   --restore-path`, with hard-link and deletion-record verification
 - sha256 checksum verification of every restored file against the live source
+- optional complete archive-root PITR restore: automatic through 25 GiB by
+  default, forceable at any size, or explicitly disabled
 - A structured JSONL result appended to a results directory (and mirrored into
   this repo's `doc/test-report/`, for tracking metrics release over release)
 
@@ -62,9 +64,11 @@ Every value the script uses is an environment variable with the shown default
 | `BITROT` | `true` | Set `false` to skip the corrupt/detect/repair phases |
 | `BITROT_SEED` | *(generated)* | Optional unsigned 64-bit seed that exactly replays the random bitrot selections |
 | `BITROT_MODE` | `contiguous` | `contiguous` for one random 2% range, `fragmented` for the same budget across 2–10 separated regions, or `edges` for bounded windows at the start of slice 1 and end of the numerically final slice |
-| `ADVERTISE` | `false` | Set `true` to request badge publication; the harness still requires a successful run whose measured source is greater than 100 GiB |
+| `ADVERTISE` | `false` | Set `true` to request badge publication; the harness still requires a successful run whose measured source is at least 100 GiB |
 | `TEST_NAME` | `Large scale torture test` | Human-readable public badge label stored with the result |
 | `ADVERTISE_CLASS` | *(image version or revision)* | Public tested version/class; set explicitly for specialized engineering tests |
+| `FULL_RESTORE_MODE` | `auto` | `auto` restores sources at or below the threshold, `forced` restores at any size, and `disabled` skips the complete restore |
+| `FULL_RESTORE_THRESHOLD_GIB` | `25` | Inclusive source-size threshold in GiB used only by `auto` mode |
 | `DEFINITION` | *(unset)* | Full backup-definition body — see [Full backup-definition control](#full-backup-definition-control) |
 
 **The one thing that trips people up**: `BASE_DIR`'s top-level directory
@@ -150,6 +154,8 @@ Anything you pass on the command line is forwarded straight through to
 | `--bitrot-seed N` | Replay the random bitrot selections made with seed N |
 | `--bitrot-mode MODE` | Select `contiguous` (default), `fragmented`, or `edges` corruption |
 | `--min-free-multiplier N` | Required free space as a multiple of source size (default 2) |
+| `--full-restore-mode MODE` | Select `auto`, `forced`, or `disabled` complete-restore behavior |
+| `--full-restore-threshold-gib N` | Set the inclusive `auto` threshold in GiB (default 25) |
 | `--timeout N` | Per-command timeout in seconds (default 86400) |
 
 Example — keep the archives around and use a lighter par2 ratio:
@@ -157,6 +163,16 @@ Example — keep the archives around and use a lighter par2 ratio:
 ```bash
 ./run_large_scale_test.sh --keep --par2-ratio 3
 ```
+
+Example — deliberately run a complete restore for a 400 GiB source:
+
+```bash
+FULL_RESTORE_MODE=forced ./run_large_scale_test.sh
+```
+
+The automatic threshold is ignored in `forced` mode, but remains recorded in
+the structured result for context. `disabled` skips only the complete restore;
+the targeted primer PITR restore remains mandatory in every mode.
 
 ## What a run looks like
 
@@ -198,6 +214,13 @@ Example — keep the archives around and use a lighter par2 ratio:
   PASS  All 119 restored file(s) match source sha256 checksums
 
 ══════════════════════════════════════════
+  Phase 3b — Complete Point-In-Time Restore Validation
+══════════════════════════════════════════
+  INFO  Restoring the complete archive root via manager...
+  PASS  Complete archive-root restore executed successfully
+  PASS  All 741 restored regular-file path(s) (7855568881 byte(s)) match the live source
+
+══════════════════════════════════════════
   Summary
 ══════════════════════════════════════════
 FULL elapsed: 4050s (~116.23 GB)
@@ -232,7 +255,7 @@ scale with however much data you point `SOURCE_GLOB` at.)
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
 
-New records use additive schema version 5. All schema-version-2 through -4
+New records use additive schema version 6. All schema-version-2 through -5
 fields remain present for existing consumers and the older lines in the history
 remain valid. Additional provenance includes the full harness commit and dirty
 state, the requested image reference, immutable local image ID, registry digest
@@ -253,9 +276,32 @@ identical archive layout.
 Schema v5 adds the intentionally small publication envelope: `advertise`,
 `test_name`, and `advertise_class`. `advertise` becomes true only when
 publication was explicitly requested, the run completed successfully with no
-failures, and `source_bytes` is strictly greater than 100 GiB. The remaining
+failures, and `source_bytes` is at least 100 GiB. The remaining
 engineering fields may continue evolving independently; badge presentation
 uses them only when their recognized values are available and valid.
+
+Schema v6 adds `checks.full_restore`. It records the requested mode, threshold,
+measured source size, whether execution was actually reached, the decision
+reason, execution/content/overall statuses, and the restored regular-file
+count and byte total. This makes an automatic size skip, explicit disablement,
+interrupted attempt, failed restore, and successful complete restore distinct.
+
+The complete restore selects archive root `.` and therefore asks `manager` to
+reconstruct every path represented by the latest FULL → DIFF → INCR chain.
+Every restored regular file is SHA-256 compared with its live source path;
+symlink targets and filesystem entry types are compared as well. Because a
+custom DAR definition may intentionally exclude source files, the restored
+archive tree—not the unfiltered source root—is the general comparison
+boundary. The harness-owned primer has no intentional omissions and is also
+checked in the source-to-restore direction so missing fixture extraction is
+detected.
+
+The badge adds `Full restore ✓` only for internally consistent schema-v6
+evidence: the complete restore must have been performed, execution, content
+comparison, and overall status must all have passed, restored file and byte
+counts must be positive, and the recorded mode and decision must agree. Older,
+skipped, failed, incomplete, or contradictory records remain publishable when
+otherwise eligible but do not receive the full-restore claim.
 
 `source_file_count` and `source_bytes` measure regular files selected by the
 definition's `-g` roots immediately before the FULL backup. Overlapping roots
@@ -276,8 +322,10 @@ build performed earlier by the wrapper.
 
 - **Runtime scales with data size.** A 116GB FULL backup takes roughly an
   hour; DIFF/INCR are fast since only the synthetic "diff-primer" fixture
-  changes between them. There's also a deliberate ~2-3 minute pause before the
-  INCR phase, to keep file mtimes cleanly separated in the log.
+  changes between them. Complete restore and checksum comparison add another
+  full-data read/write cycle when selected. There's also a deliberate ~2-3
+  minute pause before the INCR phase, to keep file mtimes cleanly separated in
+  the log.
 - **Peak-memory numbers are scoped to this run's own containers** (via `docker
   top` against each container's own ID) — they won't be polluted by unrelated
   `dar`/`par2`/`manager` processes elsewhere on the host, including your own

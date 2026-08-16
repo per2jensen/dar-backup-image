@@ -36,7 +36,15 @@ ADVERTISE_CLASS=""                                  # --advertise-class: tested 
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
-SCRIPT_VERSION="15"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+FULL_RESTORE_MODE="auto"                            # --full-restore-mode: auto below threshold, forced at any size, or disabled
+FULL_RESTORE_THRESHOLD_GIB=25                       # --full-restore-threshold-gib: inclusive source-size limit used only by auto mode
+FULL_RESTORE_THRESHOLD_BYTES=$((25 * 1024 * 1024 * 1024)) # Derived again after option validation and stored as exact result evidence
+FULL_RESTORE_SELECTED=0                             # Decision made after source measurement; separate from whether execution is reached
+FULL_RESTORE_PERFORMED=0                            # Set only immediately before complete-tree PITR execution
+FULL_RESTORE_DECISION_REASON="not_evaluated"        # Stable machine-readable explanation for selection or skip
+FULL_RESTORE_FILE_COUNT=""                          # Regular-file paths checksum-compared by the complete restore
+FULL_RESTORE_BYTES=""                               # Apparent restored bytes checksum-compared by the complete restore
+SCRIPT_VERSION="16"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -73,6 +81,8 @@ FULL_BITROT_STATUS="not_run"; DIFF_BITROT_STATUS="not_run"; INCR_BITROT_STATUS="
 DIFF_CONTENTS_STATUS="not_run"; INCR_CONTENTS_STATUS="not_run"
 PITR_EXECUTION_STATUS="not_run"; PITR_STRUCTURE_STATUS="not_run"
 PITR_CHECKSUM_STATUS="not_run"; PITR_OVERALL_STATUS="not_run"
+FULL_RESTORE_EXECUTION_STATUS="not_run"; FULL_RESTORE_CONTENT_STATUS="not_run"
+FULL_RESTORE_OVERALL_STATUS="not_run"
 
 # ── colours ─────────────────────────────────────────────────────────────────
 RED='\033[31m'; GREEN='\033[32m'
@@ -109,6 +119,8 @@ while [[ $# -gt 0 ]]; do
         --smoketest)  SMOKETEST=1;             shift   ;;
         --timeout)    TIMEOUT="$2";            shift 2 ;;
         --min-free-multiplier) MIN_FREE_MULTIPLIER="$2"; shift 2 ;;
+        --full-restore-mode) FULL_RESTORE_MODE="$2"; shift 2 ;;
+        --full-restore-threshold-gib) FULL_RESTORE_THRESHOLD_GIB="$2"; shift 2 ;;
         --help|-h)    usage ;;
         *) echo "Unknown option: $1"; usage ;;
     esac
@@ -122,11 +134,24 @@ case "$BITROT_MODE" in
     contiguous|fragmented|edges) ;;
     *) echo "ERROR: --bitrot-mode must be contiguous, fragmented, or edges" >&2; exit 1 ;;
 esac
+case "$FULL_RESTORE_MODE" in
+    auto|forced|disabled) ;;
+    *) echo "ERROR: --full-restore-mode must be auto, forced, or disabled" >&2; exit 1 ;;
+esac
+[[ "$FULL_RESTORE_THRESHOLD_GIB" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --full-restore-threshold-gib must be a positive integer" >&2; exit 1; }
+[[ "$FULL_RESTORE_THRESHOLD_GIB" -le 8589934591 ]] || { echo "ERROR: --full-restore-threshold-gib is too large" >&2; exit 1; }
+FULL_RESTORE_THRESHOLD_BYTES=$((10#$FULL_RESTORE_THRESHOLD_GIB * 1024 * 1024 * 1024))
 
 if [[ $DO_BITROT -eq 0 ]]; then
     FULL_BITROT_STATUS="skipped"
     DIFF_BITROT_STATUS="skipped"
     INCR_BITROT_STATUS="skipped"
+fi
+if [[ "$FULL_RESTORE_MODE" == "disabled" ]]; then
+    FULL_RESTORE_DECISION_REASON="disabled_by_user"
+    FULL_RESTORE_EXECUTION_STATUS="skipped"
+    FULL_RESTORE_CONTENT_STATUS="skipped"
+    FULL_RESTORE_OVERALL_STATUS="skipped"
 fi
 
 # MOUNT_ROOT is the host directory identity-mounted read-only into every
@@ -219,6 +244,31 @@ fi
 # Estimates the real source data size from the backup definition's -R/-g paths and
 # fails fast if BASE_DIR's filesystem doesn't have MIN_FREE_MULTIPLIER times that much
 # free — a multi-hour run has no business discovering "disk full" three phases in.
+decide_full_restore() {
+    if [[ "$FULL_RESTORE_MODE" == "disabled" ]]; then
+        info "Complete restore disabled by user."
+        return 0
+    fi
+    if [[ "$FULL_RESTORE_MODE" == "forced" ]]; then
+        FULL_RESTORE_SELECTED=1
+        FULL_RESTORE_DECISION_REASON="forced_by_user"
+        info "Complete restore forced for ${SOURCE_BYTES} source byte(s); automatic threshold is ignored."
+        return 0
+    fi
+    if [[ "$SOURCE_BYTES" -le "$FULL_RESTORE_THRESHOLD_BYTES" ]]; then
+        FULL_RESTORE_SELECTED=1
+        FULL_RESTORE_DECISION_REASON="source_within_threshold"
+        info "Complete restore selected automatically: ${SOURCE_BYTES} <= ${FULL_RESTORE_THRESHOLD_BYTES} byte(s)."
+        return 0
+    fi
+    FULL_RESTORE_SELECTED=0
+    FULL_RESTORE_DECISION_REASON="source_exceeds_threshold"
+    FULL_RESTORE_EXECUTION_STATUS="skipped"
+    FULL_RESTORE_CONTENT_STATUS="skipped"
+    FULL_RESTORE_OVERALL_STATUS="skipped"
+    info "Complete restore skipped automatically: ${SOURCE_BYTES} > ${FULL_RESTORE_THRESHOLD_BYTES} byte(s)."
+}
+
 check_disk_space() {
     local def_file="${BACKUP_D_DIR}/${DEFINITION_NAME}"
     # -R is already validated to equal MOUNT_ROOT above, so it's used directly
@@ -321,6 +371,8 @@ PYEOF
         total_bytes="${SOURCE_BYTES:-0}"
     fi
 
+    decide_full_restore
+
     if [[ "${total_bytes:-0}" -le 0 ]]; then
         info "Could not estimate source data size; skipping disk-space preflight."
         return
@@ -359,6 +411,7 @@ RUN_DIR="${BASE_DIR}/runs/${DATESTAMP}"             # This run's private working
 BACKUP_DIR="${RUN_DIR}/backups"                     # Where the FULL/DIFF/INCR .dar slices are written — gone after the run unless --keep
 PAR2_DIR="${RUN_DIR}/par2"                          # Where PAR2 redundancy files + manifest are written — gone after the run unless --keep
 RESTORE_DIR="${RUN_DIR}/restore"                    # Phase 3a restore target directory — gone after the run unless --keep
+FULL_RESTORE_DIR="${RUN_DIR}/full-restore"           # Optional Phase 3b complete archive-root restore target — gone after the run unless --keep
 BACKUP_D_DIR="${RUN_DIR}/backup.d"                  # Holds the generated backup definition file (DEFINITION_NAME) — gone after the run unless --keep
 RESULTS_DIR="${BASE_DIR}/results"                   # NOT under RUN_DIR — persists across every run regardless of --keep
 METRICS_DB="${RESULTS_DIR}/dar-backup-metrics.db"   # dar-backup's own METRICS_DB_PATH for this run (persists)
@@ -371,7 +424,7 @@ CID_FILE="${RUN_DIR}/current-container.cid"         # Written by docker_run_back
 BITROT_EVIDENCE_FILE="${RUN_DIR}/bitrot-evidence.json" # Incrementally persisted evidence included in the JSONL record by the EXIT trap
 DIFF_PRIMER_DIR="${BASE_DIR}/diff-primer"           # NOT under RUN_DIR — reused/reset by create_diff_primer() at the start of every run
 
-mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$BACKUP_D_DIR" "$RESULTS_DIR" "$DIFF_PRIMER_DIR"
+mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$FULL_RESTORE_DIR" "$BACKUP_D_DIR" "$RESULTS_DIR" "$DIFF_PRIMER_DIR"
 
 # ── variable dump ──────────────────────────────────────────────────────────
 # Explicit list rather than a blanket `set`/`env` dump, so this stays a readable
@@ -384,10 +437,11 @@ RUN_VARIABLES=(
     DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES BITROT_EDGE_BYTES
     ADVERTISE_REQUESTED TEST_NAME ADVERTISE_CLASS
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
+    FULL_RESTORE_MODE FULL_RESTORE_THRESHOLD_GIB FULL_RESTORE_THRESHOLD_BYTES
     DAR_BACKUP_VERSION GIT_COMMIT HARNESS_GIT_COMMIT HARNESS_GIT_DIRTY REPO_DIR
     IMAGE_ID IMAGE_REPO_DIGEST IMAGE_REVISION IMAGE_VERSION DAR_VERSION PAR2_VERSION
     PYTHON_VERSION OS_DESC KERNEL
-    RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR BACKUP_D_DIR
+    RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR FULL_RESTORE_DIR BACKUP_D_DIR
     RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE CID_FILE
     BITROT_EVIDENCE_FILE
     DIFF_PRIMER_DIR
@@ -1079,6 +1133,15 @@ write_json_record() {
     LST_PITR_STRUCTURE_STATUS="$PITR_STRUCTURE_STATUS" \
     LST_PITR_CHECKSUM_STATUS="$PITR_CHECKSUM_STATUS" \
     LST_PITR_OVERALL_STATUS="$PITR_OVERALL_STATUS" \
+    LST_FULL_RESTORE_MODE="$FULL_RESTORE_MODE" \
+    LST_FULL_RESTORE_THRESHOLD_BYTES="$FULL_RESTORE_THRESHOLD_BYTES" \
+    LST_FULL_RESTORE_PERFORMED="$FULL_RESTORE_PERFORMED" \
+    LST_FULL_RESTORE_DECISION_REASON="$FULL_RESTORE_DECISION_REASON" \
+    LST_FULL_RESTORE_EXECUTION_STATUS="$FULL_RESTORE_EXECUTION_STATUS" \
+    LST_FULL_RESTORE_CONTENT_STATUS="$FULL_RESTORE_CONTENT_STATUS" \
+    LST_FULL_RESTORE_OVERALL_STATUS="$FULL_RESTORE_OVERALL_STATUS" \
+    LST_FULL_RESTORE_FILE_COUNT="${FULL_RESTORE_FILE_COUNT:-}" \
+    LST_FULL_RESTORE_BYTES="${FULL_RESTORE_BYTES:-}" \
     LST_BITROT_SEED="${BITROT_SEED:-}" \
     LST_BITROT_EVIDENCE_FILE="${BITROT_EVIDENCE_FILE:-}" \
     LST_RESULTS_DIR="$RESULTS_DIR" \
@@ -1322,6 +1385,56 @@ else
     PITR_OVERALL_STATUS="failed"
 fi
 
+# ── PHASE 3b ──
+banner "Phase 3b — Complete Point-In-Time Restore Validation"
+if [[ $FULL_RESTORE_SELECTED -eq 1 ]]; then
+    CURRENT_PHASE="full_restore"
+    info "Cleaning the complete restore target..."
+    rm -rf "$FULL_RESTORE_DIR"
+    mkdir -p "$FULL_RESTORE_DIR"
+    FULL_RESTORE_PERFORMED=1
+
+    info "Restoring the complete archive root via manager..."
+    if docker_run_tool /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
+               -d "$DEFINITION_NAME" \
+               --restore-path . \
+               --when "now" \
+               --target "$FULL_RESTORE_DIR" \
+               --log-stdout --verbose >> "$LOGFILE" 2>&1; then
+        FULL_RESTORE_EXECUTION_STATUS="passed"
+        pass "Complete archive-root restore executed successfully"
+    else
+        FULL_RESTORE_EXECUTION_STATUS="failed"
+        FULL_RESTORE_OVERALL_STATUS="failed"
+        fail "Complete archive-root restore returned an error exit code"
+    fi
+
+    if [[ "$FULL_RESTORE_EXECUTION_STATUS" == "passed" ]]; then
+        comparison_json=""
+        if comparison_json=$(python3 "${REPO_DIR}/scripts/large_scale_restore_compare.py" \
+                --source-root "$MOUNT_ROOT" \
+                --restored-root "$FULL_RESTORE_DIR" \
+                --required-relative-path "${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}" \
+                2>> "$LOGFILE"); then
+            read -r FULL_RESTORE_FILE_COUNT FULL_RESTORE_BYTES <<< "$(python3 -c '
+import json
+import sys
+result = json.loads(sys.argv[1])
+print(result["restored_file_count"], result["restored_bytes"])
+' "$comparison_json")"
+            FULL_RESTORE_CONTENT_STATUS="passed"
+            FULL_RESTORE_OVERALL_STATUS="passed"
+            pass "All ${FULL_RESTORE_FILE_COUNT} restored regular-file path(s) (${FULL_RESTORE_BYTES} byte(s)) match the live source"
+        else
+            FULL_RESTORE_CONTENT_STATUS="failed"
+            FULL_RESTORE_OVERALL_STATUS="failed"
+            fail "Complete restore content comparison failed; see ${LOGFILE}"
+        fi
+    fi
+else
+    info "Complete restore not selected (${FULL_RESTORE_DECISION_REASON})."
+fi
+
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
 CURRENT_PHASE="summary"
 banner "Summary"
@@ -1334,6 +1447,7 @@ echo -e "dar-backup test pass: ${DATESTAMP:-}"
 echo -e "FULL elapsed: ${full_elapsed:-0}s (~${FULL_SIZE_GB:-N/A} GB)"
 echo -e "DIFF elapsed: ${diff_elapsed:-0}s (~${DIFF_SIZE_GB:-N/A} GB)"
 echo -e "INCR elapsed: ${incr_elapsed:-0}s (~${INCR_SIZE_GB:-N/A} GB)"
+echo -e "Complete restore: ${FULL_RESTORE_OVERALL_STATUS} (${FULL_RESTORE_DECISION_REASON})"
 echo -e "Peak Engine Memory Consumption:"
 echo -e "  ├── dar-backup : ${MAX_DAR_BACKUP}"
 echo -e "  ├── dar backend: ${MAX_DAR}"

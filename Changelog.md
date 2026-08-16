@@ -4,8 +4,11 @@
 
 ### Added
 
+- add optional complete archive-root PITR restoration to the large-scale test,
+  selected automatically through 25 GiB by default, forceable at any size, or
+  explicitly disabled, with source comparison and schema-v6 decision evidence
 - publish an evidence-backed Shields badge for explicitly approved successful
-  torture tests over 100 GiB, using a defensive schema-v5 JSONL consumer
+  torture tests of at least 100 GiB, using a defensive JSONL consumer
 - support development-image builds from a validated external `dar-backup`
   wheel, with installation-source and wheel SHA-256 provenance labels
 - add `dev.md` as the canonical development-image build guide
@@ -37,6 +40,9 @@
 
 ### Changed
 
+- show `Full restore ✓` on the torture-test badge only for complete,
+  internally consistent schema-v6 restore evidence, and make exactly 100 GiB
+  eligible for explicitly requested publication
 - keep PyPI installation as the default and refuse to publish images built
   from local development wheels
 - add selectable contiguous, fragmented, and archive-edge bitrot modes while

@@ -32,7 +32,7 @@ def _base_record() -> dict[str, Any]:
         "status": "passed",
     }
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "advertise": True,
         "test_name": "Large scale torture test",
         "advertise_class": "v0.5.29",
@@ -42,6 +42,18 @@ def _base_record() -> dict[str, Any]:
         "checks": {
             "par2_verify": {"full": "passed", "diff": "passed", "incr": "passed"},
             "pitr_restore": {"overall": "passed"},
+            "full_restore": {
+                "mode": "forced",
+                "threshold_bytes": 25 * 1024**3,
+                "source_bytes": 522_454_998_584,
+                "performed": True,
+                "decision_reason": "forced_by_user",
+                "execution": "passed",
+                "content_comparison": "passed",
+                "overall": "passed",
+                "restored_file_count": 220_487,
+                "restored_bytes": 522_459_193_040,
+            },
         },
         "bitrot_evidence": {
             "full": dict(phase),
@@ -71,7 +83,7 @@ def test_build_badge_complete_result_includes_available_evidence() -> None:
         "label": "Large scale torture test",
         "message": (
             "v0.5.29 · 486.6 GiB · 2% fragmented bitrot repaired · "
-            "PAR2 ✓ · PITR ✓ · 2026-08-11"
+            "PAR2 ✓ · PITR ✓ · Full restore ✓ · 2026-08-11"
         ),
         "labelColor": "#6f42c1",
         "color": "#2ea043",
@@ -86,6 +98,83 @@ def test_build_badge_missing_pitr_omits_pitr_component() -> None:
     payload = build_badge_payload(record)
 
     assert "PITR" not in payload["message"]
+
+
+def test_build_badge_passed_full_restore_includes_component() -> None:
+    """Complete coherent restore evidence produces an explicit badge claim."""
+    payload = build_badge_payload(_base_record())
+
+    assert "Full restore ✓" in payload["message"]
+
+
+def test_build_badge_passed_auto_full_restore_includes_component() -> None:
+    """A coherent automatic restore receives the same truthful success claim."""
+    record = _base_record()
+    record["checks"]["full_restore"].update(
+        {
+            "mode": "auto",
+            "threshold_bytes": 500 * 1024**3,
+            "decision_reason": "source_within_threshold",
+        }
+    )
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore ✓" in payload["message"]
+
+
+def test_build_badge_skipped_full_restore_omits_component() -> None:
+    """A size-based full-restore skip cannot produce a success claim."""
+    record = _base_record()
+    record["checks"]["full_restore"].update(
+        {
+            "mode": "auto",
+            "performed": False,
+            "decision_reason": "source_exceeds_threshold",
+            "execution": "skipped",
+            "content_comparison": "skipped",
+            "overall": "skipped",
+            "restored_file_count": None,
+            "restored_bytes": None,
+        }
+    )
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore" not in payload["message"]
+
+
+def test_build_badge_failed_full_restore_omits_component() -> None:
+    """A failed content comparison cannot produce a success claim."""
+    record = _base_record()
+    record["checks"]["full_restore"]["content_comparison"] = "failed"
+    record["checks"]["full_restore"]["overall"] = "failed"
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore" not in payload["message"]
+
+
+def test_build_badge_contradictory_full_restore_omits_component() -> None:
+    """Performed/status evidence without positive measurements is rejected."""
+    record = _base_record()
+    record["checks"]["full_restore"]["restored_file_count"] = 0
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore" not in payload["message"]
+
+
+def test_build_badge_legacy_record_without_full_restore_remains_publishable() -> None:
+    """Older advertised records remain valid without gaining a false claim."""
+    record = _base_record()
+    record["schema_version"] = 5
+    del record["checks"]["full_restore"]
+
+    payload = build_badge_payload(record)
+
+    assert "PITR ✓" in payload["message"]
+    assert "Full restore" not in payload["message"]
 
 
 def test_build_badge_missing_par2_omits_par2_component() -> None:

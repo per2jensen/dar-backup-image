@@ -1,4 +1,4 @@
-"""Tests for schema-v5 large-scale test result records."""
+"""Tests for schema-v6 large-scale test result records."""
 
 from __future__ import annotations
 
@@ -89,13 +89,22 @@ def _base_environment() -> dict[str, str]:
         "LST_PITR_STRUCTURE_STATUS": "passed",
         "LST_PITR_CHECKSUM_STATUS": "passed",
         "LST_PITR_OVERALL_STATUS": "passed",
+        "LST_FULL_RESTORE_MODE": "forced",
+        "LST_FULL_RESTORE_THRESHOLD_BYTES": str(25 * 1024**3),
+        "LST_FULL_RESTORE_PERFORMED": "1",
+        "LST_FULL_RESTORE_DECISION_REASON": "forced_by_user",
+        "LST_FULL_RESTORE_EXECUTION_STATUS": "passed",
+        "LST_FULL_RESTORE_CONTENT_STATUS": "passed",
+        "LST_FULL_RESTORE_OVERALL_STATUS": "passed",
+        "LST_FULL_RESTORE_FILE_COUNT": "42137",
+        "LST_FULL_RESTORE_BYTES": "124802341776",
         "LST_BITROT_SEED": "987654321",
         "LST_BITROT_EVIDENCE_FILE": "",
     }
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v5_to_both_histories(
+def test_write_result_completed_run_appends_schema_v6_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -120,7 +129,7 @@ def test_write_result_completed_run_appends_schema_v5_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 5
+    assert local_record["schema_version"] == 6
     assert local_record["advertise"] is True
     assert local_record["test_name"] == "Large scale torture test"
     assert local_record["advertise_class"] == "v0.8.0-rc1"
@@ -132,6 +141,18 @@ def test_write_result_completed_run_appends_schema_v5_to_both_histories(
     assert local_record["source_file_count"] == 42137
     assert local_record["full_size_bytes"] == 124801234567
     assert local_record["checks"]["pitr_restore"]["overall"] == "passed"
+    assert local_record["checks"]["full_restore"] == {
+        "mode": "forced",
+        "threshold_bytes": 25 * 1024**3,
+        "source_bytes": 124802341776,
+        "performed": True,
+        "decision_reason": "forced_by_user",
+        "execution": "passed",
+        "content_comparison": "passed",
+        "overall": "passed",
+        "restored_file_count": 42137,
+        "restored_bytes": 124802341776,
+    }
     assert local_record["bitrot_seed"] == 987654321
     assert local_record["bitrot_evidence"] is None
 
@@ -185,6 +206,13 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
             "LST_PITR_STRUCTURE_STATUS": "not_run",
             "LST_PITR_CHECKSUM_STATUS": "not_run",
             "LST_PITR_OVERALL_STATUS": "not_run",
+            "LST_FULL_RESTORE_PERFORMED": "0",
+            "LST_FULL_RESTORE_DECISION_REASON": "not_evaluated",
+            "LST_FULL_RESTORE_EXECUTION_STATUS": "not_run",
+            "LST_FULL_RESTORE_CONTENT_STATUS": "not_run",
+            "LST_FULL_RESTORE_OVERALL_STATUS": "not_run",
+            "LST_FULL_RESTORE_FILE_COUNT": "",
+            "LST_FULL_RESTORE_BYTES": "",
         }
     )
     record = build_record(environment)
@@ -232,11 +260,11 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 5
+    assert records[1]["schema_version"] == 6
 
 
 def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
-    """Schema v5 embeds per-phase bitrot and PAR2 block evidence.
+    """Schema v6 embeds per-phase bitrot and PAR2 block evidence.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -262,7 +290,7 @@ def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> No
 
     record = build_record(environment)
 
-    assert record["schema_version"] == 5
+    assert record["schema_version"] == 6
     assert record["bitrot_evidence"] == evidence
 
 
@@ -284,7 +312,7 @@ def test_build_record_malformed_bitrot_evidence_raises_value_error(
 
 
 def test_build_record_advertise_requested_success_above_100_gib_is_eligible() -> None:
-    """An opted-in successful run above the strict threshold is advertisable."""
+    """An opted-in successful run above the inclusive threshold is advertisable."""
     environment = _base_environment()
     environment["LST_SOURCE_BYTES"] = str(100 * 1024**3 + 1)
 
@@ -303,10 +331,20 @@ def test_build_record_advertise_not_requested_is_not_eligible() -> None:
     assert record["advertise"] is False
 
 
-def test_build_record_source_exactly_100_gib_is_not_eligible() -> None:
-    """The advertised source-size rule uses a strict greater-than boundary."""
+def test_build_record_source_exactly_100_gib_is_eligible() -> None:
+    """The advertised source-size rule includes exactly 100 GiB."""
     environment = _base_environment()
     environment["LST_SOURCE_BYTES"] = str(100 * 1024**3)
+
+    record = build_record(environment)
+
+    assert record["advertise"] is True
+
+
+def test_build_record_source_one_byte_below_100_gib_is_not_eligible() -> None:
+    """The inclusive publication boundary still rejects smaller sources."""
+    environment = _base_environment()
+    environment["LST_SOURCE_BYTES"] = str(100 * 1024**3 - 1)
 
     record = build_record(environment)
 
@@ -353,4 +391,108 @@ def test_build_record_empty_publication_name_raises_value_error() -> None:
     environment["LST_TEST_NAME"] = ""
 
     with pytest.raises(ValueError, match="LST_TEST_NAME"):
+        build_record(environment)
+
+
+def test_build_record_auto_restore_above_threshold_is_explicitly_skipped() -> None:
+    """Auto mode records an unambiguous size-based skip decision."""
+    environment = _base_environment()
+    environment.update(
+        {
+            "LST_FULL_RESTORE_MODE": "auto",
+            "LST_FULL_RESTORE_PERFORMED": "0",
+            "LST_FULL_RESTORE_DECISION_REASON": "source_exceeds_threshold",
+            "LST_FULL_RESTORE_EXECUTION_STATUS": "skipped",
+            "LST_FULL_RESTORE_CONTENT_STATUS": "skipped",
+            "LST_FULL_RESTORE_OVERALL_STATUS": "skipped",
+            "LST_FULL_RESTORE_FILE_COUNT": "",
+            "LST_FULL_RESTORE_BYTES": "",
+        }
+    )
+
+    record = build_record(environment)
+
+    assert record["checks"]["full_restore"]["performed"] is False
+    assert record["checks"]["full_restore"]["decision_reason"] == (
+        "source_exceeds_threshold"
+    )
+    assert record["checks"]["full_restore"]["overall"] == "skipped"
+
+
+def test_build_record_auto_restore_within_threshold_is_explicitly_passed() -> None:
+    """Auto mode records successful execution for a source below 25 GiB."""
+    environment = _base_environment()
+    source_bytes = 7 * 1024**3
+    environment.update(
+        {
+            "LST_SOURCE_BYTES": str(source_bytes),
+            "LST_FULL_RESTORE_MODE": "auto",
+            "LST_FULL_RESTORE_DECISION_REASON": "source_within_threshold",
+            "LST_FULL_RESTORE_BYTES": str(source_bytes),
+        }
+    )
+
+    record = build_record(environment)
+
+    full_restore = record["checks"]["full_restore"]
+    assert full_restore["source_bytes"] == source_bytes
+    assert full_restore["performed"] is True
+    assert full_restore["decision_reason"] == "source_within_threshold"
+    assert full_restore["overall"] == "passed"
+
+
+def test_build_record_disabled_restore_is_explicitly_skipped() -> None:
+    """Disabled mode records user intent separately from an automatic skip."""
+    environment = _base_environment()
+    environment.update(
+        {
+            "LST_FULL_RESTORE_MODE": "disabled",
+            "LST_FULL_RESTORE_PERFORMED": "0",
+            "LST_FULL_RESTORE_DECISION_REASON": "disabled_by_user",
+            "LST_FULL_RESTORE_EXECUTION_STATUS": "skipped",
+            "LST_FULL_RESTORE_CONTENT_STATUS": "skipped",
+            "LST_FULL_RESTORE_OVERALL_STATUS": "skipped",
+            "LST_FULL_RESTORE_FILE_COUNT": "",
+            "LST_FULL_RESTORE_BYTES": "",
+        }
+    )
+
+    record = build_record(environment)
+
+    full_restore = record["checks"]["full_restore"]
+    assert full_restore["performed"] is False
+    assert full_restore["decision_reason"] == "disabled_by_user"
+    assert full_restore["overall"] == "skipped"
+
+
+def test_build_record_forced_restore_accepts_source_above_threshold() -> None:
+    """Forced mode can record a successful 400 GiB complete restore."""
+    environment = _base_environment()
+    source_bytes = 400 * 1024**3
+    environment.update(
+        {
+            "LST_SOURCE_BYTES": str(source_bytes),
+            "LST_FULL_RESTORE_MODE": "forced",
+            "LST_FULL_RESTORE_PERFORMED": "1",
+            "LST_FULL_RESTORE_DECISION_REASON": "forced_by_user",
+            "LST_FULL_RESTORE_FILE_COUNT": "220487",
+            "LST_FULL_RESTORE_BYTES": str(source_bytes),
+        }
+    )
+
+    record = build_record(environment)
+
+    full_restore = record["checks"]["full_restore"]
+    assert full_restore["source_bytes"] == source_bytes
+    assert full_restore["threshold_bytes"] == 25 * 1024**3
+    assert full_restore["performed"] is True
+    assert full_restore["overall"] == "passed"
+
+
+def test_build_record_unperformed_restore_cannot_pass() -> None:
+    """Contradictory full-restore evidence is rejected instead of published."""
+    environment = _base_environment()
+    environment["LST_FULL_RESTORE_PERFORMED"] = "0"
+
+    with pytest.raises(ValueError, match="cannot pass when it was not performed"):
         build_record(environment)

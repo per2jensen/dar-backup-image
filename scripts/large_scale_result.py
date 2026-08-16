@@ -12,6 +12,14 @@ from typing import Any, Mapping, Sequence
 
 LOGGER = logging.getLogger(__name__)
 VALID_STATUSES = {"passed", "failed", "skipped", "not_run"}
+VALID_FULL_RESTORE_MODES = {"auto", "forced", "disabled"}
+VALID_FULL_RESTORE_REASONS = {
+    "not_evaluated",
+    "source_within_threshold",
+    "source_exceeds_threshold",
+    "forced_by_user",
+    "disabled_by_user",
+}
 TREND_WINDOW = 5
 REGRESSION_FACTOR = 1.5
 ADVERTISE_MIN_SOURCE_BYTES = 100 * 1024**3
@@ -186,8 +194,33 @@ def _status(environment: Mapping[str, str], key: str) -> str:
     return value
 
 
+def _choice(
+    environment: Mapping[str, str], key: str, allowed_values: set[str]
+) -> str:
+    """Return and validate a required value from a finite vocabulary.
+
+    Args:
+        environment: Environment values supplied by the test harness.
+        key: Name of the required value.
+        allowed_values: Accepted exact string values.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        ValueError: If the value is absent or outside the allowed vocabulary.
+    """
+    if not allowed_values:
+        raise ValueError("allowed_values must not be empty")
+    value = _required(environment, key)
+    if value not in allowed_values:
+        allowed = ", ".join(sorted(allowed_values))
+        raise ValueError(f"Result value {key!r} must be one of {allowed}, got {value!r}")
+    return value
+
+
 def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
-    """Build one backward-compatible schema-v5 result record.
+    """Build one backward-compatible schema-v6 result record.
 
     Args:
         environment: Environment values exported by ``large_scale_test.sh``.
@@ -206,17 +239,72 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     exit_code = _required_int(environment, "LST_EXIT_CODE")
     advertise_requested = _required_bool(environment, "LST_ADVERTISE_REQUESTED")
     source_bytes = _optional_int(environment, "LST_SOURCE_BYTES")
+    full_restore_mode = _choice(
+        environment, "LST_FULL_RESTORE_MODE", VALID_FULL_RESTORE_MODES
+    )
+    full_restore_threshold_bytes = _required_int(
+        environment, "LST_FULL_RESTORE_THRESHOLD_BYTES"
+    )
+    full_restore_performed = _required_bool(
+        environment, "LST_FULL_RESTORE_PERFORMED"
+    )
+    full_restore_reason = _choice(
+        environment, "LST_FULL_RESTORE_DECISION_REASON", VALID_FULL_RESTORE_REASONS
+    )
+    full_restore_execution = _status(
+        environment, "LST_FULL_RESTORE_EXECUTION_STATUS"
+    )
+    full_restore_content = _status(environment, "LST_FULL_RESTORE_CONTENT_STATUS")
+    full_restore_overall = _status(environment, "LST_FULL_RESTORE_OVERALL_STATUS")
+    full_restore_file_count = _optional_int(
+        environment, "LST_FULL_RESTORE_FILE_COUNT"
+    )
+    full_restore_bytes = _optional_int(environment, "LST_FULL_RESTORE_BYTES")
+    if full_restore_threshold_bytes <= 0:
+        raise ValueError("LST_FULL_RESTORE_THRESHOLD_BYTES must be positive")
+    valid_reasons_by_mode = {
+        "auto": {"not_evaluated", "source_within_threshold", "source_exceeds_threshold"},
+        "forced": {"not_evaluated", "forced_by_user"},
+        "disabled": {"disabled_by_user"},
+    }
+    if full_restore_reason not in valid_reasons_by_mode[full_restore_mode]:
+        raise ValueError(
+            f"Full restore mode {full_restore_mode!r} is inconsistent with "
+            f"decision {full_restore_reason!r}"
+        )
+    if not full_restore_performed and full_restore_overall == "passed":
+        raise ValueError("A full restore cannot pass when it was not performed")
+    if full_restore_performed and full_restore_overall == "skipped":
+        raise ValueError("A performed full restore cannot have skipped overall status")
+    if full_restore_performed and full_restore_reason in {
+        "source_exceeds_threshold",
+        "disabled_by_user",
+        "not_evaluated",
+    }:
+        raise ValueError(
+            f"Full restore decision {full_restore_reason!r} cannot be performed"
+        )
+    if full_restore_overall == "passed" and (
+        full_restore_execution != "passed" or full_restore_content != "passed"
+    ):
+        raise ValueError(
+            "A passed full restore requires passed execution and content comparison"
+        )
+    if full_restore_file_count is not None and full_restore_file_count < 0:
+        raise ValueError("LST_FULL_RESTORE_FILE_COUNT must not be negative")
+    if full_restore_bytes is not None and full_restore_bytes < 0:
+        raise ValueError("LST_FULL_RESTORE_BYTES must not be negative")
     aborted_phase = None if completed else _required(environment, "LST_CURRENT_PHASE")
     passed = completed and exit_code == 0 and failures == 0
     advertise = (
         advertise_requested
         and passed
         and source_bytes is not None
-        and source_bytes > ADVERTISE_MIN_SOURCE_BYTES
+        and source_bytes >= ADVERTISE_MIN_SOURCE_BYTES
     )
 
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "datestamp": _required(environment, "LST_DATESTAMP"),
         "date": _required(environment, "LST_DATE"),
         # Stable publication envelope; all other engineering fields may evolve.
@@ -302,6 +390,18 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
                 "structure": _status(environment, "LST_PITR_STRUCTURE_STATUS"),
                 "content_checksums": _status(environment, "LST_PITR_CHECKSUM_STATUS"),
                 "overall": _status(environment, "LST_PITR_OVERALL_STATUS"),
+            },
+            "full_restore": {
+                "mode": full_restore_mode,
+                "threshold_bytes": full_restore_threshold_bytes,
+                "source_bytes": source_bytes,
+                "performed": full_restore_performed,
+                "decision_reason": full_restore_reason,
+                "execution": full_restore_execution,
+                "content_comparison": full_restore_content,
+                "overall": full_restore_overall,
+                "restored_file_count": full_restore_file_count,
+                "restored_bytes": full_restore_bytes,
             },
         },
         # Schema-v4 reproducible random corruption and per-slice PAR2 metrics.
