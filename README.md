@@ -293,11 +293,11 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 <!-- BEGIN GENERATED RELEASE TABLE -->
 | Tag | `dar-backup` | `dar` | Release date | Git Revision | Docker Hub | Note |
 |---|---|---|---|---|---|---|
+| 0.9.0 | 1.1.11 | 2.7.21 | 2026-08-16 | cfaadb1 | [tag:0.9.0](https://hub.docker.com/layers/per2jensen/dar-backup/0.9.0/images/sha256:3dc9c3240c1a51498504e0cd8f585b95fdeef12a9caf76bbab1b504ceb28fee2) | - |
 | 0.5.28 | 1.1.10 | 2.7.21 | 2026-07-08 | c2b576e | [tag:0.5.28](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.28/images/sha256:1f8df16b31f7e5d019c3024d190158ab4adf1ad51cfd4739d0c257208c5cb731) | - |
 | 0.5.27 | 1.1.9 | 2.7.21 | 2026-07-06 | 1948e6c | [tag:0.5.27](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.27/images/sha256:3b40cfbce68cbdc311f0cec9e8e8e7eb012b929bfb8a4ae415058ebbd346420e) | - |
 | 0.5.26 | 1.1.8 | 2.7.21 | 2026-06-12 | 5aedf28 | [tag:0.5.26](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.26/images/sha256:eabf8f0f2bc805655b9258617eb2b76fe68b1160ac8ff8975c412b24b36575d9) | - |
 | 0.5.25.1 | 1.1.7 | 2.7.21 | 2026-06-10 | 46b3fe8 | [tag:0.5.25.1](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25.1/images/sha256:092f1895dd31f99b4c240744ad2ffe800b233af509919dd94574325ee2f2038a) | - |
-| 0.5.25 | 1.1.7 | 2.7.21 | 2026-06-07 | 1b19060 | [tag:0.5.25](https://hub.docker.com/layers/per2jensen/dar-backup/0.5.25/images/sha256:031818b681e7a583389e1a72d7c9fb114d7beb855f9cf42f396862debfc2af5c) | - |
 <!-- END GENERATED RELEASE TABLE -->
 
 The table is generated from `doc/build-history.json`. Refresh it at any time
