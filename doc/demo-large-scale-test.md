@@ -59,7 +59,7 @@ Every value the script uses is an environment variable with the shown default
 | `SOURCE_GLOB` | `billeder/2013` | Real data to back up, **relative to `BASE_DIR`'s own top-level directory** (see below) |
 | `IMAGE` | `dar-backup:dev` | Docker image under test |
 | `BUILD_IMAGE` | `true` | Set `false` to skip `make dev` — e.g. when `IMAGE` already points at a pulled/pre-built image |
-| `SLICE_SIZE` | `10G` | dar `-s` slice size |
+| `SLICE_SIZE` | `10G` | dar `-s` slice size; a positive integer with an explicit `k`, `M`, `G`, `T`, `E`, `Z`, or `Y` unit |
 | `COMPRESSION` | `6` | dar `-z` compression level (1-9) |
 | `BITROT` | `true` | Set `false` to skip the corrupt/detect/repair phases |
 | `BITROT_SEED` | *(generated)* | Optional unsigned 64-bit seed that exactly replays the random bitrot selections |

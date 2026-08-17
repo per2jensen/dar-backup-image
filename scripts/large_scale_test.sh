@@ -29,6 +29,7 @@ BITROT_MODE="contiguous"                            # --bitrot-mode: contiguous 
 BITROT_MODE_EXPLICIT=0                              # Tracks whether --bitrot-mode was supplied so it can require --bitrot
 BITROT_PERCENT=2                                    # Fixed percentage of one selected slice corrupted per bitrot phase
 BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while preserving exact byte offsets and lengths
+SLICE_SIZE_SOURCE="fallback"                        # Set to definition when the supplied definition contains its own validated slice option
 ADVERTISE_REQUESTED=0                               # --advertise: requests publication; the result writer still enforces success and source-size eligibility
 TEST_NAME="Large scale torture test"                 # --test-name: human-readable badge label stored with every result
 ADVERTISE_CLASS=""                                  # --advertise-class: tested version/class; defaults from image metadata after preflight
@@ -43,7 +44,7 @@ FULL_RESTORE_PERFORMED=0                            # Set only immediately befor
 FULL_RESTORE_DECISION_REASON="not_evaluated"        # Stable machine-readable explanation for selection or skip
 FULL_RESTORE_FILE_COUNT=""                          # Regular-file paths checksum-compared by the complete restore
 FULL_RESTORE_BYTES=""                               # Apparent restored bytes checksum-compared by the complete restore
-SCRIPT_VERSION="17"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="18"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -140,6 +141,18 @@ esac
 [[ "$FULL_RESTORE_THRESHOLD_GIB" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --full-restore-threshold-gib must be a positive integer" >&2; exit 1; }
 [[ "$FULL_RESTORE_THRESHOLD_GIB" -le 8589934591 ]] || { echo "ERROR: --full-restore-threshold-gib is too large" >&2; exit 1; }
 FULL_RESTORE_THRESHOLD_BYTES=$((10#$FULL_RESTORE_THRESHOLD_GIB * 1024 * 1024 * 1024))
+
+slice_resolution=""
+if ! slice_resolution=$(python3 "$(dirname "${BASH_SOURCE[0]}")/large_scale_definition.py" \
+        --definition "$DEFINITION_CONTENT" \
+        --fallback "$SLICE_SIZE"); then
+    exit 1
+fi
+IFS=$'\t' read -r SLICE_SIZE_SOURCE SLICE_SIZE <<< "$slice_resolution"
+if [[ -z "$SLICE_SIZE_SOURCE" || -z "$SLICE_SIZE" ]]; then
+    echo "ERROR: unable to resolve the effective slice size" >&2
+    exit 1
+fi
 
 if [[ $DO_BITROT -eq 0 ]]; then
     FULL_BITROT_STATUS="skipped"
@@ -432,7 +445,7 @@ mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$FULL_RESTORE_DIR" "$BACKUP_D
 RUN_VARIABLES=(
     DATESTAMP DATE_OF_RUN SCRIPT_VERSION RUN_STARTED_EPOCH
     IMAGE DEFINITION_ROOT MOUNT_ROOT
-    BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE PAR2_RATIO
+    BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE SLICE_SIZE_SOURCE PAR2_RATIO
     DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES
     ADVERTISE_REQUESTED TEST_NAME ADVERTISE_CLASS
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
@@ -571,7 +584,9 @@ EOF
 
 write_backup_def() {
     local content="$DEFINITION_CONTENT"
-    [[ ! "$content" =~ -s\  ]] && content="-s ${SLICE_SIZE}"$'\n'"$content"
+    if [[ "$SLICE_SIZE_SOURCE" == "fallback" ]]; then
+        content="-s ${SLICE_SIZE}"$'\n'"$content"
+    fi
     content="${content}"$'\n'"-g ${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     printf '%s\n' "$content" > "${BACKUP_D_DIR}/${DEFINITION_NAME}"
     BACKUP_DEFINITION_SHA256=$(sha256sum "${BACKUP_D_DIR}/${DEFINITION_NAME}" | awk '{print $1}')
@@ -1237,6 +1252,7 @@ if docker_run_backup -F -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --dar
 else
     full_elapsed=$(( $(date +%s) - t0 ))
     FULL_BACKUP_STATUS="failed"
+    fail "FULL backup failed after ${full_elapsed}s; see ${LOGFILE}"
     exit 1
 fi
 
@@ -1266,6 +1282,7 @@ if docker_run_backup -D -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --dar
 else
     diff_elapsed=$(( $(date +%s) - t0 ))
     DIFF_BACKUP_STATUS="failed"
+    fail "DIFF backup failed after ${diff_elapsed}s; see ${LOGFILE}"
     exit 1
 fi
 
@@ -1297,6 +1314,7 @@ if docker_run_backup -I -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --dar
 else
     incr_elapsed=$(( $(date +%s) - t0 ))
     INCR_BACKUP_STATUS="failed"
+    fail "INCR backup failed after ${incr_elapsed}s; see ${LOGFILE}"
     exit 1
 fi
 

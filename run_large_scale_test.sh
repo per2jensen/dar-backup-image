@@ -62,7 +62,7 @@ TEST_NAME="${TEST_NAME:-Large scale torture test}"      # human-readable badge l
 ADVERTISE_CLASS="${ADVERTISE_CLASS:-}"                  # tested version/class; empty derives it from the image metadata
 FULL_RESTORE_MODE="${FULL_RESTORE_MODE:-auto}"          # auto at/below threshold, forced at any size, or disabled
 FULL_RESTORE_THRESHOLD_GIB="${FULL_RESTORE_THRESHOLD_GIB:-25}" # inclusive auto-mode source-size limit in GiB
-DEFINITION="${DEFINITION:-}"                            # full backup-definition body; overrides SOURCE_GLOB/SLICE_SIZE/COMPRESSION entirely when set (see examples above)
+DEFINITION="${DEFINITION:-}"                            # full backup-definition body; overrides pieced-together options; SLICE_SIZE remains the fallback when it has no slice option
 
 case "$ADVERTISE" in
     true|false) ;;
@@ -80,23 +80,6 @@ esac
 # top-level directory (e.g. /home/...) still produces a matching -R.
 MOUNT_ROOT="/$(echo "$BASE_DIR" | cut -d/ -f2)"
 
-if [[ "$BUILD_IMAGE" == "true" ]]; then
-    echo "Building ${IMAGE}..."
-    make -C "${SCRIPT_DIR}" dev
-else
-    echo "BUILD_IMAGE=false — skipping build, using existing image ${IMAGE}"
-fi
-
-ARGS=(--base "${BASE_DIR}" --image "${IMAGE}")
-[[ "$BITROT" == "true" ]] && ARGS+=(--bitrot)
-[[ "$BITROT" == "true" && -n "$BITROT_SEED" ]] && ARGS+=(--bitrot-seed "$BITROT_SEED")
-[[ "$BITROT" == "true" ]] && ARGS+=(--bitrot-mode "$BITROT_MODE")
-[[ "$ADVERTISE" == "true" ]] && ARGS+=(--advertise)
-ARGS+=(--test-name "$TEST_NAME")
-[[ -n "$ADVERTISE_CLASS" ]] && ARGS+=(--advertise-class "$ADVERTISE_CLASS")
-ARGS+=(--full-restore-mode "$FULL_RESTORE_MODE")
-ARGS+=(--full-restore-threshold-gib "$FULL_RESTORE_THRESHOLD_GIB")
-
 if [[ -z "$DEFINITION" ]]; then
     DEFINITION="$(cat << EOF
 -R ${MOUNT_ROOT}
@@ -108,6 +91,44 @@ if [[ -z "$DEFINITION" ]]; then
 EOF
 )"
 fi
+
+# The internal harness parses passthrough arguments after wrapper defaults, so
+# the last --slice supplied here is the fallback that will actually take effect.
+EFFECTIVE_SLICE_FALLBACK="$SLICE_SIZE"
+PASSTHROUGH_ARGUMENTS=("$@")
+for ((argument_index = 0; argument_index < ${#PASSTHROUGH_ARGUMENTS[@]}; argument_index++)); do
+    if [[ "${PASSTHROUGH_ARGUMENTS[$argument_index]}" != "--slice" ]]; then
+        continue
+    fi
+    next_index=$((argument_index + 1))
+    if [[ $next_index -ge ${#PASSTHROUGH_ARGUMENTS[@]} ]]; then
+        echo "ERROR: --slice requires a value" >&2
+        exit 1
+    fi
+    EFFECTIVE_SLICE_FALLBACK="${PASSTHROUGH_ARGUMENTS[$next_index]}"
+done
+if ! python3 "${SCRIPT_DIR}/scripts/large_scale_definition.py" \
+        --definition "$DEFINITION" \
+        --fallback "$EFFECTIVE_SLICE_FALLBACK" >/dev/null; then
+    exit 1
+fi
+
+if [[ "$BUILD_IMAGE" == "true" ]]; then
+    echo "Building ${IMAGE}..."
+    make -C "${SCRIPT_DIR}" dev
+else
+    echo "BUILD_IMAGE=false — skipping build, using existing image ${IMAGE}"
+fi
+
+ARGS=(--base "${BASE_DIR}" --image "${IMAGE}" --slice "$SLICE_SIZE")
+[[ "$BITROT" == "true" ]] && ARGS+=(--bitrot)
+[[ "$BITROT" == "true" && -n "$BITROT_SEED" ]] && ARGS+=(--bitrot-seed "$BITROT_SEED")
+[[ "$BITROT" == "true" ]] && ARGS+=(--bitrot-mode "$BITROT_MODE")
+[[ "$ADVERTISE" == "true" ]] && ARGS+=(--advertise)
+ARGS+=(--test-name "$TEST_NAME")
+[[ -n "$ADVERTISE_CLASS" ]] && ARGS+=(--advertise-class "$ADVERTISE_CLASS")
+ARGS+=(--full-restore-mode "$FULL_RESTORE_MODE")
+ARGS+=(--full-restore-threshold-gib "$FULL_RESTORE_THRESHOLD_GIB")
 
 # Run the script completely natively in the foreground
 "${SCRIPT_DIR}/scripts/large_scale_test.sh" \

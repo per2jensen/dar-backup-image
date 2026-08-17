@@ -10,6 +10,9 @@
   the per-boundary percentage explicitly
 - include `-rc<number>` releases in the generated README release table while
   continuing to exclude weekly numeric-suffix refresh builds
+- reject unitless or conflicting large-scale slice sizes before expensive
+  setup, recognize long-form slice options in custom definitions, and report
+  backup-command failures explicitly
 
 ## 0.9.0 - 2026-08-16
 
