@@ -23,7 +23,9 @@ DEFAULT_README_PATH = REPOSITORY_ROOT / "README.md"
 DEFAULT_RELEASE_LIMIT = 5
 START_MARKER = "<!-- BEGIN GENERATED RELEASE TABLE -->"
 END_MARKER = "<!-- END GENERATED RELEASE TABLE -->"
-STABLE_RELEASE_PATTERN = re.compile(r"^\d+(?:\.\d+){2,3}$")
+RELEASE_TAG_PATTERN = re.compile(
+    r"^\d+(?:\.\d+){2,3}(?:-rc[1-9]\d*)?$"
+)
 
 
 def _required_string(
@@ -181,11 +183,11 @@ def load_history(path: Path) -> list[dict[str, Any]]:
 def select_releases(
     entries: Sequence[Mapping[str, Any]], limit: int
 ) -> list[dict[str, Any]]:
-    """Select and validate the newest stable release entries.
+    """Select and validate the newest stable and release-candidate entries.
 
     Args:
         entries: Complete build-history entries.
-        limit: Maximum number of stable releases to return.
+        limit: Maximum number of releases to return.
 
     Returns:
         Validated release dictionaries sorted by descending build number.
@@ -207,16 +209,16 @@ def select_releases(
                 f"Build-history entry {entry_index} field 'tag' must be a string"
             )
         tag = tag_value.strip()
-        if not STABLE_RELEASE_PATTERN.fullmatch(tag):
+        if not RELEASE_TAG_PATTERN.fullmatch(tag):
             continue
         if tag in seen_tags:
-            raise ValueError(f"Duplicate stable release tag in build history: {tag}")
+            raise ValueError(f"Duplicate release tag in build history: {tag}")
         seen_tags.add(tag)
         build_number = _required_build_number(entry, entry_index)
         candidates.append((build_number, entry_index, entry, tag))
 
     if not candidates:
-        raise ValueError("Build history contains no stable release entries")
+        raise ValueError("Build history contains no release entries")
 
     candidates.sort(key=lambda candidate: candidate[0], reverse=True)
     releases: list[dict[str, Any]] = []
@@ -258,7 +260,7 @@ def render_release_table(releases: Sequence[Mapping[str, Any]]) -> str:
     """Render validated release metadata as a Markdown table.
 
     Args:
-        releases: Stable releases in desired display order.
+        releases: Stable or release-candidate entries in desired display order.
 
     Returns:
         Complete Markdown table without surrounding markers.
@@ -360,7 +362,7 @@ def update_readme(
     Args:
         history_path: Canonical build-history JSON file.
         readme_path: README containing generated-table markers.
-        limit: Maximum number of stable releases to display.
+        limit: Maximum number of stable or release-candidate entries to display.
         check: When true, report drift without writing.
 
     Returns:
@@ -400,7 +402,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=DEFAULT_RELEASE_LIMIT,
-        help="number of stable releases to display",
+        help="number of stable or release-candidate entries to display",
     )
     parser.add_argument(
         "--check",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,8 +12,12 @@ from typing import Any, Sequence
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "update_readme_releases.py"
 REAL_HISTORY_PATH = Path(__file__).parents[1] / "doc" / "build-history.json"
+REAL_README_PATH = Path(__file__).parents[1] / "README.md"
 START_MARKER = "<!-- BEGIN GENERATED RELEASE TABLE -->"
 END_MARKER = "<!-- END GENERATED RELEASE TABLE -->"
+RELEASE_TAG_PATTERN = re.compile(
+    r"^\d+(?:\.\d+){2,3}(?:-rc[1-9]\d*)?$"
+)
 README_TEMPLATE = f"""Before table.
 
 {START_MARKER}
@@ -103,10 +108,57 @@ def _run_generator(
     )
 
 
+def _rendered_release_tags(content: str) -> list[str]:
+    """Extract release tags from the generated Markdown table.
+
+    Args:
+        content: README content containing one generated release table.
+
+    Returns:
+        Release tags in rendered row order.
+
+    Raises:
+        ValueError: If the generated table markers are missing or reversed.
+    """
+    if not isinstance(content, str):
+        raise ValueError("README content must be a string")
+    start_index = content.index(START_MARKER) + len(START_MARKER)
+    end_index = content.index(END_MARKER)
+    if end_index <= start_index:
+        raise ValueError("README generated release-table markers are reversed")
+    table = content[start_index:end_index]
+    return [
+        line.split("|")[1].strip()
+        for line in table.splitlines()
+        if line.startswith("| ") and not line.startswith("| Tag ")
+    ]
+
+
+def _generated_table_region(content: str) -> str:
+    """Extract the marker-bounded generated table region.
+
+    Args:
+        content: README content containing one generated release table.
+
+    Returns:
+        Generated table including its boundary markers.
+
+    Raises:
+        ValueError: If the generated table markers are missing or reversed.
+    """
+    if not isinstance(content, str):
+        raise ValueError("README content must be a string")
+    start_index = content.index(START_MARKER)
+    end_index = content.index(END_MARKER)
+    if end_index <= start_index:
+        raise ValueError("README generated release-table markers are reversed")
+    return content[start_index : end_index + len(END_MARKER)]
+
+
 def test_generator_renders_newest_five_releases_with_utc_dates(
     tmp_path: Path,
 ) -> None:
-    """Generation orders releases and excludes refresh and test tags.
+    """Generation includes RCs while excluding refresh and test tags.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -120,6 +172,7 @@ def test_generator_renders_newest_five_releases_with_utc_dates(
         _entry("0.5.27", 28),
         _entry("0.5.28", 29, "2026-07-09T00:30:00+02:00"),
         _entry("0.5.28-1", 30),
+        _entry("1.0.0-rc1", 31),
     ]
     history_path, readme_path = _write_inputs(tmp_path, entries)
 
@@ -127,14 +180,14 @@ def test_generator_renders_newest_five_releases_with_utc_dates(
 
     assert result.returncode == 0, result.stderr
     content = readme_path.read_text(encoding="utf-8")
-    release_rows = [line for line in content.splitlines() if line.startswith("| 0.")]
-    assert [row.split("|")[1].strip() for row in release_rows] == [
+    assert _rendered_release_tags(content) == [
+        "1.0.0-rc1",
         "0.5.28",
         "0.5.27",
         "0.5.26",
         "0.5.25.1",
-        "0.5.25",
     ]
+    assert "| 1.0.0-rc1 | 1.1.31 | 2.7.21 |" in content
     assert "| 0.5.28 | 1.1.29 | 2.7.21 | 2026-07-08 |" in content
     assert "0.5.28-1" not in content
     assert "0.0.1-releasetest" not in content
@@ -248,8 +301,8 @@ def test_generator_selected_release_malformed_date_fails(tmp_path: Path) -> None
     assert "invalid 'created' timestamp" in result.stderr
 
 
-def test_generator_duplicate_stable_release_tag_fails(tmp_path: Path) -> None:
-    """Duplicate stable tags are rejected as ambiguous canonical history.
+def test_generator_duplicate_release_tag_fails(tmp_path: Path) -> None:
+    """Duplicate release tags are rejected as ambiguous canonical history.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -261,11 +314,11 @@ def test_generator_duplicate_stable_release_tag_fails(tmp_path: Path) -> None:
     result = _run_generator(history_path, readme_path)
 
     assert result.returncode == 2
-    assert "Duplicate stable release tag" in result.stderr
+    assert "Duplicate release tag" in result.stderr
 
 
-def test_generator_history_without_stable_release_fails(tmp_path: Path) -> None:
-    """Refresh-only history cannot produce the stable-release table.
+def test_generator_history_without_release_fails(tmp_path: Path) -> None:
+    """Refresh-only history cannot produce the release table.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -277,13 +330,13 @@ def test_generator_history_without_stable_release_fails(tmp_path: Path) -> None:
     result = _run_generator(history_path, readme_path)
 
     assert result.returncode == 2
-    assert "no stable release entries" in result.stderr
+    assert "no release entries" in result.stderr
 
 
-def test_generator_real_history_restores_current_release_as_first_row(
+def test_generator_real_history_matches_latest_displayable_releases(
     tmp_path: Path,
 ) -> None:
-    """Repository history renders 0.5.28 ahead of the four prior releases.
+    """Repository history and README agree on the newest five release tags.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -295,12 +348,24 @@ def test_generator_real_history_restores_current_release_as_first_row(
 
     assert result.returncode == 0, result.stderr
     content = readme_path.read_text(encoding="utf-8")
-    release_rows = [line for line in content.splitlines() if line.startswith("| 0.")]
-    assert [row.split("|")[1].strip() for row in release_rows] == [
-        "0.5.28",
-        "0.5.27",
-        "0.5.26",
-        "0.5.25.1",
-        "0.5.25",
+    history = json.loads(REAL_HISTORY_PATH.read_text(encoding="utf-8"))
+    displayable_entries = [
+        entry
+        for entry in history
+        if isinstance(entry.get("tag"), str)
+        and RELEASE_TAG_PATTERN.fullmatch(entry["tag"])
     ]
-    assert "| 0.5.28 | 1.1.10 | 2.7.21 | 2026-07-08 | c2b576e |" in content
+    expected_tags = [
+        entry["tag"]
+        for entry in sorted(
+            displayable_entries,
+            key=lambda entry: entry["build_number"],
+            reverse=True,
+        )[:5]
+    ]
+
+    assert _rendered_release_tags(content) == expected_tags
+    assert all(not re.fullmatch(r".+-\d+", tag) for tag in expected_tags)
+    assert _generated_table_region(content) == _generated_table_region(
+        REAL_README_PATH.read_text(encoding="utf-8")
+    )

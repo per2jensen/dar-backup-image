@@ -8,6 +8,8 @@
   `Full restore verified ✓`
 - corrupt exactly 1% at each archive boundary in edge bitrot mode and record
   the per-boundary percentage explicitly
+- include `-rc<number>` releases in the generated README release table while
+  continuing to exclude weekly numeric-suffix refresh builds
 
 ## 0.9.0 - 2026-08-16
 
