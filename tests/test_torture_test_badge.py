@@ -83,7 +83,7 @@ def test_build_badge_complete_result_includes_available_evidence() -> None:
         "label": "Large scale torture test",
         "message": (
             "v0.5.29 · 486.6 GiB · 2% fragmented bitrot repaired · "
-            "PAR2 ✓ · PITR ✓ · Full restore ✓ · 2026-08-11"
+            "PAR2 ✓ · PITR ✓ · Full restore verified ✓ · 2026-08-11"
         ),
         "labelColor": "#6f42c1",
         "color": "#2ea043",
@@ -104,7 +104,7 @@ def test_build_badge_passed_full_restore_includes_component() -> None:
     """Complete coherent restore evidence produces an explicit badge claim."""
     payload = build_badge_payload(_base_record())
 
-    assert "Full restore ✓" in payload["message"]
+    assert "Full restore verified ✓" in payload["message"]
 
 
 def test_build_badge_passed_auto_full_restore_includes_component() -> None:
@@ -120,7 +120,7 @@ def test_build_badge_passed_auto_full_restore_includes_component() -> None:
 
     payload = build_badge_payload(record)
 
-    assert "Full restore ✓" in payload["message"]
+    assert "Full restore verified ✓" in payload["message"]
 
 
 def test_build_badge_skipped_full_restore_omits_component() -> None:

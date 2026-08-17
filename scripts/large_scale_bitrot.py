@@ -16,7 +16,7 @@ from typing import Any, Mapping, Sequence
 
 
 MAX_SEED = (1 << 64) - 1
-DEFAULT_EDGE_BYTES = 1_048_576
+EDGE_PERCENT = 1
 VALID_MODES = {"contiguous", "fragmented", "edges"}
 VALID_STATUSES = {"passed", "failed", "skipped", "not_run", "in_progress"}
 SLICE_PATTERN = re.compile(r"\.(\d+)\.dar$")
@@ -409,52 +409,35 @@ def _select_edges(
     phase: str,
     ordered_paths: Sequence[Path],
     slice_sizes: Sequence[int],
-    corruption_percent: int,
-    edge_bytes: int,
 ) -> dict[str, Any]:
-    """Select bounded windows at the archive's first and final slice edges.
+    """Select one-percent windows at the archive's first and final edges.
 
     Args:
         seed: Run-level seed recorded with the deterministic selection.
         phase: Lifecycle phase label.
         ordered_paths: Numerically ordered DAR slices.
         slice_sizes: Corresponding slice sizes.
-        corruption_percent: Per-slice safety cap for edge windows.
-        edge_bytes: Maximum bytes to corrupt at each edge.
 
     Returns:
         JSON-serializable edge selection.
 
     Raises:
-        ValueError: If a slice is too small for safe edge windows.
+        ValueError: If a boundary slice is too small for one-percent windows.
     """
-    if edge_bytes <= 0:
-        raise ValueError("edge_bytes must be positive")
-
     first_path = ordered_paths[0]
     final_path = ordered_paths[-1]
     first_size = slice_sizes[0]
     final_size = slice_sizes[-1]
     segments: list[dict[str, Any]] = []
 
-    if first_path == final_path:
-        total_budget = min(
-            edge_bytes * 2,
-            max(1, first_size * corruption_percent // 100),
+    first_length = first_size * EDGE_PERCENT // 100
+    final_length = final_size * EDGE_PERCENT // 100
+    if first_length <= 0 or final_length <= 0:
+        raise ValueError(
+            "boundary DAR slices must be at least 100 bytes for edge corruption"
         )
-        if total_budget < 2 or total_budget >= first_size:
-            raise ValueError("single DAR slice is too small for two edge regions")
-        first_length = total_budget // 2
-        final_length = total_budget - first_length
-    else:
-        first_length = min(
-            edge_bytes, max(1, first_size * corruption_percent // 100)
-        )
-        final_length = min(
-            edge_bytes, max(1, final_size * corruption_percent // 100)
-        )
-        if first_length >= first_size or final_length >= final_size:
-            raise ValueError("DAR slice is too small for safe edge corruption")
+    if first_path == final_path and first_length + final_length >= first_size:
+        raise ValueError("single DAR slice is too small for two edge regions")
 
     edge_values = (
         (first_path, first_size, 0, first_length),
@@ -478,8 +461,8 @@ def _select_edges(
         "seed": seed,
         "phase": phase.lower(),
         "mode": "edges",
-        "corruption_percent": corruption_percent,
-        "edge_bytes": edge_bytes,
+        "corruption_percent": EDGE_PERCENT * 2,
+        "edge_percent": EDGE_PERCENT,
         "logical_offset_bytes": None,
         "length_bytes": first_length + final_length,
         "region_count": 2,
@@ -493,7 +476,6 @@ def select_corruption(
     slice_paths: Sequence[Path],
     corruption_percent: int = 2,
     mode: str = "contiguous",
-    edge_bytes: int = DEFAULT_EDGE_BYTES,
 ) -> dict[str, Any]:
     """Select reproducible corruption regions for one supported test mode.
 
@@ -503,7 +485,6 @@ def select_corruption(
         slice_paths: DAR slice paths belonging to one archive.
         corruption_percent: Maximum corruption percentage for every affected slice.
         mode: ``contiguous``, ``fragmented``, or ``edges``.
-        edge_bytes: Maximum window at each boundary in ``edges`` mode.
 
     Returns:
         JSON-serializable selection metadata and physical slice segments.
@@ -521,10 +502,8 @@ def select_corruption(
         raise ValueError("corruption_percent must be between 1 and 99")
     if not isinstance(mode, str) or mode not in VALID_MODES:
         raise ValueError(f"mode must be one of: {', '.join(sorted(VALID_MODES))}")
-    if not isinstance(edge_bytes, int) or isinstance(edge_bytes, bool):
-        raise ValueError("edge_bytes must be an integer")
-    if edge_bytes <= 0:
-        raise ValueError("edge_bytes must be positive")
+    if mode == "edges" and corruption_percent != EDGE_PERCENT * 2:
+        raise ValueError("edges mode requires 2% corruption: 1% at each end")
 
     ordered_paths, slice_sizes = _inspect_slices(slice_paths)
     if mode == "contiguous":
@@ -540,8 +519,6 @@ def select_corruption(
         phase,
         ordered_paths,
         slice_sizes,
-        corruption_percent,
-        edge_bytes,
     )
 
 
@@ -684,7 +661,7 @@ def initialize_phase_evidence(
         "seed": selection.get("seed"),
         "mode": selection.get("mode", "contiguous"),
         "corruption_percent": selection.get("corruption_percent"),
-        "edge_bytes": selection.get("edge_bytes"),
+        "edge_percent": selection.get("edge_percent"),
         "logical_offset_bytes": selection.get("logical_offset_bytes"),
         "length_bytes": selection.get("length_bytes"),
         "region_count": selection.get("region_count", 1),
@@ -888,7 +865,6 @@ def _build_parser() -> argparse.ArgumentParser:
     select_parser.add_argument(
         "--mode", choices=sorted(VALID_MODES), default="contiguous"
     )
-    select_parser.add_argument("--edge-bytes", type=int, default=DEFAULT_EDGE_BYTES)
     select_parser.add_argument("slices", nargs="+")
 
     segments_parser = subparsers.add_parser("segments")
@@ -954,7 +930,6 @@ def main() -> int:
             [Path(value) for value in arguments.slices],
             arguments.percent,
             arguments.mode,
-            arguments.edge_bytes,
         )
         print(json.dumps(selection, separators=(",", ":")))
         return 0

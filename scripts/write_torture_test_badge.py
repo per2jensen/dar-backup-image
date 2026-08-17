@@ -354,7 +354,7 @@ def _full_restore_component(record: Mapping[str, Any]) -> str | None:
             return None
     else:
         return None
-    return "Full restore ✓"
+    return "Full restore verified ✓"
 
 
 def _date_component(record: Mapping[str, Any]) -> str | None:

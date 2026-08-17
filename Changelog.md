@@ -2,6 +2,13 @@
 
 ## 0.9.1 - not released
 
+### Fixed
+
+- label complete, internally consistent schema-v6 badge evidence as
+  `Full restore verified ✓`
+- corrupt exactly 1% at each archive boundary in edge bitrot mode and record
+  the per-boundary percentage explicitly
+
 ## 0.9.0 - 2026-08-16
 
 ### Added

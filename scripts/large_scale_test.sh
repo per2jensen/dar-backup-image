@@ -29,7 +29,6 @@ BITROT_MODE="contiguous"                            # --bitrot-mode: contiguous 
 BITROT_MODE_EXPLICIT=0                              # Tracks whether --bitrot-mode was supplied so it can require --bitrot
 BITROT_PERCENT=2                                    # Fixed percentage of one selected slice corrupted per bitrot phase
 BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while preserving exact byte offsets and lengths
-BITROT_EDGE_BYTES=1048576                           # Maximum corruption window at each archive edge in edges mode
 ADVERTISE_REQUESTED=0                               # --advertise: requests publication; the result writer still enforces success and source-size eligibility
 TEST_NAME="Large scale torture test"                 # --test-name: human-readable badge label stored with every result
 ADVERTISE_CLASS=""                                  # --advertise-class: tested version/class; defaults from image metadata after preflight
@@ -44,7 +43,7 @@ FULL_RESTORE_PERFORMED=0                            # Set only immediately befor
 FULL_RESTORE_DECISION_REASON="not_evaluated"        # Stable machine-readable explanation for selection or skip
 FULL_RESTORE_FILE_COUNT=""                          # Regular-file paths checksum-compared by the complete restore
 FULL_RESTORE_BYTES=""                               # Apparent restored bytes checksum-compared by the complete restore
-SCRIPT_VERSION="16"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="17"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -434,7 +433,7 @@ RUN_VARIABLES=(
     DATESTAMP DATE_OF_RUN SCRIPT_VERSION RUN_STARTED_EPOCH
     IMAGE DEFINITION_ROOT MOUNT_ROOT
     BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE PAR2_RATIO
-    DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES BITROT_EDGE_BYTES
+    DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES
     ADVERTISE_REQUESTED TEST_NAME ADVERTISE_CLASS
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
     FULL_RESTORE_MODE FULL_RESTORE_THRESHOLD_GIB FULL_RESTORE_THRESHOLD_BYTES
@@ -801,7 +800,6 @@ do_bitrot_test() {
         --phase "$phase" \
         --percent "$BITROT_PERCENT" \
         --mode "$BITROT_MODE" \
-        --edge-bytes "$BITROT_EDGE_BYTES" \
         "${slice_files[@]}"); then
         fail "Unable to select safe bitrot regions"
         return 1

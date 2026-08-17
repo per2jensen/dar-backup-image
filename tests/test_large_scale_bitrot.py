@@ -107,9 +107,10 @@ def test_select_corruption_edges_targets_numeric_first_and_final_slices(
         tmp_path: Isolated pytest temporary directory.
     """
     paths = []
+    sizes = {1: 200_000, 2: 250_000, 10: 300_000}
     for number in (10, 2, 1):
         path = tmp_path / f"archive.{number}.dar"
-        path.write_bytes(b"\0" * 200_000)
+        path.write_bytes(b"\0" * sizes[number])
         paths.append(path)
 
     selection = BITROT_MODULE.select_corruption(5, "full", paths, mode="edges")
@@ -121,8 +122,10 @@ def test_select_corruption_edges_targets_numeric_first_and_final_slices(
     assert first["offset_bytes"] == 0
     assert final["slice_number"] == 10
     assert final["offset_bytes"] + final["length_bytes"] == final["slice_bytes"]
-    assert first["length_bytes"] == 4_000
-    assert final["length_bytes"] == 4_000
+    assert first["length_bytes"] == 2_000
+    assert final["length_bytes"] == 3_000
+    assert selection["edge_percent"] == 1
+    assert selection["corruption_percent"] == 2
 
 
 def test_select_corruption_edges_single_slice_uses_two_non_overlapping_regions(
@@ -142,6 +145,8 @@ def test_select_corruption_edges_single_slice_uses_two_non_overlapping_regions(
     assert first["offset_bytes"] == 0
     assert final["offset_bytes"] + final["length_bytes"] == 100_000
     assert first["offset_bytes"] + first["length_bytes"] < final["offset_bytes"]
+    assert first["length_bytes"] == 1_000
+    assert final["length_bytes"] == 1_000
     assert first["length_bytes"] + final["length_bytes"] == 2_000
 
 
@@ -155,8 +160,24 @@ def test_select_corruption_edges_tiny_single_slice_raises_value_error(
     """
     paths = _create_slices(tmp_path, (50,))
 
-    with pytest.raises(ValueError, match="too small for two edge regions"):
+    with pytest.raises(ValueError, match="at least 100 bytes"):
         BITROT_MODULE.select_corruption(1, "full", paths, mode="edges")
+
+
+def test_select_corruption_edges_non_two_percent_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """Edges mode rejects a percentage that is not one percent per end.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    paths = _create_slices(tmp_path, (100_000,))
+
+    with pytest.raises(ValueError, match="1% at each end"):
+        BITROT_MODULE.select_corruption(
+            1, "full", paths, corruption_percent=4, mode="edges"
+        )
 
 
 def test_select_corruption_unknown_mode_raises_value_error(tmp_path: Path) -> None:
@@ -346,6 +367,28 @@ def test_evidence_updates_record_metrics_without_absolute_slice_path(
     assert segment["par2_data_blocks_total"] == 2000
     assert segment["par2_data_blocks_damaged"] == 41
     assert "path" not in segment
+
+
+def test_initialize_phase_evidence_records_edge_percentage(tmp_path: Path) -> None:
+    """Persisted edge evidence identifies the percentage applied at each end.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    slices = _create_slices(tmp_path, (100_000, 200_000))
+    selection = BITROT_MODULE.select_corruption(
+        7, "full", slices, mode="edges"
+    )
+    evidence_path = tmp_path / "evidence.json"
+
+    BITROT_MODULE.initialize_phase_evidence(
+        evidence_path, "full", selection, buffer_bytes=1_048_576
+    )
+
+    phase = json.loads(evidence_path.read_text(encoding="utf-8"))["full"]
+    assert phase["corruption_percent"] == 2
+    assert phase["edge_percent"] == 1
+    assert "edge_bytes" not in phase
 
 
 def test_update_slice_evidence_updates_every_region_in_repaired_slice(

@@ -273,6 +273,11 @@ seed as `BITROT_SEED` (or `--bitrot-seed`) and the recorded mode as
 `BITROT_MODE` (or `--bitrot-mode`) to reproduce the same choices against an
 identical archive layout.
 
+Archive-edge mode corrupts exactly 1% of the first slice from byte zero and 1%
+of the final slice through EOF. A single-slice archive receives two separate
+1% regions. The evidence records both the aggregate `corruption_percent: 2`
+and the per-boundary `edge_percent: 1`.
+
 Schema v5 adds the intentionally small publication envelope: `advertise`,
 `test_name`, and `advertise_class`. `advertise` becomes true only when
 publication was explicitly requested, the run completed successfully with no
@@ -296,7 +301,7 @@ boundary. The harness-owned primer has no intentional omissions and is also
 checked in the source-to-restore direction so missing fixture extraction is
 detected.
 
-The badge adds `Full restore ✓` only for internally consistent schema-v6
+The badge adds `Full restore verified ✓` only for internally consistent schema-v6
 evidence: the complete restore must have been performed, execution, content
 comparison, and overall status must all have passed, restored file and byte
 counts must be positive, and the recorded mode and decision must agree. Older,
