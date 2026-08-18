@@ -103,6 +103,59 @@ def test_build_badge_complete_result_includes_available_evidence() -> None:
     }
 
 
+def test_build_badge_edges_reports_per_edge_corruption() -> None:
+    """Explicit edge evidence reports the percentage at both archive edges."""
+    record = _base_record()
+    for phase in record["bitrot_evidence"].values():
+        phase.update(
+            {
+                "mode": "edges",
+                "corruption_percent": 2,
+                "edge_percent": 1,
+                "region_count": 2,
+            }
+        )
+
+    payload = build_badge_payload(record)
+
+    assert "1% bitrot repaired at both archive edges" in payload["message"]
+    assert "2% edges bitrot" not in payload["message"]
+
+
+def test_build_badge_inconsistent_edges_uses_non_quantitative_claim() -> None:
+    """Conflicting edge details cannot produce a per-edge percentage claim."""
+    record = _base_record()
+    for phase in record["bitrot_evidence"].values():
+        phase.update(
+            {
+                "mode": "edges",
+                "corruption_percent": 2,
+                "edge_percent": 1,
+                "region_count": 2,
+            }
+        )
+    record["bitrot_evidence"]["incr"]["edge_percent"] = 0.5
+
+    payload = build_badge_payload(record)
+
+    assert "archive-edge bitrot repaired" in payload["message"]
+    assert "at both archive edges" not in payload["message"]
+    assert "2% edges bitrot" not in payload["message"]
+
+
+def test_build_badge_legacy_edges_use_non_quantitative_claim() -> None:
+    """Legacy edge evidence without per-edge fields avoids a numeric claim."""
+    record = _base_record()
+    for phase in record["bitrot_evidence"].values():
+        phase["mode"] = "edges"
+
+    payload = build_badge_payload(record)
+
+    assert "archive-edge bitrot repaired" in payload["message"]
+    assert "at both archive edges" not in payload["message"]
+    assert "2% edges bitrot" not in payload["message"]
+
+
 def test_build_badge_missing_pitr_omits_pitr_component() -> None:
     """Missing PITR evidence is omitted rather than reported as failure."""
     record = _base_record()

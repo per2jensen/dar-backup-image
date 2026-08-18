@@ -336,20 +336,20 @@ the targeted primer PITR restore remains mandatory in every mode.
 ══════════════════════════════════════════
   Summary
 ══════════════════════════════════════════
-FULL elapsed: 4050s (~116.23 GB)
-DIFF elapsed: 8s (~0.58 GB)
-INCR elapsed: 6s (~0.59 GB)
+FULL elapsed: 4050s (~116.23 GiB)
+DIFF elapsed: 8s (~0.58 GiB)
+INCR elapsed: 6s (~0.59 GiB)
 Peak Engine Memory Consumption:
-  ├── dar-backup : 33.2 MB
-  ├── dar backend: 34.1 MB
-  ├── par2 engine: 146.9 MB
-  └── db manager : 40.6 MB
+  ├── dar-backup : 33.2 MiB
+  ├── dar backend: 34.1 MiB
+  ├── par2 engine: 146.9 MiB
+  └── db manager : 40.6 MiB
 Failures:      0
 
 ✓ ALL TESTS PASSED SUCCESSFULLY
 ```
 
-(Taken from a real run against a 116GB photo collection; your own numbers will
+(Taken from a real run that produced a 116 GiB FULL archive; your own numbers will
 scale with however much data you point `SOURCE_GLOB` at.)
 
 ## Output
@@ -368,9 +368,13 @@ scale with however much data you point `SOURCE_GLOB` at.)
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
 
-New records use additive schema version 8. All schema-version-2 through -7
-fields remain present for existing consumers and the older lines in the history
-remain valid. Additional provenance includes the full harness commit and dirty
+New records use schema version 9. Existing schema-version-2 through -8 history
+lines remain valid and are not rewritten. Schema v9 replaces the misleading
+rounded fields `full_size_gb`, `diff_size_gb`, and `incr_size_gb` with
+`*_size_gib`, and replaces `memory_mb` with `memory_mib`. Exact archive sizes
+remain available in the `*_size_bytes` fields. Trend analysis accepts both the
+new memory field and legacy history. All other earlier schema fields remain
+present for consumers. Provenance includes the full harness commit and dirty
 state, the requested image reference, immutable local image ID, registry digest
 when available, OCI image revision/version labels, harness script version, and
 the sha256 of the effective generated backup definition.
@@ -390,6 +394,12 @@ Archive-edge mode corrupts exactly 1% of the first slice from byte zero and 1%
 of the final slice through EOF. A single-slice archive receives two separate
 1% regions. The evidence records both the aggregate `corruption_percent: 2`
 and the per-boundary `edge_percent: 1`.
+
+When that evidence is internally consistent, the public badge describes it as
+`1% bitrot repaired at both archive edges`. This remains accurate when the
+first and final boundaries belong to the same single-slice archive. Older or
+inconsistent edge evidence receives only the non-quantitative
+`archive-edge bitrot repaired` claim.
 
 Schema v5 adds the intentionally small publication envelope: `advertise`,
 `test_name`, and `advertise_class`. `advertise` becomes true only when
@@ -425,10 +435,11 @@ and ZFS, and verifies:
 The primer contains deterministic ownership (the invoking UID plus an available
 supplemental GID, with the primary GID as fallback), access/default ACL,
 three-xattr, hard-link, file-mode, and directory-mode fixtures. A successful
-schema-v8 record must prove that these fixtures were actually encountered;
+schema-v8-or-later record must prove that these fixtures were actually
+encountered;
 zero or missing evidence cannot produce a verified complete-restore claim.
 
-The schema-v8 contract is explicitly **same filesystem**. `MOUNT_ROOT`, every
+The schema-v8-or-later contract is explicitly **same filesystem**. `MOUNT_ROOT`, every
 source entry selected for complete comparison, `FULL_RESTORE_DIR`, and every
 restored entry must have the same `st_dev` value. The harness checks this before
 the backup and again during comparison, records both filesystem types and
@@ -464,7 +475,7 @@ The badge adds `Full restore verified ✓` only for internally consistent
 schema-v6-or-later evidence: the complete restore must have been performed,
 execution, content comparison, and overall status must all have passed,
 restored file and byte counts must be positive, and the recorded mode and
-decision must agree. Schema-v8 records must additionally contain passed,
+decision must agree. Schema-v8-or-later records must additionally contain passed,
 internally consistent `portable-posix-v1` evidence, matching filesystem types
 and device numbers, and positive fixture counts. Older, skipped, failed,
 incomplete, or contradictory records remain publishable when otherwise
@@ -488,7 +499,7 @@ build performed earlier by the wrapper.
 
 ## Notes
 
-- **Runtime scales with data size.** A 116GB FULL backup takes roughly an
+- **Runtime scales with data size.** A 116 GiB FULL backup takes roughly an
   hour; DIFF/INCR are fast since only the synthetic "diff-primer" fixture
   changes between them. Complete restore and checksum comparison add another
   full-data read/write cycle when selected. There's also a deliberate ~2-3

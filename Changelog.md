@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- describe edge-mode badge evidence as 1% bitrot at both archive edges instead
+  of the misleading 2% aggregate
+- label binary archive sizes and RSS measurements as GiB and MiB in
+  large-scale schema-v9 results, console output, and documentation
+- normalize Docker's decimal layer sizes with decimal conversions in the
+  image size report
 - label complete, internally consistent schema-v6 badge evidence as
   `Full restore verified ✓`
 - corrupt exactly 1% at each archive boundary in edge bitrot mode and record

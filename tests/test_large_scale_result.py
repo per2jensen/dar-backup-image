@@ -1,4 +1,4 @@
-"""Tests for schema-v8 large-scale test result records."""
+"""Tests for schema-v9 large-scale test result records."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ if MODULE_SPEC is None or MODULE_SPEC.loader is None:
 RESULT_MODULE = importlib.util.module_from_spec(MODULE_SPEC)
 MODULE_SPEC.loader.exec_module(RESULT_MODULE)
 build_record = RESULT_MODULE.build_record
+regression_warnings = RESULT_MODULE.regression_warnings
 write_result = RESULT_MODULE.write_result
 
 
@@ -39,15 +40,15 @@ def _base_environment() -> dict[str, str]:
         "LST_OS_DESC": "Ubuntu 24.04.4 LTS",
         "LST_KERNEL": "6.17.0-test",
         "LST_FULL_ELAPSED": "4000",
-        "LST_FULL_GB": "116.23",
+        "LST_FULL_GIB": "116.23",
         "LST_DIFF_ELAPSED": "8",
-        "LST_DIFF_GB": "0.58",
+        "LST_DIFF_GIB": "0.58",
         "LST_INCR_ELAPSED": "7",
-        "LST_INCR_GB": "0.59",
-        "LST_DB_MB": "33.2",
-        "LST_DAR_MB": "32.1",
-        "LST_PAR2_MB": "146.9",
-        "LST_MGR_MB": "40.6",
+        "LST_INCR_GIB": "0.59",
+        "LST_DB_MIB": "33.2",
+        "LST_DAR_MIB": "32.1",
+        "LST_PAR2_MIB": "146.9",
+        "LST_MGR_MIB": "40.6",
         "LST_FAILURES": "0",
         "LST_SCRIPT_VERSION": "11",
         "LST_HARNESS_GIT_COMMIT": "1234567890abcdef1234567890abcdef12345678",
@@ -117,7 +118,7 @@ def _base_environment() -> dict[str, str]:
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v8_to_both_histories(
+def test_write_result_completed_run_appends_schema_v9_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -142,7 +143,7 @@ def test_write_result_completed_run_appends_schema_v8_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 8
+    assert local_record["schema_version"] == 9
     assert local_record["advertise"] is True
     assert local_record["test_name"] == "Large scale torture test"
     assert local_record["advertise_class"] == "v0.8.0-rc1"
@@ -184,6 +185,59 @@ def test_write_result_completed_run_appends_schema_v8_to_both_histories(
     assert local_record["bitrot_evidence"] is None
 
 
+def test_build_record_binary_units_use_iec_field_names() -> None:
+    """Binary size and memory values are published under IEC unit names."""
+    record = build_record(_base_environment())
+
+    assert record["full_size_gib"] == 116.23
+    assert record["diff_size_gib"] == 0.58
+    assert record["incr_size_gib"] == 0.59
+    assert record["memory_mib"] == {
+        "dar_backup": 33.2,
+        "dar": 32.1,
+        "par2": 146.9,
+        "manager": 40.6,
+    }
+
+
+def test_build_record_misleading_si_field_names_are_absent() -> None:
+    """Schema v9 does not duplicate binary measurements under SI unit names."""
+    record = build_record(_base_environment())
+
+    for misleading_key in (
+        "full_size_gb",
+        "diff_size_gb",
+        "incr_size_gb",
+        "memory_mb",
+    ):
+        assert misleading_key not in record
+
+
+def test_regression_warnings_compare_legacy_memory_history() -> None:
+    """Schema-v9 memory values remain comparable with legacy history."""
+    environment = _base_environment()
+    environment["LST_DAR_MIB"] = "64.0"
+    record = build_record(environment)
+    legacy_history = [
+        {
+            "schema_version": 8,
+            "passed": True,
+            "full_elapsed_s": 4000,
+            "memory_mb": {
+                "dar_backup": 33.2,
+                "dar": 32.0,
+                "par2": 146.9,
+                "manager": 40.6,
+            },
+        }
+    ]
+
+    warnings = regression_warnings(record, legacy_history)
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Peak dar memory (MiB) (64.0) is 2.0x")
+
+
 def test_write_result_aborted_run_records_phase_and_unreached_checks(
     tmp_path: Path,
 ) -> None:
@@ -196,11 +250,11 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
     environment.update(
         {
             "LST_FULL_ELAPSED": "19",
-            "LST_FULL_GB": "",
+            "LST_FULL_GIB": "",
             "LST_DIFF_ELAPSED": "0",
-            "LST_DIFF_GB": "",
+            "LST_DIFF_GIB": "",
             "LST_INCR_ELAPSED": "0",
-            "LST_INCR_GB": "",
+            "LST_INCR_GIB": "",
             "LST_FAILURES": "0",
             "LST_SOURCE_FILE_COUNT": "",
             "LST_SOURCE_BYTES": "",
@@ -264,7 +318,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
     assert stored_record["completed"] is False
     assert stored_record["aborted_phase"] == "full_backup"
     assert stored_record["exit_code"] == 17
-    assert stored_record["full_size_gb"] is None
+    assert stored_record["full_size_gib"] is None
     assert stored_record["source_bytes"] is None
     assert stored_record["checks"]["backup"]["full"] == "failed"
     assert stored_record["checks"]["backup"]["diff"] == "not_run"
@@ -274,7 +328,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
 def test_write_result_existing_schema_v2_history_remains_readable(
     tmp_path: Path,
 ) -> None:
-    """Appending schema v8 preserves an existing schema-v2 JSONL record.
+    """Appending schema v9 preserves an existing schema-v2 JSONL record.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -295,11 +349,11 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 8
+    assert records[1]["schema_version"] == 9
 
 
 def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
-    """Schema v8 embeds per-phase bitrot and PAR2 block evidence.
+    """Schema v9 retains per-phase bitrot and PAR2 block evidence.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -325,7 +379,7 @@ def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> No
 
     record = build_record(environment)
 
-    assert record["schema_version"] == 8
+    assert record["schema_version"] == 9
     assert record["bitrot_evidence"] == evidence
 
 

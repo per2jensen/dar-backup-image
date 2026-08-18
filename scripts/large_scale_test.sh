@@ -56,7 +56,7 @@ RESTORE_FILESYSTEM_TYPE=""                          # Host filesystem type conta
 SOURCE_FILESYSTEM_DEVICE=""                         # Host st_dev number for MOUNT_ROOT
 RESTORE_FILESYSTEM_DEVICE=""                        # Host st_dev number for FULL_RESTORE_DIR
 OWNERSHIP_FIXTURE_GID=""                            # Supplemental GID used when available, otherwise the invoking user's primary GID
-SCRIPT_VERSION="22"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="23"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -365,19 +365,19 @@ print("\t".join(str(measurement[key]) for key in keys))
         return
     fi
 
-    local total_gb required_gb available_gb
-    total_gb=$(awk -v b="$total_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
-    required_gb=$(awk -v b="$required_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
-    available_gb=$(awk -v b="$available_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
+    local total_gib required_gib available_gib
+    total_gib=$(awk -v b="$total_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
+    required_gib=$(awk -v b="$required_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
+    available_gib=$(awk -v b="$available_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
 
     if [[ "$available_bytes" -lt "$required_bytes" ]]; then
         echo "ERROR: insufficient disk space under '${BASE_DIR}'."
-        echo "  Source data size: ~${total_gb} GB"
-        echo "  Required (${MIN_FREE_MULTIPLIER}x source, for archive+PAR2+restore copy): ~${required_gb} GB"
-        echo "  Available:        ~${available_gb} GB"
+        echo "  Source data size: ~${total_gib} GiB"
+        echo "  Required (${MIN_FREE_MULTIPLIER}x source, for archive+PAR2+restore copy): ~${required_gib} GiB"
+        echo "  Available:        ~${available_gib} GiB"
         exit 1
     fi
-    info "Disk-space preflight OK: source ~${total_gb} GB, need ~${required_gb} GB (${MIN_FREE_MULTIPLIER}x), have ~${available_gb} GB free under '${BASE_DIR}'."
+    info "Disk-space preflight OK: source ~${total_gib} GiB, need ~${required_gib} GiB (${MIN_FREE_MULTIPLIER}x), have ~${available_gib} GiB free under '${BASE_DIR}'."
 }
 
 # ── directory layout ─────────────────────────────────────────────────────────
@@ -1163,7 +1163,7 @@ calc_max_rss() {
                 split($3, rss_val, "=");
                 if (rss_val[2] > max) max = rss_val[2]
             }
-            END { if (max > 0) printf "%.1f MB", max / 1024; else print "N/A" }
+            END { if (max > 0) printf "%.1f MiB", max / 1024; else print "N/A" }
         ' "$log_path"
         return 0
     fi
@@ -1197,7 +1197,7 @@ calc_archive_bytes() {
     echo "$total_bytes"
 }
 
-bytes_to_gb() {
+bytes_to_gib() {
     local byte_count="${1:-}"
     if [[ -z "$byte_count" ]]; then
         echo ""
@@ -1215,9 +1215,9 @@ prepare_result_metrics() {
     FULL_SIZE_BYTES=$(calc_archive_bytes "FULL")
     DIFF_SIZE_BYTES=$(calc_archive_bytes "DIFF")
     INCR_SIZE_BYTES=$(calc_archive_bytes "INCR")
-    FULL_SIZE_GB=$(bytes_to_gb "$FULL_SIZE_BYTES")
-    DIFF_SIZE_GB=$(bytes_to_gb "$DIFF_SIZE_BYTES")
-    INCR_SIZE_GB=$(bytes_to_gb "$INCR_SIZE_BYTES")
+    FULL_SIZE_GIB=$(bytes_to_gib "$FULL_SIZE_BYTES")
+    DIFF_SIZE_GIB=$(bytes_to_gib "$DIFF_SIZE_BYTES")
+    INCR_SIZE_GIB=$(bytes_to_gib "$INCR_SIZE_BYTES")
     OVERALL_ELAPSED=$(( $(date +%s) - RUN_STARTED_EPOCH ))
 }
 
@@ -1226,12 +1226,12 @@ prepare_result_metrics() {
 write_json_record() {
     local exit_status="$1"
     local effective_repo_dir="${REPO_DIR:-}"
-    local db_mb dar_mb_value par2_mb manager_mb
+    local db_mib dar_mib_value par2_mib manager_mib
 
-    db_mb=$(awk '{print $1}' <<< "${MAX_DAR_BACKUP:-N/A}")
-    dar_mb_value=$(awk '{print $1}' <<< "${MAX_DAR:-N/A}")
-    par2_mb=$(awk '{print $1}' <<< "${MAX_PAR2:-N/A}")
-    manager_mb=$(awk '{print $1}' <<< "${MAX_MANAGER:-N/A}")
+    db_mib=$(awk '{print $1}' <<< "${MAX_DAR_BACKUP:-N/A}")
+    dar_mib_value=$(awk '{print $1}' <<< "${MAX_DAR:-N/A}")
+    par2_mib=$(awk '{print $1}' <<< "${MAX_PAR2:-N/A}")
+    manager_mib=$(awk '{print $1}' <<< "${MAX_MANAGER:-N/A}")
 
     if [[ $SMOKETEST -eq 1 ]]; then
         effective_repo_dir=""
@@ -1252,15 +1252,15 @@ write_json_record() {
     LST_OS_DESC="${OS_DESC:-unknown}" \
     LST_KERNEL="${KERNEL:-unknown}" \
     LST_FULL_ELAPSED="${full_elapsed:-0}" \
-    LST_FULL_GB="${FULL_SIZE_GB:-}" \
+    LST_FULL_GIB="${FULL_SIZE_GIB:-}" \
     LST_DIFF_ELAPSED="${diff_elapsed:-0}" \
-    LST_DIFF_GB="${DIFF_SIZE_GB:-}" \
+    LST_DIFF_GIB="${DIFF_SIZE_GIB:-}" \
     LST_INCR_ELAPSED="${incr_elapsed:-0}" \
-    LST_INCR_GB="${INCR_SIZE_GB:-}" \
-    LST_DB_MB="$db_mb" \
-    LST_DAR_MB="$dar_mb_value" \
-    LST_PAR2_MB="$par2_mb" \
-    LST_MGR_MB="$manager_mb" \
+    LST_INCR_GIB="${INCR_SIZE_GIB:-}" \
+    LST_DB_MIB="$db_mib" \
+    LST_DAR_MIB="$dar_mib_value" \
+    LST_PAR2_MIB="$par2_mib" \
+    LST_MGR_MIB="$manager_mib" \
     LST_FAILURES="${FAILURES:-0}" \
     LST_SCRIPT_VERSION="$SCRIPT_VERSION" \
     LST_HARNESS_GIT_COMMIT="${HARNESS_GIT_COMMIT:-unknown}" \
@@ -1695,9 +1695,9 @@ prepare_result_metrics
 
 # Compile final analytics screen layout using matched variable casing
 echo -e "dar-backup test pass: ${DATESTAMP:-}"
-echo -e "FULL elapsed: ${full_elapsed:-0}s (~${FULL_SIZE_GB:-N/A} GB)"
-echo -e "DIFF elapsed: ${diff_elapsed:-0}s (~${DIFF_SIZE_GB:-N/A} GB)"
-echo -e "INCR elapsed: ${incr_elapsed:-0}s (~${INCR_SIZE_GB:-N/A} GB)"
+echo -e "FULL elapsed: ${full_elapsed:-0}s (~${FULL_SIZE_GIB:-N/A} GiB)"
+echo -e "DIFF elapsed: ${diff_elapsed:-0}s (~${DIFF_SIZE_GIB:-N/A} GiB)"
+echo -e "INCR elapsed: ${incr_elapsed:-0}s (~${INCR_SIZE_GIB:-N/A} GiB)"
 echo -e "Complete restore: ${FULL_RESTORE_OVERALL_STATUS} (${FULL_RESTORE_DECISION_REASON})"
 echo -e "Restore metadata: ${FULL_RESTORE_METADATA_STATUS} (${RESTORE_METADATA_PROFILE}, ${SOURCE_FILESYSTEM_TYPE}, same filesystem st_dev=${SOURCE_FILESYSTEM_DEVICE})"
 echo -e "Peak Engine Memory Consumption:"

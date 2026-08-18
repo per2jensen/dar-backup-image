@@ -276,6 +276,38 @@ def _bitrot_component(record: Mapping[str, Any]) -> str | None:
         return None
     repaired = all(phase.get("status") == "passed" for phase in available)
     suffix = " repaired" if repaired else ""
+    if mode == "edges":
+        edge_percentages = [
+            _positive_number(phase.get("edge_percent"), maximum=50.0)
+            for phase in available
+        ]
+        region_counts = [phase.get("region_count") for phase in available]
+        has_consistent_edges = (
+            not any(edge_percent is None for edge_percent in edge_percentages)
+            and len(set(edge_percentages)) == 1
+            and all(
+                isinstance(region_count, int)
+                and not isinstance(region_count, bool)
+                and region_count == 2
+                for region_count in region_counts
+            )
+        )
+        if has_consistent_edges:
+            edge_percent = edge_percentages[0]
+            if edge_percent is not None and all(
+                math.isclose(
+                    phase_percent,
+                    edge_percent * 2,
+                    rel_tol=0.0,
+                    abs_tol=1e-9,
+                )
+                for phase_percent in percentages
+            ):
+                return (
+                    f"{_format_number(edge_percent)}% bitrot{suffix} "
+                    "at both archive edges"
+                )
+        return f"archive-edge bitrot{suffix}"
     return f"{_format_number(percent)}% {mode} bitrot{suffix}"
 
 

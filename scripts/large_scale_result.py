@@ -222,7 +222,7 @@ def _choice(
 
 
 def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
-    """Build one backward-compatible schema-v8 result record.
+    """Build one schema-v9 result record with legacy history compatibility.
 
     Args:
         environment: Environment values exported by ``large_scale_test.sh``.
@@ -430,7 +430,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "datestamp": _required(environment, "LST_DATESTAMP"),
         "date": _required(environment, "LST_DATE"),
         # Stable publication envelope; all other engineering fields may evolve.
@@ -446,16 +446,16 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         "os_desc": _required(environment, "LST_OS_DESC"),
         "kernel": _required(environment, "LST_KERNEL"),
         "full_elapsed_s": _required_int(environment, "LST_FULL_ELAPSED"),
-        "full_size_gb": _optional_float(environment, "LST_FULL_GB"),
+        "full_size_gib": _optional_float(environment, "LST_FULL_GIB"),
         "diff_elapsed_s": _required_int(environment, "LST_DIFF_ELAPSED"),
-        "diff_size_gb": _optional_float(environment, "LST_DIFF_GB"),
+        "diff_size_gib": _optional_float(environment, "LST_DIFF_GIB"),
         "incr_elapsed_s": _required_int(environment, "LST_INCR_ELAPSED"),
-        "incr_size_gb": _optional_float(environment, "LST_INCR_GB"),
-        "memory_mb": {
-            "dar_backup": _optional_float(environment, "LST_DB_MB"),
-            "dar": _optional_float(environment, "LST_DAR_MB"),
-            "par2": _optional_float(environment, "LST_PAR2_MB"),
-            "manager": _optional_float(environment, "LST_MGR_MB"),
+        "incr_size_gib": _optional_float(environment, "LST_INCR_GIB"),
+        "memory_mib": {
+            "dar_backup": _optional_float(environment, "LST_DB_MIB"),
+            "dar": _optional_float(environment, "LST_DAR_MIB"),
+            "par2": _optional_float(environment, "LST_PAR2_MIB"),
+            "manager": _optional_float(environment, "LST_MGR_MIB"),
         },
         "failures": failures,
         "passed": passed,
@@ -602,7 +602,8 @@ def _trailing_average(
     Args:
         records: Historical result records.
         key: Top-level numeric key to average.
-        memory_key: Optional key under ``memory_mb`` instead of ``key``.
+        memory_key: Optional key under the current ``memory_mib`` or legacy
+            ``memory_mb`` object instead of ``key``.
 
     Returns:
         The average, or ``None`` when no compatible values exist.
@@ -612,8 +613,10 @@ def _trailing_average(
         if memory_key is None:
             value = record.get(key)
         else:
-            memory = record.get("memory_mb", {})
-            value = memory.get(memory_key) if isinstance(memory, dict) else None
+            memory = record.get("memory_mib")
+            if not isinstance(memory, Mapping):
+                memory = record.get("memory_mb", {})
+            value = memory.get(memory_key) if isinstance(memory, Mapping) else None
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             values.append(float(value))
     return sum(values) / len(values) if values else None
@@ -643,12 +646,16 @@ def regression_warnings(
             _trailing_average(recent, "full_elapsed_s"),
         )
     ]
-    current_memory = record.get("memory_mb", {})
+    current_memory = record.get("memory_mib")
+    if not isinstance(current_memory, Mapping):
+        current_memory = record.get("memory_mb", {})
     for tool in ("dar_backup", "dar", "par2", "manager"):
-        current = current_memory.get(tool) if isinstance(current_memory, dict) else None
+        current = (
+            current_memory.get(tool) if isinstance(current_memory, Mapping) else None
+        )
         comparisons.append(
             (
-                f"Peak {tool} memory (MB)",
+                f"Peak {tool} memory (MiB)",
                 current,
                 _trailing_average(recent, "", memory_key=tool),
             )

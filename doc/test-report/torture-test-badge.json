@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "label": "Large scale torture test",
-  "message": "dev · 106.6 GiB · 2% edges bitrot repaired · PAR2 ✓ · PITR ✓ · Full restore verified ✓ · 2026-08-15",
+  "message": "dev · 350.3 GiB · 1% bitrot repaired at both archive edges · PAR2 ✓ · PITR ✓ · Full restore verified ✓ · 2026-08-18",
   "labelColor": "#6f42c1",
   "color": "#2ea043"
 }
