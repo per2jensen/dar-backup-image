@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- avoid unbounded package installation before CI checkout and prevent the
+  always-run SBOM summary from masking an unavailable checkout
 - describe edge-mode badge evidence as 1% bitrot at both archive edges instead
   of the misleading 2% aggregate
 - label binary archive sizes and RSS measurements as GiB and MiB in
