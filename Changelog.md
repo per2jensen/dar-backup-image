@@ -13,6 +13,16 @@
 - reject unitless or conflicting large-scale slice sizes before expensive
   setup, recognize long-form slice options in custom definitions, and report
   backup-command failures explicitly
+- verify restored POSIX permission modes in every mandatory primer PITR and
+  across optional complete restores, with explicit schema-v7 evidence
+- verify the same-filesystem `portable-posix-v1` metadata contract during
+  complete restores: numeric ownership, access/default ACLs, `user.*` xattrs,
+  and hard-link topology, with defensive schema-v8 evidence
+- preserve archived numeric UID/GID values by running only validated PITR
+  extraction targets as container root, with scoped cleanup and a tiny
+  positive/negative ownership round-trip test
+- define and enforce a narrow literal `-g`/`-P` large-scale selection contract,
+  and base disk preflight on exact selected bytes after pruning and cache tags
 
 ## 0.9.0 - 2026-08-16
 

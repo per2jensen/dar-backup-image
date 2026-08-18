@@ -1,4 +1,4 @@
-"""Tests for schema-v6 large-scale test result records."""
+"""Tests for schema-v8 large-scale test result records."""
 
 from __future__ import annotations
 
@@ -88,6 +88,7 @@ def _base_environment() -> dict[str, str]:
         "LST_PITR_EXECUTION_STATUS": "passed",
         "LST_PITR_STRUCTURE_STATUS": "passed",
         "LST_PITR_CHECKSUM_STATUS": "passed",
+        "LST_PITR_PERMISSION_STATUS": "passed",
         "LST_PITR_OVERALL_STATUS": "passed",
         "LST_FULL_RESTORE_MODE": "forced",
         "LST_FULL_RESTORE_THRESHOLD_BYTES": str(25 * 1024**3),
@@ -95,16 +96,28 @@ def _base_environment() -> dict[str, str]:
         "LST_FULL_RESTORE_DECISION_REASON": "forced_by_user",
         "LST_FULL_RESTORE_EXECUTION_STATUS": "passed",
         "LST_FULL_RESTORE_CONTENT_STATUS": "passed",
+        "LST_FULL_RESTORE_METADATA_STATUS": "passed",
         "LST_FULL_RESTORE_OVERALL_STATUS": "passed",
         "LST_FULL_RESTORE_FILE_COUNT": "42137",
         "LST_FULL_RESTORE_BYTES": "124802341776",
+        "LST_FULL_RESTORE_ENTRY_COUNT": "42140",
+        "LST_FULL_RESTORE_OWNERSHIP_COUNT": "42140",
+        "LST_FULL_RESTORE_PERMISSION_COUNT": "42139",
+        "LST_FULL_RESTORE_POSIX_ACL_COUNT": "2",
+        "LST_FULL_RESTORE_XATTR_COUNT": "3",
+        "LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT": "1",
+        "LST_RESTORE_METADATA_PROFILE": "portable-posix-v1",
+        "LST_SOURCE_FILESYSTEM_TYPE": "btrfs",
+        "LST_RESTORE_FILESYSTEM_TYPE": "btrfs",
+        "LST_SOURCE_FILESYSTEM_DEVICE": "44",
+        "LST_RESTORE_FILESYSTEM_DEVICE": "44",
         "LST_BITROT_SEED": "987654321",
         "LST_BITROT_EVIDENCE_FILE": "",
     }
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v6_to_both_histories(
+def test_write_result_completed_run_appends_schema_v8_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -129,7 +142,7 @@ def test_write_result_completed_run_appends_schema_v6_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 6
+    assert local_record["schema_version"] == 8
     assert local_record["advertise"] is True
     assert local_record["test_name"] == "Large scale torture test"
     assert local_record["advertise_class"] == "v0.8.0-rc1"
@@ -141,6 +154,7 @@ def test_write_result_completed_run_appends_schema_v6_to_both_histories(
     assert local_record["source_file_count"] == 42137
     assert local_record["full_size_bytes"] == 124801234567
     assert local_record["checks"]["pitr_restore"]["overall"] == "passed"
+    assert local_record["checks"]["pitr_restore"]["permission_modes"] == "passed"
     assert local_record["checks"]["full_restore"] == {
         "mode": "forced",
         "threshold_bytes": 25 * 1024**3,
@@ -149,9 +163,22 @@ def test_write_result_completed_run_appends_schema_v6_to_both_histories(
         "decision_reason": "forced_by_user",
         "execution": "passed",
         "content_comparison": "passed",
+        "portable_metadata": "passed",
         "overall": "passed",
         "restored_file_count": 42137,
         "restored_bytes": 124802341776,
+        "restored_entry_count": 42140,
+        "ownership_entry_count": 42140,
+        "permission_entry_count": 42139,
+        "posix_acl_count": 2,
+        "portable_xattr_count": 3,
+        "hard_link_group_count": 1,
+        "metadata_profile": "portable-posix-v1",
+        "source_filesystem": "btrfs",
+        "restore_filesystem": "btrfs",
+        "source_filesystem_device": 44,
+        "restore_filesystem_device": 44,
+        "same_filesystem": True,
     }
     assert local_record["bitrot_seed"] == 987654321
     assert local_record["bitrot_evidence"] is None
@@ -205,14 +232,22 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
             "LST_PITR_EXECUTION_STATUS": "not_run",
             "LST_PITR_STRUCTURE_STATUS": "not_run",
             "LST_PITR_CHECKSUM_STATUS": "not_run",
+            "LST_PITR_PERMISSION_STATUS": "not_run",
             "LST_PITR_OVERALL_STATUS": "not_run",
             "LST_FULL_RESTORE_PERFORMED": "0",
             "LST_FULL_RESTORE_DECISION_REASON": "not_evaluated",
             "LST_FULL_RESTORE_EXECUTION_STATUS": "not_run",
             "LST_FULL_RESTORE_CONTENT_STATUS": "not_run",
+            "LST_FULL_RESTORE_METADATA_STATUS": "not_run",
             "LST_FULL_RESTORE_OVERALL_STATUS": "not_run",
             "LST_FULL_RESTORE_FILE_COUNT": "",
             "LST_FULL_RESTORE_BYTES": "",
+            "LST_FULL_RESTORE_ENTRY_COUNT": "",
+            "LST_FULL_RESTORE_OWNERSHIP_COUNT": "",
+            "LST_FULL_RESTORE_PERMISSION_COUNT": "",
+            "LST_FULL_RESTORE_POSIX_ACL_COUNT": "",
+            "LST_FULL_RESTORE_XATTR_COUNT": "",
+            "LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT": "",
         }
     )
     record = build_record(environment)
@@ -239,7 +274,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
 def test_write_result_existing_schema_v2_history_remains_readable(
     tmp_path: Path,
 ) -> None:
-    """Appending schema v5 preserves an existing schema-v2 JSONL record.
+    """Appending schema v8 preserves an existing schema-v2 JSONL record.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -260,11 +295,11 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 6
+    assert records[1]["schema_version"] == 8
 
 
 def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
-    """Schema v6 embeds per-phase bitrot and PAR2 block evidence.
+    """Schema v8 embeds per-phase bitrot and PAR2 block evidence.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -290,7 +325,7 @@ def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> No
 
     record = build_record(environment)
 
-    assert record["schema_version"] == 6
+    assert record["schema_version"] == 8
     assert record["bitrot_evidence"] == evidence
 
 
@@ -308,6 +343,52 @@ def test_build_record_malformed_bitrot_evidence_raises_value_error(
     environment["LST_BITROT_EVIDENCE_FILE"] = str(evidence_path)
 
     with pytest.raises(ValueError, match="Malformed JSON evidence"):
+        build_record(environment)
+
+
+def test_build_record_passed_pitr_with_failed_permissions_raises_value_error() -> None:
+    """A successful PITR claim requires successful permission verification."""
+    environment = _base_environment()
+    environment["LST_PITR_PERMISSION_STATUS"] = "failed"
+
+    with pytest.raises(ValueError, match="requires passed execution.*permission modes"):
+        build_record(environment)
+
+
+def test_build_record_passed_full_restore_with_failed_metadata_raises_value_error() -> None:
+    """A successful full-restore claim requires portable metadata verification."""
+    environment = _base_environment()
+    environment["LST_FULL_RESTORE_METADATA_STATUS"] = "failed"
+
+    with pytest.raises(ValueError, match="requires passed execution.*metadata"):
+        build_record(environment)
+
+
+def test_build_record_different_restore_filesystem_device_raises_value_error() -> None:
+    """Cross-filesystem evidence violates the explicit schema-v8 contract."""
+    environment = _base_environment()
+    environment["LST_RESTORE_FILESYSTEM_DEVICE"] = "45"
+
+    with pytest.raises(ValueError, match="must be on the same filesystem device"):
+        build_record(environment)
+
+
+def test_build_record_unsupported_filesystem_type_raises_value_error() -> None:
+    """Filesystems outside the documented portable profile are rejected."""
+    environment = _base_environment()
+    environment["LST_SOURCE_FILESYSTEM_TYPE"] = "xfs"
+    environment["LST_RESTORE_FILESYSTEM_TYPE"] = "xfs"
+
+    with pytest.raises(ValueError, match="LST_SOURCE_FILESYSTEM_TYPE"):
+        build_record(environment)
+
+
+def test_build_record_missing_acl_fixture_evidence_raises_value_error() -> None:
+    """A passed portable profile must prove both access and default ACLs."""
+    environment = _base_environment()
+    environment["LST_FULL_RESTORE_POSIX_ACL_COUNT"] = "1"
+
+    with pytest.raises(ValueError, match="access and default POSIX ACL fixtures"):
         build_record(environment)
 
 
@@ -404,9 +485,16 @@ def test_build_record_auto_restore_above_threshold_is_explicitly_skipped() -> No
             "LST_FULL_RESTORE_DECISION_REASON": "source_exceeds_threshold",
             "LST_FULL_RESTORE_EXECUTION_STATUS": "skipped",
             "LST_FULL_RESTORE_CONTENT_STATUS": "skipped",
+            "LST_FULL_RESTORE_METADATA_STATUS": "skipped",
             "LST_FULL_RESTORE_OVERALL_STATUS": "skipped",
             "LST_FULL_RESTORE_FILE_COUNT": "",
             "LST_FULL_RESTORE_BYTES": "",
+            "LST_FULL_RESTORE_ENTRY_COUNT": "",
+            "LST_FULL_RESTORE_OWNERSHIP_COUNT": "",
+            "LST_FULL_RESTORE_PERMISSION_COUNT": "",
+            "LST_FULL_RESTORE_POSIX_ACL_COUNT": "",
+            "LST_FULL_RESTORE_XATTR_COUNT": "",
+            "LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT": "",
         }
     )
 
@@ -451,9 +539,16 @@ def test_build_record_disabled_restore_is_explicitly_skipped() -> None:
             "LST_FULL_RESTORE_DECISION_REASON": "disabled_by_user",
             "LST_FULL_RESTORE_EXECUTION_STATUS": "skipped",
             "LST_FULL_RESTORE_CONTENT_STATUS": "skipped",
+            "LST_FULL_RESTORE_METADATA_STATUS": "skipped",
             "LST_FULL_RESTORE_OVERALL_STATUS": "skipped",
             "LST_FULL_RESTORE_FILE_COUNT": "",
             "LST_FULL_RESTORE_BYTES": "",
+            "LST_FULL_RESTORE_ENTRY_COUNT": "",
+            "LST_FULL_RESTORE_OWNERSHIP_COUNT": "",
+            "LST_FULL_RESTORE_PERMISSION_COUNT": "",
+            "LST_FULL_RESTORE_POSIX_ACL_COUNT": "",
+            "LST_FULL_RESTORE_XATTR_COUNT": "",
+            "LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT": "",
         }
     )
 
@@ -477,6 +572,9 @@ def test_build_record_forced_restore_accepts_source_above_threshold() -> None:
             "LST_FULL_RESTORE_DECISION_REASON": "forced_by_user",
             "LST_FULL_RESTORE_FILE_COUNT": "220487",
             "LST_FULL_RESTORE_BYTES": str(source_bytes),
+            "LST_FULL_RESTORE_ENTRY_COUNT": "220500",
+            "LST_FULL_RESTORE_OWNERSHIP_COUNT": "220500",
+            "LST_FULL_RESTORE_PERMISSION_COUNT": "220499",
         }
     )
 

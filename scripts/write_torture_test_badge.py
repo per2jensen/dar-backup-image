@@ -24,6 +24,7 @@ MAX_LABEL_LENGTH = 80
 MAX_COMPONENT_LENGTH = 80
 MAX_MESSAGE_LENGTH = 240
 PHASE_NAMES = ("full", "diff", "incr")
+PORTABLE_RESTORE_FILESYSTEMS = {"ext4", "btrfs", "zfs"}
 
 
 def _reject_json_constant(value: str) -> None:
@@ -300,7 +301,7 @@ def _full_restore_component(record: Mapping[str, Any]) -> str | None:
     """Build a badge claim from internally consistent full-restore evidence.
 
     Args:
-        record: Advertised schema-v6 result record.
+        record: Advertised schema-v6-or-later result record.
 
     Returns:
         A concise success component, or ``None`` when evidence is absent,
@@ -319,6 +320,15 @@ def _full_restore_component(record: Mapping[str, Any]) -> str | None:
     if any(
         evidence.get(key) != "passed"
         for key in ("execution", "content_comparison", "overall")
+    ):
+        return None
+
+    schema_version = record.get("schema_version")
+    if (
+        isinstance(schema_version, int)
+        and not isinstance(schema_version, bool)
+        and schema_version >= 8
+        and not _portable_metadata_evidence_is_consistent(evidence)
     ):
         return None
 
@@ -355,6 +365,77 @@ def _full_restore_component(record: Mapping[str, Any]) -> str | None:
     else:
         return None
     return "Full restore verified ✓"
+
+
+def _portable_metadata_evidence_is_consistent(evidence: Mapping[str, Any]) -> bool:
+    """Validate the additional same-filesystem schema-v8 restore contract.
+
+    Args:
+        evidence: Full-restore check object from an advertised record.
+
+    Returns:
+        ``True`` only for complete, internally consistent portable metadata
+        evidence.
+
+    Raises:
+        ValueError: If ``evidence`` is ``None``.
+    """
+    if evidence is None:
+        raise ValueError("evidence must not be None")
+    if evidence.get("portable_metadata") != "passed":
+        return False
+    if evidence.get("metadata_profile") != "portable-posix-v1":
+        return False
+    if evidence.get("same_filesystem") is not True:
+        return False
+
+    source_filesystem = _clean_text(
+        evidence.get("source_filesystem"), MAX_COMPONENT_LENGTH
+    )
+    restore_filesystem = _clean_text(
+        evidence.get("restore_filesystem"), MAX_COMPONENT_LENGTH
+    )
+    if source_filesystem is None or source_filesystem != restore_filesystem:
+        return False
+    if source_filesystem not in PORTABLE_RESTORE_FILESYSTEMS:
+        return False
+
+    source_device = evidence.get("source_filesystem_device")
+    restore_device = evidence.get("restore_filesystem_device")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in (source_device, restore_device)
+    ):
+        return False
+    if source_device != restore_device:
+        return False
+
+    entry_count = evidence.get("restored_entry_count")
+    ownership_count = evidence.get("ownership_entry_count")
+    permission_count = evidence.get("permission_entry_count")
+    acl_count = evidence.get("posix_acl_count")
+    xattr_count = evidence.get("portable_xattr_count")
+    hard_link_count = evidence.get("hard_link_group_count")
+    counts = (
+        entry_count,
+        ownership_count,
+        permission_count,
+        acl_count,
+        xattr_count,
+        hard_link_count,
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in counts
+    ):
+        return False
+    if entry_count <= 0 or ownership_count != entry_count:
+        return False
+    if permission_count <= 0 or permission_count > entry_count:
+        return False
+    if acl_count < 2 or xattr_count < 3 or hard_link_count < 1:
+        return False
+    return True
 
 
 def _date_component(record: Mapping[str, Any]) -> str | None:

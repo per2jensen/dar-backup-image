@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ MODULE_SPEC = importlib.util.spec_from_file_location(
 if MODULE_SPEC is None or MODULE_SPEC.loader is None:
     raise RuntimeError(f"Unable to load definition helper from {MODULE_PATH}")
 DEFINITION_MODULE = importlib.util.module_from_spec(MODULE_SPEC)
+sys.modules[MODULE_SPEC.name] = DEFINITION_MODULE
 MODULE_SPEC.loader.exec_module(DEFINITION_MODULE)
 
 
@@ -93,3 +95,93 @@ def test_resolve_slice_size_missing_definition_value_raises_value_error() -> Non
     """A slice option without its required value fails clearly."""
     with pytest.raises(ValueError, match="exactly one value"):
         DEFINITION_MODULE.resolve_slice_size("-R /data\n-s", "10G")
+
+
+def test_parse_selection_contract_literal_prunes_with_spaces_are_preserved() -> None:
+    """Quoted literal Steam paths are parsed without shell quote characters."""
+    definition = """\
+-R /data
+-am
+--cache-directory-tagging
+-g SteamLibrary
+-P 'SteamLibrary/steamapps/common/Metro Exodus'
+-P "SteamLibrary/steamapps/common/The Witcher 3"
+"""
+
+    selection = DEFINITION_MODULE.parse_selection_contract(definition)
+
+    assert selection.root == "/data"
+    assert selection.include_paths == ("SteamLibrary",)
+    assert selection.prune_paths == (
+        "SteamLibrary/steamapps/common/Metro Exodus",
+        "SteamLibrary/steamapps/common/The Witcher 3",
+    )
+    assert selection.ordered_masks is True
+    assert selection.cache_directory_tagging is True
+
+
+def test_parse_selection_contract_duplicate_literal_paths_are_deduplicated() -> None:
+    """Repeated identical include and prune paths do not duplicate measurement."""
+    definition = """\
+-R /data
+-g photos
+--go-into photos
+-P photos/private
+--prune photos/private
+"""
+
+    selection = DEFINITION_MODULE.parse_selection_contract(definition)
+
+    assert selection.include_paths == ("photos",)
+    assert selection.prune_paths == ("photos/private",)
+
+
+@pytest.mark.parametrize(
+    "definition,error_pattern",
+    (
+        ("-R /data\n-g SteamLibrary\n-P", "exactly one value"),
+        ("-R /data\n-g SteamLibrary\n-P /etc", "relative"),
+        ("-R /data\n-g SteamLibrary\n-P ../private", "must not escape"),
+        ("-R /data\n-g SteamLibrary\n-P 'games/*'", "wildcard"),
+        ("-R /data\n-gSteamLibrary", "unsupported selection"),
+        ("-R /data\n-g SteamLibrary\n-X '*.tmp'", "unsupported selection"),
+        ("-R /data\n-g SteamLibrary\n-ar", "unsupported selection"),
+        ("-R /data\n-g SteamLibrary\n-M", "unsupported selection"),
+        ("-R /data\n-P SteamLibrary/private", "at least one literal -g"),
+        ("-g SteamLibrary", "exactly one -R"),
+        ("-R /data\n-R /mnt\n-g SteamLibrary", "exactly one -R"),
+    ),
+)
+def test_parse_selection_contract_invalid_definition_raises_value_error(
+    definition: str, error_pattern: str
+) -> None:
+    """Malformed or unsupported selection definitions fail before traversal.
+
+    Args:
+        definition: Invalid constrained backup definition.
+        error_pattern: Expected diagnostic fragment.
+    """
+    with pytest.raises(ValueError, match=error_pattern):
+        DEFINITION_MODULE.parse_selection_contract(definition)
+
+
+def test_parse_selection_contract_ordered_reinclude_raises_value_error() -> None:
+    """A user -g after -P cannot introduce unsupported ordered re-inclusion."""
+    definition = """\
+-R /data
+-am
+-g SteamLibrary
+-P SteamLibrary/private
+-g SteamLibrary/private/keep
+"""
+
+    with pytest.raises(ValueError, match="ordered re-inclusion"):
+        DEFINITION_MODULE.parse_selection_contract(definition)
+
+
+def test_parse_selection_contract_am_after_path_rule_raises_value_error() -> None:
+    """Ordered mode must be declared before path rules to remain unambiguous."""
+    definition = "-R /data\n-g SteamLibrary\n-am"
+
+    with pytest.raises(ValueError, match="must appear before"):
+        DEFINITION_MODULE.parse_selection_contract(definition)

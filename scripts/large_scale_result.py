@@ -13,6 +13,8 @@ from typing import Any, Mapping, Sequence
 LOGGER = logging.getLogger(__name__)
 VALID_STATUSES = {"passed", "failed", "skipped", "not_run"}
 VALID_FULL_RESTORE_MODES = {"auto", "forced", "disabled"}
+VALID_RESTORE_METADATA_PROFILES = {"portable-posix-v1"}
+VALID_RESTORE_FILESYSTEMS = {"ext4", "btrfs", "zfs"}
 VALID_FULL_RESTORE_REASONS = {
     "not_evaluated",
     "source_within_threshold",
@@ -220,7 +222,7 @@ def _choice(
 
 
 def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
-    """Build one backward-compatible schema-v6 result record.
+    """Build one backward-compatible schema-v8 result record.
 
     Args:
         environment: Environment values exported by ``large_scale_test.sh``.
@@ -239,6 +241,11 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     exit_code = _required_int(environment, "LST_EXIT_CODE")
     advertise_requested = _required_bool(environment, "LST_ADVERTISE_REQUESTED")
     source_bytes = _optional_int(environment, "LST_SOURCE_BYTES")
+    pitr_execution = _status(environment, "LST_PITR_EXECUTION_STATUS")
+    pitr_structure = _status(environment, "LST_PITR_STRUCTURE_STATUS")
+    pitr_checksums = _status(environment, "LST_PITR_CHECKSUM_STATUS")
+    pitr_permissions = _status(environment, "LST_PITR_PERMISSION_STATUS")
+    pitr_overall = _status(environment, "LST_PITR_OVERALL_STATUS")
     full_restore_mode = _choice(
         environment, "LST_FULL_RESTORE_MODE", VALID_FULL_RESTORE_MODES
     )
@@ -255,11 +262,47 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         environment, "LST_FULL_RESTORE_EXECUTION_STATUS"
     )
     full_restore_content = _status(environment, "LST_FULL_RESTORE_CONTENT_STATUS")
+    full_restore_metadata = _status(environment, "LST_FULL_RESTORE_METADATA_STATUS")
     full_restore_overall = _status(environment, "LST_FULL_RESTORE_OVERALL_STATUS")
     full_restore_file_count = _optional_int(
         environment, "LST_FULL_RESTORE_FILE_COUNT"
     )
     full_restore_bytes = _optional_int(environment, "LST_FULL_RESTORE_BYTES")
+    full_restore_entry_count = _optional_int(
+        environment, "LST_FULL_RESTORE_ENTRY_COUNT"
+    )
+    full_restore_ownership_count = _optional_int(
+        environment, "LST_FULL_RESTORE_OWNERSHIP_COUNT"
+    )
+    full_restore_permission_count = _optional_int(
+        environment, "LST_FULL_RESTORE_PERMISSION_COUNT"
+    )
+    full_restore_posix_acl_count = _optional_int(
+        environment, "LST_FULL_RESTORE_POSIX_ACL_COUNT"
+    )
+    full_restore_xattr_count = _optional_int(
+        environment, "LST_FULL_RESTORE_XATTR_COUNT"
+    )
+    full_restore_hard_link_group_count = _optional_int(
+        environment, "LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT"
+    )
+    restore_metadata_profile = _choice(
+        environment,
+        "LST_RESTORE_METADATA_PROFILE",
+        VALID_RESTORE_METADATA_PROFILES,
+    )
+    source_filesystem_type = _choice(
+        environment, "LST_SOURCE_FILESYSTEM_TYPE", VALID_RESTORE_FILESYSTEMS
+    )
+    restore_filesystem_type = _choice(
+        environment, "LST_RESTORE_FILESYSTEM_TYPE", VALID_RESTORE_FILESYSTEMS
+    )
+    source_filesystem_device = _required_int(
+        environment, "LST_SOURCE_FILESYSTEM_DEVICE"
+    )
+    restore_filesystem_device = _required_int(
+        environment, "LST_RESTORE_FILESYSTEM_DEVICE"
+    )
     if full_restore_threshold_bytes <= 0:
         raise ValueError("LST_FULL_RESTORE_THRESHOLD_BYTES must be positive")
     valid_reasons_by_mode = {
@@ -284,16 +327,99 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         raise ValueError(
             f"Full restore decision {full_restore_reason!r} cannot be performed"
         )
-    if full_restore_overall == "passed" and (
-        full_restore_execution != "passed" or full_restore_content != "passed"
+    if source_filesystem_device < 0 or restore_filesystem_device < 0:
+        raise ValueError("Filesystem device numbers must not be negative")
+    if source_filesystem_device != restore_filesystem_device:
+        raise ValueError(
+            "Source and restore directories must be on the same filesystem device"
+        )
+    if source_filesystem_type != restore_filesystem_type:
+        raise ValueError(
+            "Source and restore filesystem types must match for same-filesystem evidence"
+        )
+    if full_restore_overall == "passed" and any(
+        status != "passed"
+        for status in (
+            full_restore_execution,
+            full_restore_content,
+            full_restore_metadata,
+        )
     ):
         raise ValueError(
-            "A passed full restore requires passed execution and content comparison"
+            "A passed full restore requires passed execution, content comparison, "
+            "and portable metadata comparison"
         )
-    if full_restore_file_count is not None and full_restore_file_count < 0:
-        raise ValueError("LST_FULL_RESTORE_FILE_COUNT must not be negative")
-    if full_restore_bytes is not None and full_restore_bytes < 0:
-        raise ValueError("LST_FULL_RESTORE_BYTES must not be negative")
+    full_restore_counts = {
+        "LST_FULL_RESTORE_FILE_COUNT": full_restore_file_count,
+        "LST_FULL_RESTORE_BYTES": full_restore_bytes,
+        "LST_FULL_RESTORE_ENTRY_COUNT": full_restore_entry_count,
+        "LST_FULL_RESTORE_OWNERSHIP_COUNT": full_restore_ownership_count,
+        "LST_FULL_RESTORE_PERMISSION_COUNT": full_restore_permission_count,
+        "LST_FULL_RESTORE_POSIX_ACL_COUNT": full_restore_posix_acl_count,
+        "LST_FULL_RESTORE_XATTR_COUNT": full_restore_xattr_count,
+        "LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT": (
+            full_restore_hard_link_group_count
+        ),
+    }
+    for key, value in full_restore_counts.items():
+        if value is not None and value < 0:
+            raise ValueError(f"{key} must not be negative")
+    if full_restore_overall == "passed":
+        missing_counts = [
+            key for key, value in full_restore_counts.items() if value is None
+        ]
+        if missing_counts:
+            raise ValueError(
+                "A passed full restore requires all portable metadata counts: "
+                + ", ".join(missing_counts)
+            )
+        if full_restore_entry_count != full_restore_ownership_count:
+            raise ValueError(
+                "A passed full restore must compare numeric ownership for every entry"
+            )
+        if (
+            full_restore_entry_count is None
+            or full_restore_file_count is None
+            or full_restore_entry_count < full_restore_file_count
+        ):
+            raise ValueError(
+                "A passed full restore cannot contain more regular files than entries"
+            )
+        if (
+            full_restore_permission_count is None
+            or full_restore_permission_count > full_restore_entry_count
+        ):
+            raise ValueError(
+                "A passed full restore cannot compare more permission modes than entries"
+            )
+        if full_restore_posix_acl_count is None or full_restore_posix_acl_count < 2:
+            raise ValueError(
+                "A passed full restore requires both access and default POSIX ACL fixtures"
+            )
+        if full_restore_xattr_count is None or full_restore_xattr_count < 3:
+            raise ValueError(
+                "A passed full restore requires all portable extended-attribute fixtures"
+            )
+        if (
+            full_restore_hard_link_group_count is None
+            or full_restore_hard_link_group_count < 1
+        ):
+            raise ValueError(
+                "A passed full restore requires a verified hard-link fixture group"
+            )
+    if pitr_overall == "passed" and any(
+        status != "passed"
+        for status in (
+            pitr_execution,
+            pitr_structure,
+            pitr_checksums,
+            pitr_permissions,
+        )
+    ):
+        raise ValueError(
+            "A passed PITR restore requires passed execution, structure, "
+            "content checksums, and permission modes"
+        )
     aborted_phase = None if completed else _required(environment, "LST_CURRENT_PHASE")
     passed = completed and exit_code == 0 and failures == 0
     advertise = (
@@ -304,7 +430,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 6,
+        "schema_version": 8,
         "datestamp": _required(environment, "LST_DATESTAMP"),
         "date": _required(environment, "LST_DATE"),
         # Stable publication envelope; all other engineering fields may evolve.
@@ -386,10 +512,11 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
                 "incr": _status(environment, "LST_INCR_CONTENTS_STATUS"),
             },
             "pitr_restore": {
-                "execution": _status(environment, "LST_PITR_EXECUTION_STATUS"),
-                "structure": _status(environment, "LST_PITR_STRUCTURE_STATUS"),
-                "content_checksums": _status(environment, "LST_PITR_CHECKSUM_STATUS"),
-                "overall": _status(environment, "LST_PITR_OVERALL_STATUS"),
+                "execution": pitr_execution,
+                "structure": pitr_structure,
+                "content_checksums": pitr_checksums,
+                "permission_modes": pitr_permissions,
+                "overall": pitr_overall,
             },
             "full_restore": {
                 "mode": full_restore_mode,
@@ -399,9 +526,22 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
                 "decision_reason": full_restore_reason,
                 "execution": full_restore_execution,
                 "content_comparison": full_restore_content,
+                "portable_metadata": full_restore_metadata,
                 "overall": full_restore_overall,
                 "restored_file_count": full_restore_file_count,
                 "restored_bytes": full_restore_bytes,
+                "restored_entry_count": full_restore_entry_count,
+                "ownership_entry_count": full_restore_ownership_count,
+                "permission_entry_count": full_restore_permission_count,
+                "posix_acl_count": full_restore_posix_acl_count,
+                "portable_xattr_count": full_restore_xattr_count,
+                "hard_link_group_count": full_restore_hard_link_group_count,
+                "metadata_profile": restore_metadata_profile,
+                "source_filesystem": source_filesystem_type,
+                "restore_filesystem": restore_filesystem_type,
+                "source_filesystem_device": source_filesystem_device,
+                "restore_filesystem_device": restore_filesystem_device,
+                "same_filesystem": True,
             },
         },
         # Schema-v4 reproducible random corruption and per-slice PAR2 metrics.

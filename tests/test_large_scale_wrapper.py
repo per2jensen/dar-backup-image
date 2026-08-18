@@ -195,3 +195,58 @@ def test_wrapper_unitless_cli_slice_fails_before_build_or_harness(
     assert "slice size '10'" in result.stderr
     assert "explicit DAR unit" in result.stderr
     assert "Building" not in result.stdout
+
+
+def test_wrapper_literal_prune_definition_reaches_harness(tmp_path: Path) -> None:
+    """A quoted literal prune within an include satisfies the narrow contract.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    wrapper = _isolated_wrapper(tmp_path)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BUILD_IMAGE": "false",
+            "BITROT": "false",
+            "BASE_DIR": "/data/tmp/test",
+            "DEFINITION": (
+                "-R /data\n-am\n-g SteamLibrary\n"
+                "-P 'SteamLibrary/Metro Exodus'"
+            ),
+        }
+    )
+
+    result = subprocess.run(
+        [str(wrapper)], env=environment, capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "-P 'SteamLibrary/Metro Exodus'" in result.stdout
+
+
+def test_wrapper_unsupported_wildcard_prune_fails_before_build(
+    tmp_path: Path,
+) -> None:
+    """A wildcard prune is rejected before an expensive image build.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    wrapper = _isolated_wrapper(tmp_path)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BUILD_IMAGE": "true",
+            "BASE_DIR": "/data/tmp/test",
+            "DEFINITION": "-R /data\n-g SteamLibrary\n-P 'SteamLibrary/*'",
+        }
+    )
+
+    result = subprocess.run(
+        [str(wrapper)], env=environment, capture_output=True, text=True
+    )
+
+    assert result.returncode != 0
+    assert "wildcard" in result.stderr
+    assert "Building" not in result.stdout

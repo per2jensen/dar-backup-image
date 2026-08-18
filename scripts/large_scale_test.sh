@@ -44,7 +44,19 @@ FULL_RESTORE_PERFORMED=0                            # Set only immediately befor
 FULL_RESTORE_DECISION_REASON="not_evaluated"        # Stable machine-readable explanation for selection or skip
 FULL_RESTORE_FILE_COUNT=""                          # Regular-file paths checksum-compared by the complete restore
 FULL_RESTORE_BYTES=""                               # Apparent restored bytes checksum-compared by the complete restore
-SCRIPT_VERSION="18"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+FULL_RESTORE_ENTRY_COUNT=""                         # Restored filesystem entries covered by the complete comparison
+FULL_RESTORE_OWNERSHIP_COUNT=""                     # Numeric UID/GID pairs compared by the complete restore
+FULL_RESTORE_PERMISSION_COUNT=""                    # Non-symlink POSIX modes compared by the complete restore
+FULL_RESTORE_POSIX_ACL_COUNT=""                     # POSIX ACL attributes compared by the complete restore
+FULL_RESTORE_XATTR_COUNT=""                         # Portable user.* attributes compared by the complete restore
+FULL_RESTORE_HARD_LINK_GROUP_COUNT=""               # Multi-path hard-link groups compared by the complete restore
+RESTORE_METADATA_PROFILE="portable-posix-v1"        # Common metadata contract for ext4, Btrfs, and Linux ZFS
+SOURCE_FILESYSTEM_TYPE=""                           # Host filesystem type containing MOUNT_ROOT
+RESTORE_FILESYSTEM_TYPE=""                          # Host filesystem type containing FULL_RESTORE_DIR
+SOURCE_FILESYSTEM_DEVICE=""                         # Host st_dev number for MOUNT_ROOT
+RESTORE_FILESYSTEM_DEVICE=""                        # Host st_dev number for FULL_RESTORE_DIR
+OWNERSHIP_FIXTURE_GID=""                            # Supplemental GID used when available, otherwise the invoking user's primary GID
+SCRIPT_VERSION="22"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
@@ -62,8 +74,8 @@ PAR2_VERSION=""                                     # Set by preflight() from `p
 PYTHON_VERSION=""                                   # Set by preflight() from `python3 --version`, run inside the image
 OS_DESC=""                                           # Set by preflight() from `lsb_release -d` (describes the Docker host, not the image)
 KERNEL=""                                           # Set by preflight() from `uname -r` (the Docker host's kernel)
-SOURCE_FILE_COUNT=""                                # Regular-file count across effective -g source paths, captured before FULL
-SOURCE_BYTES=""                                     # Apparent regular-file bytes across effective -g source paths, captured before FULL
+SOURCE_FILE_COUNT=""                                # Regular-file count after supported -P/cache pruning, captured before FULL
+SOURCE_BYTES=""                                     # Apparent regular-file bytes after supported -P/cache pruning, captured before FULL
 BACKUP_DEFINITION_SHA256=""                         # Hash of the effective generated backup definition, including injected primer and slice options
 
 # Explicit lifecycle state is serialized by the EXIT trap. Values use the
@@ -80,8 +92,9 @@ FULL_PAR2_VERIFY_STATUS="not_run"; DIFF_PAR2_VERIFY_STATUS="not_run"; INCR_PAR2_
 FULL_BITROT_STATUS="not_run"; DIFF_BITROT_STATUS="not_run"; INCR_BITROT_STATUS="not_run"
 DIFF_CONTENTS_STATUS="not_run"; INCR_CONTENTS_STATUS="not_run"
 PITR_EXECUTION_STATUS="not_run"; PITR_STRUCTURE_STATUS="not_run"
-PITR_CHECKSUM_STATUS="not_run"; PITR_OVERALL_STATUS="not_run"
+PITR_CHECKSUM_STATUS="not_run"; PITR_PERMISSION_STATUS="not_run"; PITR_OVERALL_STATUS="not_run"
 FULL_RESTORE_EXECUTION_STATUS="not_run"; FULL_RESTORE_CONTENT_STATUS="not_run"
+FULL_RESTORE_METADATA_STATUS="not_run"
 FULL_RESTORE_OVERALL_STATUS="not_run"
 
 # ── colours ─────────────────────────────────────────────────────────────────
@@ -163,6 +176,7 @@ if [[ "$FULL_RESTORE_MODE" == "disabled" ]]; then
     FULL_RESTORE_DECISION_REASON="disabled_by_user"
     FULL_RESTORE_EXECUTION_STATUS="skipped"
     FULL_RESTORE_CONTENT_STATUS="skipped"
+    FULL_RESTORE_METADATA_STATUS="skipped"
     FULL_RESTORE_OVERALL_STATUS="skipped"
 fi
 
@@ -176,6 +190,9 @@ case "$BASE_DIR" in
     *) echo "ERROR: --base ('$BASE_DIR') must be at least two directories deep (e.g. '/data/tmp/...') so it has a mountable parent"; exit 1 ;;
 esac
 
+# Validate the deliberately narrow selection contract before Docker inspection,
+# directory creation, or source traversal. The helper also returns the single
+# quote-aware -R value, avoiding a second partial definition parser here.
 # The definition's -R must match MOUNT_ROOT (the host directory actually
 # identity-mounted into every container, above) so the container-side -R
 # resolves against real, visible files. dar-backup's
@@ -185,28 +202,23 @@ esac
 # other root; see v2/BUG.txt in the dar-backup repo). A definition using a
 # root that doesn't match what's actually mounted would still break restore
 # detection, just against the wrong assumed root instead of a hardcoded one.
-DEFINITION_ROOT=$(python3 -c "
-import re
-import sys
-
-for line in sys.argv[1].splitlines():
-    match = re.match(r'^\s*-R\s+(.*)', line.strip())
-    if not match:
-        continue
-    value = match.group(1).strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('\"', \"'\", '\`'):
-        value = value[1:-1]
-    print(value)
-    break
-" "$DEFINITION_CONTENT")
+if ! DEFINITION_ROOT=$(python3 "$(dirname "${BASH_SOURCE[0]}")/large_scale_definition.py" \
+        --definition "$DEFINITION_CONTENT" \
+        --selection-root); then
+    exit 1
+fi
 [[ "$DEFINITION_ROOT" != "$MOUNT_ROOT" ]] && { echo "ERROR: --definition's '-R' must match the mount root '${MOUNT_ROOT}' (derived from --base '${BASE_DIR}'), got '${DEFINITION_ROOT:-<none>}'."; exit 1; }
 
 # ── preflight checks ──────────────────────────────────────────────────────────
 preflight() {
     local errors=0
-    if ! command -v docker &>/dev/null; then
-        echo "ERROR: docker not found"; errors=$((errors+1))
-    fi
+    local required_command
+    for required_command in docker findmnt setfacl setfattr stat; do
+        if ! command -v "$required_command" &>/dev/null; then
+            echo "ERROR: ${required_command} not found"
+            errors=$((errors+1))
+        fi
+    done
     if [[ $errors -eq 0 ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
         echo "ERROR: image '${IMAGE}' not found locally — build it first (e.g. 'make dev')"
         errors=$((errors+1))
@@ -253,9 +265,9 @@ if [[ $DO_BITROT -eq 1 ]]; then
 fi
 
 # ── disk-space preflight ──────────────────────────────────────────────────────
-# Estimates the real source data size from the backup definition's -R/-g paths and
-# fails fast if BASE_DIR's filesystem doesn't have MIN_FREE_MULTIPLIER times that much
-# free — a multi-hour run has no business discovering "disk full" three phases in.
+# Measures the constrained definition's exact literal inclusion-minus-pruning
+# selection and fails fast if BASE_DIR's filesystem doesn't have
+# MIN_FREE_MULTIPLIER times that much free.
 decide_full_restore() {
     if [[ "$FULL_RESTORE_MODE" == "disabled" ]]; then
         info "Complete restore disabled by user."
@@ -277,111 +289,67 @@ decide_full_restore() {
     FULL_RESTORE_DECISION_REASON="source_exceeds_threshold"
     FULL_RESTORE_EXECUTION_STATUS="skipped"
     FULL_RESTORE_CONTENT_STATUS="skipped"
+    FULL_RESTORE_METADATA_STATUS="skipped"
     FULL_RESTORE_OVERALL_STATUS="skipped"
     info "Complete restore skipped automatically: ${SOURCE_BYTES} > ${FULL_RESTORE_THRESHOLD_BYTES} byte(s)."
 }
 
 check_disk_space() {
-    local def_file="${BACKUP_D_DIR}/${DEFINITION_NAME}"
-    # -R is already validated to equal MOUNT_ROOT above, so it's used directly
-    # rather than re-parsed here (the previous `awk '{print $2}'` re-parse
-    # silently truncated any -R/-g value containing a space to its first
-    # word — confirmed broken against a real quoted -R/-g).
-    local root_path="$MOUNT_ROOT"
-
-    local total_bytes=0
-    # -g values may also be quoted (same reference-file convention as -R); a
-    # small quote-aware parser mirrors the -R parsing above rather than
-    # repeating the naive awk approach.
-    local glob_paths
-    glob_paths=$(DEF_FILE="$def_file" python3 -c "
-import os
-import re
-
-with open(os.environ['DEF_FILE']) as f:
-    lines = f.readlines()
-for line in lines:
-    match = re.match(r'^\s*-g\s+(.*)', line.strip())
-    if not match:
-        continue
-    value = match.group(1).strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('\"', \"'\", '\`'):
-        value = value[1:-1]
-    print(value)
-")
-    local -a source_paths=()
-    if [[ -z "$glob_paths" ]]; then
-        source_paths+=("$root_path")
-    else
-        while IFS= read -r g; do
-            [[ -z "$g" ]] && continue
-            local full_path="${root_path%/}/${g}"
-            if [[ ! -e "$full_path" ]]; then
-                echo "ERROR: source path from backup definition does not exist: ${full_path}" >&2
-                return 1
-            fi
-            source_paths+=("$full_path")
-        done <<< "$glob_paths"
+    local primer_relative="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
+    local source_measurement_json
+    if ! source_measurement_json=$(python3 "${REPO_DIR}/scripts/large_scale_source_measurement.py" \
+            --definition "$DEFINITION_CONTENT" \
+            --root "$MOUNT_ROOT" \
+            --required-include "$primer_relative"); then
+        echo "ERROR: failed to measure the selected large-scale source" >&2
+        return 1
     fi
 
-    if [[ ${#source_paths[@]} -gt 0 ]]; then
-        # Measure regular files by unique absolute path so overlapping -g entries
-        # are not counted twice. Symlink targets are deliberately not followed.
-        local source_measurement
-        if ! source_measurement=$(python3 - "${source_paths[@]}" << 'PYEOF'
-import os
-import stat
+    local source_measurement
+    if ! source_measurement=$(python3 -c '
+import json
 import sys
 
-def raise_walk_error(error: OSError) -> None:
-    """Propagate an os.walk error instead of silently skipping source data.
+measurement = json.loads(sys.argv[1])
+keys = (
+    "selected_file_count",
+    "selected_bytes",
+    "pruned_file_count",
+    "pruned_bytes",
+    "candidate_file_count",
+    "candidate_bytes",
+    "prune_path_count",
+    "cache_tagged_directory_count",
+)
+print("\t".join(str(measurement[key]) for key in keys))
+' "$source_measurement_json"); then
+        echo "ERROR: failed to decode large-scale source measurement" >&2
+        return 1
+    fi
 
-    Args:
-        error: Filesystem error raised while walking a source directory.
-
-    Raises:
-        OSError: Always, using the original walk error.
-    """
-    raise error
-
-seen_paths = set()
-file_count = 0
-total_bytes = 0
-
-for source_path in sys.argv[1:]:
-    if os.path.isfile(source_path):
-        candidates = [source_path]
-    else:
-        candidates = (
-            os.path.join(directory, filename)
-            for directory, _, filenames in os.walk(
-                source_path, followlinks=False, onerror=raise_walk_error
-            )
-            for filename in filenames
-        )
-    for candidate in candidates:
-        absolute_path = os.path.abspath(candidate)
-        if absolute_path in seen_paths:
-            continue
-        seen_paths.add(absolute_path)
-        file_stat = os.stat(absolute_path, follow_symlinks=False)
-        if stat.S_ISREG(file_stat.st_mode):
-            file_count += 1
-            total_bytes += file_stat.st_size
-
-print(file_count, total_bytes)
-PYEOF
-        ); then
-            echo "ERROR: failed to measure source files for release evidence" >&2
-            return 1
-        fi
-        read -r SOURCE_FILE_COUNT SOURCE_BYTES <<< "$source_measurement"
-        if [[ ! "$SOURCE_FILE_COUNT" =~ ^[0-9]+$ || ! "$SOURCE_BYTES" =~ ^[0-9]+$ ]]; then
+    local pruned_file_count pruned_bytes candidate_file_count candidate_bytes
+    local prune_path_count cache_tagged_directory_count
+    IFS=$'\t' read -r SOURCE_FILE_COUNT SOURCE_BYTES \
+        pruned_file_count pruned_bytes candidate_file_count candidate_bytes \
+        prune_path_count cache_tagged_directory_count <<< "$source_measurement"
+    local measurement_value
+    for measurement_value in \
+        "$SOURCE_FILE_COUNT" "$SOURCE_BYTES" "$pruned_file_count" "$pruned_bytes" \
+        "$candidate_file_count" "$candidate_bytes" "$prune_path_count" \
+        "$cache_tagged_directory_count"; do
+        if [[ ! "$measurement_value" =~ ^[0-9]+$ ]]; then
             echo "ERROR: invalid source measurement: '${source_measurement}'" >&2
             return 1
         fi
-        total_bytes="${SOURCE_BYTES:-0}"
-    fi
+    done
+
+    local total_bytes="$SOURCE_BYTES"
+    local selected_gib pruned_gib candidate_gib
+    selected_gib=$(awk -v b="$SOURCE_BYTES" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
+    pruned_gib=$(awk -v b="$pruned_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
+    candidate_gib=$(awk -v b="$candidate_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
+    info "Source selection: ${SOURCE_FILE_COUNT} file(s), ~${selected_gib} GiB selected from ${candidate_file_count} candidate file(s), ~${candidate_gib} GiB."
+    info "Source pruning: ${pruned_file_count} file(s), ~${pruned_gib} GiB excluded by ${prune_path_count} literal -P path(s) and ${cache_tagged_directory_count} cache-tagged subtree(s)."
 
     decide_full_restore
 
@@ -432,11 +400,44 @@ SUMMARY="${RESULTS_DIR}/summary-${DATESTAMP}.txt"   # Full tee'd transcript of t
 CONFIG_FILE="${RUN_DIR}/dar-backup.conf"            # Generated dar-backup.conf for this run — gone after the run unless --keep
 DARRC="${RUN_DIR}/.darrc"                           # Copied/generated .darrc for this run — gone after the run unless --keep
 RSS_LOGFILE="${RUN_DIR}/rss.log"                    # Raw per-process RSS samples written by start_rss_monitor — gone after the run unless --keep
-CID_FILE="${RUN_DIR}/current-container.cid"         # Written by docker_run_backup/docker_run_tool for each invocation; scopes start_rss_monitor to this run's own container instead of a host-wide process scan
+CID_FILE="${RUN_DIR}/current-container.cid"         # Written by each Docker invocation helper; scopes start_rss_monitor to this run's own container instead of a host-wide process scan
 BITROT_EVIDENCE_FILE="${RUN_DIR}/bitrot-evidence.json" # Incrementally persisted evidence included in the JSONL record by the EXIT trap
 DIFF_PRIMER_DIR="${BASE_DIR}/diff-primer"           # NOT under RUN_DIR — reused/reset by create_diff_primer() at the start of every run
+PERMISSION_FIXTURE_DIR="${DIFF_PRIMER_DIR}/permission-fixtures" # Stable entries with varied POSIX modes for mandatory restore verification
 
 mkdir -p "$BACKUP_DIR" "$PAR2_DIR" "$RESTORE_DIR" "$FULL_RESTORE_DIR" "$BACKUP_D_DIR" "$RESULTS_DIR" "$DIFF_PRIMER_DIR"
+
+# The portable metadata profile deliberately compares canonical same-filesystem
+# representations. Reject a separately mounted restore directory rather than
+# silently presenting a cross-filesystem run as equivalent evidence.
+SOURCE_FILESYSTEM_DEVICE=$(stat -c %d -- "$MOUNT_ROOT")
+RESTORE_FILESYSTEM_DEVICE=$(stat -c %d -- "$FULL_RESTORE_DIR")
+SOURCE_FILESYSTEM_TYPE=$(findmnt -n -o FSTYPE --target "$MOUNT_ROOT")
+RESTORE_FILESYSTEM_TYPE=$(findmnt -n -o FSTYPE --target "$FULL_RESTORE_DIR")
+if [[ "$SOURCE_FILESYSTEM_DEVICE" != "$RESTORE_FILESYSTEM_DEVICE" ]]; then
+    echo "ERROR: source root '${MOUNT_ROOT}' and restore directory '${FULL_RESTORE_DIR}' must be on the same filesystem (source st_dev=${SOURCE_FILESYSTEM_DEVICE}, restore st_dev=${RESTORE_FILESYSTEM_DEVICE})." >&2
+    exit 1
+fi
+if [[ -z "$SOURCE_FILESYSTEM_TYPE" || -z "$RESTORE_FILESYSTEM_TYPE" ]]; then
+    echo "ERROR: unable to identify source and restore filesystem types." >&2
+    exit 1
+fi
+if [[ "$SOURCE_FILESYSTEM_TYPE" != "$RESTORE_FILESYSTEM_TYPE" ]]; then
+    echo "ERROR: source filesystem '${SOURCE_FILESYSTEM_TYPE}' and restore filesystem '${RESTORE_FILESYSTEM_TYPE}' must match." >&2
+    exit 1
+fi
+case "$SOURCE_FILESYSTEM_TYPE" in
+    ext4|btrfs|zfs) ;;
+    *)
+        echo "ERROR: filesystem '${SOURCE_FILESYSTEM_TYPE}' is outside the portable-posix-v1 contract; supported filesystems are ext4, btrfs, and zfs." >&2
+        exit 1
+        ;;
+esac
+
+OWNERSHIP_FIXTURE_GID=$(id -G | tr ' ' '\n' | grep -vx "$(id -g)" | head -n 1 || true)
+if [[ -z "$OWNERSHIP_FIXTURE_GID" ]]; then
+    OWNERSHIP_FIXTURE_GID=$(id -g)
+fi
 
 # ── variable dump ──────────────────────────────────────────────────────────
 # Explicit list rather than a blanket `set`/`env` dump, so this stays a readable
@@ -450,13 +451,15 @@ RUN_VARIABLES=(
     ADVERTISE_REQUESTED TEST_NAME ADVERTISE_CLASS
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
     FULL_RESTORE_MODE FULL_RESTORE_THRESHOLD_GIB FULL_RESTORE_THRESHOLD_BYTES
+    RESTORE_METADATA_PROFILE SOURCE_FILESYSTEM_TYPE RESTORE_FILESYSTEM_TYPE
+    SOURCE_FILESYSTEM_DEVICE RESTORE_FILESYSTEM_DEVICE OWNERSHIP_FIXTURE_GID
     DAR_BACKUP_VERSION GIT_COMMIT HARNESS_GIT_COMMIT HARNESS_GIT_DIRTY REPO_DIR
     IMAGE_ID IMAGE_REPO_DIGEST IMAGE_REVISION IMAGE_VERSION DAR_VERSION PAR2_VERSION
     PYTHON_VERSION OS_DESC KERNEL
     RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR FULL_RESTORE_DIR BACKUP_D_DIR
     RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE CID_FILE
     BITROT_EVIDENCE_FILE
-    DIFF_PRIMER_DIR
+    DIFF_PRIMER_DIR PERMISSION_FIXTURE_DIR
 )
 
 print_run_variables() {
@@ -474,7 +477,7 @@ print_run_variables() {
 # bind mount on top of it; since both are identity mounts (same path on host
 # and in-container), CONFIG_FILE's paths and the definition's -R (validated to
 # equal MOUNT_ROOT above) need no translation.
-# Both helpers below write their container's ID to CID_FILE via --cidfile so
+# The invocation helpers write their container's ID to CID_FILE via --cidfile so
 # start_rss_monitor() can scope its sampling to *this run's own* container
 # (via `docker top`) instead of a host-wide `ps` scan by command name — this
 # machine also runs the user's own scheduled dar-backup jobs, and a
@@ -499,10 +502,19 @@ docker_run_backup() {
 # uses for these tools. Only needs BASE_DIR; none of these operate on MOUNT_ROOT.
 docker_run_tool() {
     local tool_entrypoint="$1"; shift
+    local primary_gid
+    local supplemental_gid
+    local -a supplemental_group_args=()
+    primary_gid=$(id -g)
+    while IFS= read -r supplemental_gid; do
+        [[ -z "$supplemental_gid" || "$supplemental_gid" == "$primary_gid" ]] && continue
+        supplemental_group_args+=(--group-add "$supplemental_gid")
+    done < <(id -G | tr ' ' '\n')
     rm -f "$CID_FILE"
     docker run --rm \
         --cidfile "$CID_FILE" \
         --user "$(id -u):$(id -g)" \
+        "${supplemental_group_args[@]}" \
         -e HOME=/tmp \
         --entrypoint "$tool_entrypoint" \
         -v "${BASE_DIR}":"${BASE_DIR}" \
@@ -510,6 +522,84 @@ docker_run_tool() {
     local rc=$?
     rm -f "$CID_FILE"
     return $rc
+}
+
+# Ownership-preserving extraction is the only large-scale-test operation that
+# runs as container root. BASE_DIR remains read-only, with narrowly scoped
+# read-write overlays for the validated restore target and persistent logs.
+docker_run_restore_tool() {
+    local restore_target="$1"
+    local tool_entrypoint="$2"
+    shift 2
+
+    case "$restore_target" in
+        "$RESTORE_DIR"|"$FULL_RESTORE_DIR") ;;
+        *)
+            echo "ERROR: refusing root container access to unrecognized restore target '${restore_target}'." >&2
+            return 2
+            ;;
+    esac
+    case "$restore_target" in
+        "$RUN_DIR"/*) ;;
+        *)
+            echo "ERROR: restore target '${restore_target}' is outside run directory '${RUN_DIR}'." >&2
+            return 2
+            ;;
+    esac
+    if [[ ! -d "$restore_target" || -L "$restore_target" ]]; then
+        echo "ERROR: restore target must be an existing non-symlink directory: '${restore_target}'." >&2
+        return 2
+    fi
+    case "$tool_entrypoint" in
+        /opt/venv/bin/manager|/bin/chown|/usr/bin/find) ;;
+        *)
+            echo "ERROR: root restore helper does not allow entrypoint '${tool_entrypoint}'." >&2
+            return 2
+            ;;
+    esac
+
+    rm -f "$CID_FILE"
+    local rc=0
+    docker run --rm \
+        --cidfile "$CID_FILE" \
+        --user 0:0 \
+        -e HOME=/tmp \
+        --entrypoint "$tool_entrypoint" \
+        -v "${BASE_DIR}":"${BASE_DIR}":ro \
+        -v "${RESULTS_DIR}":"${RESULTS_DIR}" \
+        -v "${restore_target}":"${restore_target}" \
+        "$IMAGE" "$@" || rc=$?
+    rm -f "$CID_FILE"
+    return "$rc"
+}
+
+clear_restore_target_as_root() {
+    local restore_target="$1"
+
+    if [[ ! -e "$restore_target" ]]; then
+        return 0
+    fi
+    if [[ ! -d "$restore_target" || -L "$restore_target" ]]; then
+        echo "ERROR: refusing to clear invalid restore target '${restore_target}'." >&2
+        return 2
+    fi
+    docker_run_restore_tool "$restore_target" /usr/bin/find \
+        "$restore_target" -mindepth 1 -delete
+}
+
+prepare_root_restore_target() {
+    local restore_target="$1"
+
+    if ! clear_restore_target_as_root "$restore_target"; then
+        echo "ERROR: unable to clear restore target '${restore_target}' as container root." >&2
+        return 1
+    fi
+    rm -rf "$restore_target"
+    mkdir -p "$restore_target"
+    if ! docker_run_restore_tool "$restore_target" /bin/chown 0:0 "$restore_target"; then
+        echo "ERROR: unable to establish root-owned restore target '${restore_target}'." >&2
+        return 1
+    fi
 }
 
 # Tee all output to the summary file from this point forward so every run
@@ -566,6 +656,7 @@ NO_FILES_VERIFICATION = 5
 COMMAND_TIMEOUT_SECS = ${TIMEOUT}
 COMMAND_CAPTURE_MAX_BYTES = 102400
 METRICS_DB_PATH = ${METRICS_DB}
+RESTORE_OWNERSHIP = yes
 RESTORETEST_EXCLUDE_PREFIXES = .cache/, .local/share/Trash/
 RESTORETEST_EXCLUDE_SUFFIXES = .log, .tmp, .lock
 [DIRECTORIES]
@@ -600,15 +691,54 @@ create_diff_primer() {
     for i in $(seq 1 5); do dd if=/dev/urandom of="${DIFF_PRIMER_DIR}/large_${i}.NEF" bs=1M count=55 2>/dev/null; done
     echo "Original static content stream for hard link verification tracking." > "${DIFF_PRIMER_DIR}/link_original.txt"
     ln "${DIFF_PRIMER_DIR}/link_original.txt" "${DIFF_PRIMER_DIR}/link_target1.txt"
-    # Count non-link files; used as the expected-modified threshold in verify_diff_contents.
-    PRIMER_NON_LINK_COUNT=$(find "${DIFF_PRIMER_DIR}" -type f ! -name "link_*" | wc -l)
+    mkdir -p "${PERMISSION_FIXTURE_DIR}/restricted"
+    printf '%s\n' "Private restore-permission fixture." > "${PERMISSION_FIXTURE_DIR}/private.txt"
+    printf '%s\n' "Read-only restore-permission fixture." > "${PERMISSION_FIXTURE_DIR}/read-only.txt"
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${PERMISSION_FIXTURE_DIR}/executable.sh"
+    printf '%s\n' "Numeric UID/GID restore fixture." > "${PERMISSION_FIXTURE_DIR}/ownership.txt"
+    printf '%s\n' "POSIX access ACL restore fixture." > "${PERMISSION_FIXTURE_DIR}/access-acl.txt"
+    mkdir -p "${PERMISSION_FIXTURE_DIR}/default-acl"
+    printf '%s\n' "Portable extended-attribute restore fixture." > "${PERMISSION_FIXTURE_DIR}/xattrs.bin"
+    chmod 0755 "${PERMISSION_FIXTURE_DIR}"
+    chmod 0750 "${PERMISSION_FIXTURE_DIR}/restricted"
+    chmod 0600 "${PERMISSION_FIXTURE_DIR}/private.txt"
+    chmod 0440 "${PERMISSION_FIXTURE_DIR}/read-only.txt"
+    chmod 0755 "${PERMISSION_FIXTURE_DIR}/executable.sh"
+    if ! chgrp "$OWNERSHIP_FIXTURE_GID" "${PERMISSION_FIXTURE_DIR}/ownership.txt"; then
+        echo "ERROR: unable to create the numeric GID restore fixture." >&2
+        return 1
+    fi
+    if ! setfacl -m "u:$(id -u):r--,g:${OWNERSHIP_FIXTURE_GID}:r--" \
+            "${PERMISSION_FIXTURE_DIR}/access-acl.txt"; then
+        echo "ERROR: the source filesystem does not support the required POSIX access ACL fixture." >&2
+        return 1
+    fi
+    if ! setfacl -m "d:u:$(id -u):r-x,d:g:${OWNERSHIP_FIXTURE_GID}:r-x" \
+            "${PERMISSION_FIXTURE_DIR}/default-acl"; then
+        echo "ERROR: the source filesystem does not support the required POSIX default ACL fixture." >&2
+        return 1
+    fi
+    if ! setfattr -n user.dar-backup.profile -v "$RESTORE_METADATA_PROFILE" \
+            "${PERMISSION_FIXTURE_DIR}/xattrs.bin" \
+        || ! setfattr -n user.dar-backup.empty -v "" \
+            "${PERMISSION_FIXTURE_DIR}/xattrs.bin" \
+        || ! setfattr -n user.dar-backup.binary -v 0x00ff1020 \
+            "${PERMISSION_FIXTURE_DIR}/xattrs.bin"; then
+        echo "ERROR: the source filesystem does not support the required user.* extended-attribute fixtures." >&2
+        return 1
+    fi
+    # Portable metadata fixtures remain unchanged across DIFF/INCR. Exclude them from
+    # the expected modified-file count as well as the mutation loops below.
+    PRIMER_NON_LINK_COUNT=$(find "${DIFF_PRIMER_DIR}" -type f \
+        ! -name "link_*" ! -path "${PERMISSION_FIXTURE_DIR}/*" | wc -l)
 }
 
 update_diff_primer() {
     info "Updating diff-primer data..."
-    find "$DIFF_PRIMER_DIR" -type f | grep -v "link_" | while read -r f; do
+    while IFS= read -r -d '' f; do
         dd if=/dev/urandom of="$f" bs="$(stat -c%s "$f")" count=1 2>/dev/null
-    done || true
+    done < <(find "$DIFF_PRIMER_DIR" -type f \
+        ! -name "link_*" ! -path "${PERMISSION_FIXTURE_DIR}/*" -print0)
     rm "${DIFF_PRIMER_DIR}/link_original.txt"
     echo "Appended text block mutating target1 inode before execution of DIFF backup." >> "${DIFF_PRIMER_DIR}/link_target1.txt"
     ln "${DIFF_PRIMER_DIR}/link_target1.txt" "${DIFF_PRIMER_DIR}/link_target2.txt"
@@ -642,9 +772,10 @@ verify_diff_contents() {
 
 update_incr_primer() {
     info "Updating diff-primer data for INCR..."
-    find "$DIFF_PRIMER_DIR" -type f | grep -v "link_" | while read -r f; do
+    while IFS= read -r -d '' f; do
         dd if=/dev/urandom of="$f" bs="$(stat -c%s "$f")" count=1 2>/dev/null
-    done || true
+    done < <(find "$DIFF_PRIMER_DIR" -type f \
+        ! -name "link_*" ! -path "${PERMISSION_FIXTURE_DIR}/*" -print0)
     # Remove one of the two current hardlink names; the underlying inode/content
     # survives via link_target2.txt, extending the hardlink-tracking chain one tier.
     rm "${DIFF_PRIMER_DIR}/link_target1.txt"
@@ -707,6 +838,31 @@ verify_primer_checksums() {
     done
     [[ $ok -eq 1 ]] && pass "All ${checked} restored file(s) match source sha256 checksums"
     return $((1 - ok))
+}
+
+verify_primer_permissions() {
+    banner "Phase 3a — POSIX permission verification"
+    local comparison_json permission_entry_count
+    if ! comparison_json=$(python3 "${REPO_DIR}/scripts/large_scale_restore_compare.py" \
+            --source-root "$DIFF_PRIMER_DIR" \
+            --restored-root "$RESTORE_PRIMER_PATH" \
+            --required-relative-path . \
+            --permissions-only \
+            2>> "$LOGFILE"); then
+        fail "Restored POSIX permission modes differ; see ${LOGFILE}"
+        return 1
+    fi
+    if ! permission_entry_count=$(python3 -c '
+import json
+import sys
+result = json.loads(sys.argv[1])
+print(result["permission_entry_count"])
+' "$comparison_json"); then
+        fail "Unable to decode POSIX permission verification evidence"
+        return 1
+    fi
+    pass "All ${permission_entry_count} restored non-symlink entry mode(s) match the source"
+    return 0
 }
 
 write_darrc() {
@@ -1145,6 +1301,7 @@ write_json_record() {
     LST_PITR_EXECUTION_STATUS="$PITR_EXECUTION_STATUS" \
     LST_PITR_STRUCTURE_STATUS="$PITR_STRUCTURE_STATUS" \
     LST_PITR_CHECKSUM_STATUS="$PITR_CHECKSUM_STATUS" \
+    LST_PITR_PERMISSION_STATUS="$PITR_PERMISSION_STATUS" \
     LST_PITR_OVERALL_STATUS="$PITR_OVERALL_STATUS" \
     LST_FULL_RESTORE_MODE="$FULL_RESTORE_MODE" \
     LST_FULL_RESTORE_THRESHOLD_BYTES="$FULL_RESTORE_THRESHOLD_BYTES" \
@@ -1152,9 +1309,21 @@ write_json_record() {
     LST_FULL_RESTORE_DECISION_REASON="$FULL_RESTORE_DECISION_REASON" \
     LST_FULL_RESTORE_EXECUTION_STATUS="$FULL_RESTORE_EXECUTION_STATUS" \
     LST_FULL_RESTORE_CONTENT_STATUS="$FULL_RESTORE_CONTENT_STATUS" \
+    LST_FULL_RESTORE_METADATA_STATUS="$FULL_RESTORE_METADATA_STATUS" \
     LST_FULL_RESTORE_OVERALL_STATUS="$FULL_RESTORE_OVERALL_STATUS" \
     LST_FULL_RESTORE_FILE_COUNT="${FULL_RESTORE_FILE_COUNT:-}" \
     LST_FULL_RESTORE_BYTES="${FULL_RESTORE_BYTES:-}" \
+    LST_FULL_RESTORE_ENTRY_COUNT="${FULL_RESTORE_ENTRY_COUNT:-}" \
+    LST_FULL_RESTORE_OWNERSHIP_COUNT="${FULL_RESTORE_OWNERSHIP_COUNT:-}" \
+    LST_FULL_RESTORE_PERMISSION_COUNT="${FULL_RESTORE_PERMISSION_COUNT:-}" \
+    LST_FULL_RESTORE_POSIX_ACL_COUNT="${FULL_RESTORE_POSIX_ACL_COUNT:-}" \
+    LST_FULL_RESTORE_XATTR_COUNT="${FULL_RESTORE_XATTR_COUNT:-}" \
+    LST_FULL_RESTORE_HARD_LINK_GROUP_COUNT="${FULL_RESTORE_HARD_LINK_GROUP_COUNT:-}" \
+    LST_RESTORE_METADATA_PROFILE="$RESTORE_METADATA_PROFILE" \
+    LST_SOURCE_FILESYSTEM_TYPE="$SOURCE_FILESYSTEM_TYPE" \
+    LST_RESTORE_FILESYSTEM_TYPE="$RESTORE_FILESYSTEM_TYPE" \
+    LST_SOURCE_FILESYSTEM_DEVICE="$SOURCE_FILESYSTEM_DEVICE" \
+    LST_RESTORE_FILESYSTEM_DEVICE="$RESTORE_FILESYSTEM_DEVICE" \
     LST_BITROT_SEED="${BITROT_SEED:-}" \
     LST_BITROT_EVIDENCE_FILE="${BITROT_EVIDENCE_FILE:-}" \
     LST_RESULTS_DIR="$RESULTS_DIR" \
@@ -1175,6 +1344,18 @@ write_json_record() {
 # shellcheck disable=SC2317
 cleanup() {
     if [[ $KEEP -eq 0 ]]; then
+        local restore_cleanup_failed=0
+        if ! clear_restore_target_as_root "$RESTORE_DIR"; then
+            echo "ERROR: unable to remove root-owned entries from '${RESTORE_DIR}'." >&2
+            restore_cleanup_failed=1
+        fi
+        if ! clear_restore_target_as_root "$FULL_RESTORE_DIR"; then
+            echo "ERROR: unable to remove root-owned entries from '${FULL_RESTORE_DIR}'." >&2
+            restore_cleanup_failed=1
+        fi
+        if [[ $restore_cleanup_failed -ne 0 ]]; then
+            return 1
+        fi
         rm -rf "${RUN_DIR:?}"
         return 0
     fi
@@ -1186,6 +1367,7 @@ cleanup() {
 on_exit() {
     local exit_status=$?
     local writer_status=0
+    local cleanup_status=0
 
     trap - EXIT HUP INT QUIT TERM
     set +e
@@ -1200,6 +1382,10 @@ on_exit() {
         fi
     fi
     cleanup
+    cleanup_status=$?
+    if [[ $cleanup_status -ne 0 && $exit_status -eq 0 ]]; then
+        exit_status=$cleanup_status
+    fi
     exit "$exit_status"
 }
 
@@ -1339,17 +1525,21 @@ CURRENT_PHASE="pitr_restore"
 banner "Phase 3a — Point-In-Time Restore Validation (latest state)"
 
 info "Cleaning restore target directory to satisfy manager safety checks..."
-rm -rf "$RESTORE_DIR"
-mkdir -p "$RESTORE_DIR"
+if ! prepare_root_restore_target "$RESTORE_DIR"; then
+    PITR_EXECUTION_STATUS="failed"
+    fail "Unable to prepare the root-owned PITR restore target"
+    exit 1
+fi
 
 info "Invoking manager to process PITR extraction for diff-primer data..."
 
 # Using the exact CLI arguments from restoring.md to restore our relative primer directory
-if docker_run_tool /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
+if docker_run_restore_tool "$RESTORE_DIR" /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
            -d "$DEFINITION_NAME" \
            --restore-path "${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}/" \
            --when "now" \
            --target "$RESTORE_DIR" \
+           --preserve-ownership \
            --log-stdout --verbose >> "$LOGFILE" 2>&1; then
     PITR_EXECUTION_STATUS="passed"
     pass "Restore sequence completed execution via manager"
@@ -1395,7 +1585,8 @@ fi
 
 if [[ $pitr_structure_ok -eq 1 ]]; then PITR_STRUCTURE_STATUS="passed"; else PITR_STRUCTURE_STATUS="failed"; fi
 if verify_primer_checksums; then PITR_CHECKSUM_STATUS="passed"; else PITR_CHECKSUM_STATUS="failed"; fi
-if [[ "$PITR_EXECUTION_STATUS" == "passed" && "$PITR_STRUCTURE_STATUS" == "passed" && "$PITR_CHECKSUM_STATUS" == "passed" ]]; then
+if verify_primer_permissions; then PITR_PERMISSION_STATUS="passed"; else PITR_PERMISSION_STATUS="failed"; fi
+if [[ "$PITR_EXECUTION_STATUS" == "passed" && "$PITR_STRUCTURE_STATUS" == "passed" && "$PITR_CHECKSUM_STATUS" == "passed" && "$PITR_PERMISSION_STATUS" == "passed" ]]; then
     PITR_OVERALL_STATUS="passed"
 else
     PITR_OVERALL_STATUS="failed"
@@ -1406,16 +1597,21 @@ banner "Phase 3b — Complete Point-In-Time Restore Validation"
 if [[ $FULL_RESTORE_SELECTED -eq 1 ]]; then
     CURRENT_PHASE="full_restore"
     info "Cleaning the complete restore target..."
-    rm -rf "$FULL_RESTORE_DIR"
-    mkdir -p "$FULL_RESTORE_DIR"
+    if ! prepare_root_restore_target "$FULL_RESTORE_DIR"; then
+        FULL_RESTORE_EXECUTION_STATUS="failed"
+        FULL_RESTORE_OVERALL_STATUS="failed"
+        fail "Unable to prepare the root-owned complete restore target"
+        exit 1
+    fi
     FULL_RESTORE_PERFORMED=1
 
     info "Restoring the complete archive root via manager..."
-    if docker_run_tool /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
+    if docker_run_restore_tool "$FULL_RESTORE_DIR" /opt/venv/bin/manager --config-file "$CONFIG_FILE" \
                -d "$DEFINITION_NAME" \
                --restore-path . \
                --when "now" \
                --target "$FULL_RESTORE_DIR" \
+               --preserve-ownership \
                --log-stdout --verbose >> "$LOGFILE" 2>&1; then
         FULL_RESTORE_EXECUTION_STATUS="passed"
         pass "Complete archive-root restore executed successfully"
@@ -1432,19 +1628,58 @@ if [[ $FULL_RESTORE_SELECTED -eq 1 ]]; then
                 --restored-root "$FULL_RESTORE_DIR" \
                 --required-relative-path "${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}" \
                 2>> "$LOGFILE"); then
-            read -r FULL_RESTORE_FILE_COUNT FULL_RESTORE_BYTES <<< "$(python3 -c '
+            comparison_values=""
+            if ! comparison_values=$(python3 -c '
 import json
 import sys
 result = json.loads(sys.argv[1])
-print(result["restored_file_count"], result["restored_bytes"])
-' "$comparison_json")"
-            FULL_RESTORE_CONTENT_STATUS="passed"
-            FULL_RESTORE_OVERALL_STATUS="passed"
-            pass "All ${FULL_RESTORE_FILE_COUNT} restored regular-file path(s) (${FULL_RESTORE_BYTES} byte(s)) match the live source"
+keys = (
+    "restored_file_count",
+    "restored_bytes",
+    "restored_entry_count",
+    "ownership_entry_count",
+    "permission_entry_count",
+    "posix_acl_count",
+    "portable_xattr_count",
+    "hard_link_group_count",
+    "metadata_profile",
+    "filesystem_device",
+)
+print("\t".join(str(result[key]) for key in keys))
+' "$comparison_json"); then
+                fail "Unable to decode complete-restore comparison evidence"
+                FULL_RESTORE_CONTENT_STATUS="failed"
+                FULL_RESTORE_METADATA_STATUS="failed"
+                FULL_RESTORE_OVERALL_STATUS="failed"
+            else
+                IFS=$'\t' read -r \
+                    FULL_RESTORE_FILE_COUNT \
+                    FULL_RESTORE_BYTES \
+                    FULL_RESTORE_ENTRY_COUNT \
+                    FULL_RESTORE_OWNERSHIP_COUNT \
+                    FULL_RESTORE_PERMISSION_COUNT \
+                    FULL_RESTORE_POSIX_ACL_COUNT \
+                    FULL_RESTORE_XATTR_COUNT \
+                    FULL_RESTORE_HARD_LINK_GROUP_COUNT \
+                    comparison_profile \
+                    comparison_device <<< "$comparison_values"
+                if [[ "$comparison_profile" != "$RESTORE_METADATA_PROFILE" || "$comparison_device" != "$SOURCE_FILESYSTEM_DEVICE" ]]; then
+                    fail "Complete-restore comparison returned inconsistent metadata-profile evidence"
+                    FULL_RESTORE_CONTENT_STATUS="failed"
+                    FULL_RESTORE_METADATA_STATUS="failed"
+                    FULL_RESTORE_OVERALL_STATUS="failed"
+                else
+                    FULL_RESTORE_CONTENT_STATUS="passed"
+                    FULL_RESTORE_METADATA_STATUS="passed"
+                    FULL_RESTORE_OVERALL_STATUS="passed"
+                    pass "All ${FULL_RESTORE_FILE_COUNT} restored regular-file path(s) (${FULL_RESTORE_BYTES} byte(s)) and ${FULL_RESTORE_ENTRY_COUNT} portable metadata entry set(s) match the live source"
+                fi
+            fi
         else
             FULL_RESTORE_CONTENT_STATUS="failed"
+            FULL_RESTORE_METADATA_STATUS="failed"
             FULL_RESTORE_OVERALL_STATUS="failed"
-            fail "Complete restore content comparison failed; see ${LOGFILE}"
+            fail "Complete restore content or portable metadata comparison failed; see ${LOGFILE}"
         fi
     fi
 else
@@ -1464,6 +1699,7 @@ echo -e "FULL elapsed: ${full_elapsed:-0}s (~${FULL_SIZE_GB:-N/A} GB)"
 echo -e "DIFF elapsed: ${diff_elapsed:-0}s (~${DIFF_SIZE_GB:-N/A} GB)"
 echo -e "INCR elapsed: ${incr_elapsed:-0}s (~${INCR_SIZE_GB:-N/A} GB)"
 echo -e "Complete restore: ${FULL_RESTORE_OVERALL_STATUS} (${FULL_RESTORE_DECISION_REASON})"
+echo -e "Restore metadata: ${FULL_RESTORE_METADATA_STATUS} (${RESTORE_METADATA_PROFILE}, ${SOURCE_FILESYSTEM_TYPE}, same filesystem st_dev=${SOURCE_FILESYSTEM_DEVICE})"
 echo -e "Peak Engine Memory Consumption:"
 echo -e "  ├── dar-backup : ${MAX_DAR_BACKUP}"
 echo -e "  ├── dar backend: ${MAX_DAR}"

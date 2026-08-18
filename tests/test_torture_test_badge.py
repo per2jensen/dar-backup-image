@@ -32,7 +32,7 @@ def _base_record() -> dict[str, Any]:
         "status": "passed",
     }
     return {
-        "schema_version": 6,
+        "schema_version": 8,
         "advertise": True,
         "test_name": "Large scale torture test",
         "advertise_class": "v0.5.29",
@@ -50,9 +50,22 @@ def _base_record() -> dict[str, Any]:
                 "decision_reason": "forced_by_user",
                 "execution": "passed",
                 "content_comparison": "passed",
+                "portable_metadata": "passed",
                 "overall": "passed",
                 "restored_file_count": 220_487,
                 "restored_bytes": 522_459_193_040,
+                "restored_entry_count": 220_500,
+                "ownership_entry_count": 220_500,
+                "permission_entry_count": 220_499,
+                "posix_acl_count": 2,
+                "portable_xattr_count": 3,
+                "hard_link_group_count": 1,
+                "metadata_profile": "portable-posix-v1",
+                "source_filesystem": "btrfs",
+                "restore_filesystem": "btrfs",
+                "source_filesystem_device": 44,
+                "restore_filesystem_device": 44,
+                "same_filesystem": True,
             },
         },
         "bitrot_evidence": {
@@ -153,6 +166,58 @@ def test_build_badge_failed_full_restore_omits_component() -> None:
     payload = build_badge_payload(record)
 
     assert "Full restore" not in payload["message"]
+
+
+def test_build_badge_failed_portable_metadata_omits_component() -> None:
+    """Schema-v8 metadata failure cannot produce a full-restore claim."""
+    record = _base_record()
+    record["checks"]["full_restore"]["portable_metadata"] = "failed"
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore" not in payload["message"]
+
+
+def test_build_badge_cross_filesystem_schema_v8_omits_component() -> None:
+    """Schema-v8 evidence must honor the same-filesystem contract."""
+    record = _base_record()
+    record["checks"]["full_restore"].update(
+        {
+            "restore_filesystem": "zfs",
+            "restore_filesystem_device": 45,
+            "same_filesystem": False,
+        }
+    )
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore" not in payload["message"]
+
+
+def test_build_badge_schema_v6_full_restore_remains_compatible() -> None:
+    """Earlier coherent full-restore evidence retains its published claim."""
+    record = _base_record()
+    record["schema_version"] = 6
+    for key in (
+        "portable_metadata",
+        "restored_entry_count",
+        "ownership_entry_count",
+        "permission_entry_count",
+        "posix_acl_count",
+        "portable_xattr_count",
+        "hard_link_group_count",
+        "metadata_profile",
+        "source_filesystem",
+        "restore_filesystem",
+        "source_filesystem_device",
+        "restore_filesystem_device",
+        "same_filesystem",
+    ):
+        del record["checks"]["full_restore"][key]
+
+    payload = build_badge_payload(record)
+
+    assert "Full restore verified ✓" in payload["message"]
 
 
 def test_build_badge_contradictory_full_restore_omits_component() -> None:

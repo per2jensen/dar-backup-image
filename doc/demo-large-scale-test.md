@@ -22,7 +22,8 @@ Key features demonstrated:
   --restore-path`, with hard-link and deletion-record verification
 - sha256 checksum verification of every restored file against the live source
 - optional complete archive-root PITR restore: automatic through 25 GiB by
-  default, forceable at any size, or explicitly disabled
+  default, forceable at any size, or explicitly disabled, with the
+  same-filesystem `portable-posix-v1` metadata profile
 - A structured JSONL result appended to a results directory (and mirrored into
   this repo's `doc/test-report/`, for tracking metrics release over release)
 
@@ -35,7 +36,73 @@ Key features demonstrated:
   you point it at (archive + par2 redundancy + a restore copy)
 - `make`, unless you set `BUILD_IMAGE=false` and point `IMAGE` at an
   already-built or already-pulled image
+- host `findmnt`, `stat`, `setfacl`, and `setfattr` commands; the inner harness
+  fails preflight with a specific error when one is unavailable
 - Some real data to back up — see [Pointing it at your own data](#pointing-it-at-your-own-data) below
+
+### ZFS prerequisites
+
+The `portable-posix-v1` profile requires Linux POSIX ACLs and extended
+attributes. OpenZFS datasets may have ACLs disabled even though the filesystem
+itself supports them. Configure the dataset containing both the source and
+`BASE_DIR` once as an administrator, replacing `pool/dataset` with the source
+reported by `findmnt`:
+
+```bash
+findmnt -T /data -n -o SOURCE
+sudo zfs set acltype=posix pool/dataset
+sudo zfs set xattr=sa pool/dataset
+```
+
+`acltype=posix` is required. Extended attributes must also be enabled;
+`xattr=sa` is the recommended ZFS storage mode for ACL- and xattr-heavy
+metadata. Verify the effective mount before starting the test:
+
+```bash
+findmnt -T /data -o TARGET,SOURCE,FSTYPE,OPTIONS
+```
+
+A correctly configured Linux ZFS mount reports `xattr` and `posixacl`, for
+example:
+
+```text
+/data pool/dataset zfs rw,noatime,xattr,posixacl,casesensitive
+```
+
+If it reports `noacl`, `setfacl` will fail with `Operation not supported`.
+Changing ZFS dataset properties requires administrative access, but afterward
+the large-scale test itself can run as an ordinary user such as `pj`; that user
+owns the generated ACL and xattr fixtures.
+
+### Ownership-preserving restore execution
+
+Start `run_large_scale_test.sh` as your ordinary user; do not invoke the whole
+harness with `sudo`. Backup creation, archive verification, bitrot injection,
+PAR2 repair, and result comparison remain unprivileged. Only manager's PITR
+extraction containers run with UID/GID `0:0` and `--preserve-ownership`, because
+setting arbitrary archived numeric UID/GID values is a root-only operation.
+
+The root container receives `BASE_DIR` read-only. The selected restore target
+and persistent results directory are mounted back read-write as narrow
+overlays. Before extraction, the harness validates that the target is exactly
+the current run's `RESTORE_DIR` or `FULL_RESTORE_DIR`, rejects symlinks, empties
+it through a root container, and makes the empty target root-owned to satisfy
+manager's restore safety policy. Automatic cleanup uses the same scoped path.
+With `--keep`, faithfully restored ownership is retained and some entries may
+require root or a root container to remove later.
+
+The Docker daemon must permit container root to apply host numeric ownership
+on bind-mounted files. Prove that path before a large run with the two-case,
+few-second regression test:
+
+```bash
+IMAGE=dar-backup:dev pytest -q tests/test_restore_ownership.py -vv
+```
+
+The positive case archives a tiny file with an alternate numeric GID and
+proves that root manager extraction restores it exactly. The negative case
+proves that the same `--preserve-ownership` request cannot satisfy the contract
+through the previous unprivileged extraction model.
 
 ## Quick start
 
@@ -95,6 +162,12 @@ If `BASE_DIR` and your real data don't share a top-level directory, the script
 fails fast during preflight rather than silently backing up the wrong thing —
 see `scripts/large_scale_test.sh` for the full validation logic.
 
+For the complete-restore verification, the source tree and restore directory
+must also be on the same filesystem device. A nested mount beneath `BASE_DIR`
+does not provide a cross-filesystem escape hatch: if a compared source or
+restore entry has another `st_dev`, the run fails the explicit metadata
+contract.
+
 ### This is a test-script artifact, not a dar-backup limitation
 
 Nothing about `dar-backup` or the Docker image requires your data and your
@@ -117,10 +190,11 @@ convenience for keeping the test script itself simple, not a property of
 
 ## Full backup-definition control
 
-`SOURCE_GLOB`/`SLICE_SIZE`/`COMPRESSION` cover the common case. For anything
-more — exclude patterns, several `-g` lines, a different `-am` selection mode —
-set `DEFINITION` to a complete backup-definition body; it's used verbatim
-instead of the pieced-together one, and the other three variables are ignored:
+`SOURCE_GLOB`/`SLICE_SIZE`/`COMPRESSION` cover the common case. Use `DEFINITION`
+when a run needs several literal source paths or literal pruned subtrees. The
+body is passed to DAR, but the harness deliberately supports only a small,
+measurable path-selection contract; it does not attempt to parse every DAR
+selection mode.
 
 ```bash
 DEFINITION="$(cat <<'EOF'
@@ -137,6 +211,45 @@ EOF
 
 Its own `-R` must still match `BASE_DIR`'s derived mount root, for the same
 reason as above.
+
+### `DEFINITION` path-selection contract
+
+The harness accepts:
+
+- exactly one `-R PATH` or `--fs-root PATH`; it must be absolute and equal the
+  mount root derived from `BASE_DIR`
+- one or more `-g PATH` or `--go-into PATH` entries
+- zero or more `-P PATH` or `--prune PATH` entries
+- optional `-am`/`--alter=mask` and optional `--cache-directory-tagging`
+- shell-style single or double quotes around a path containing spaces
+
+Every `-g` and `-P` value must be a literal path relative to `-R`: no absolute
+path, `..`, wildcard, regular expression, or attached option form is accepted.
+Each path must exist when source measurement runs, and each `-P` must intersect
+at least one user `-g`. Repeated identical paths are harmless and measured once.
+
+With `-am`, ordering is intentionally simpler than DAR's complete ordered-mask
+language: `-am` must precede the path rules, all user `-g` entries must precede
+all `-P` entries, and user re-inclusion (`-g` after `-P`) is rejected. The
+harness appends its mandatory diff-primer as the final `-g`, separately from
+the user contract, so ordered mode re-includes that fixture if a broad prune
+would otherwise cover it. Without `-am`, a `-P` that removes any primer file
+causes preflight to fail.
+
+Selection features outside this contract are rejected, including `-I`/`-X`
+masks, include/exclude list files, regex/glob/case alter modes, mount-point
+filters, wildcards inside `-g`/`-P`, and attached `-gPATH`/`-PPATH` forms.
+Ordinary non-selection settings such as slicing and compression continue to be
+passed through. Adding another selection language requires an explicit harness
+contract and measurement tests; there is no fallback interpretation.
+
+Before backup, the harness walks the literal `-g` roots plus its primer without
+following symlinks, deduplicates overlapping roots, subtracts literal `-P`
+subtrees and valid cache-tagged directories, and reports candidate, pruned, and
+selected regular-file counts and apparent bytes. The selected byte total drives
+both disk-space preflight and the automatic complete-restore threshold. A
+Docker-backed regression test compares this model with a real DAR
+archive/restore selection.
 
 ## Other options
 
@@ -255,7 +368,7 @@ scale with however much data you point `SOURCE_GLOB` at.)
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
 
-New records use additive schema version 6. All schema-version-2 through -5
+New records use additive schema version 8. All schema-version-2 through -7
 fields remain present for existing consumers and the older lines in the history
 remain valid. Additional provenance includes the full harness commit and dirty
 state, the requested image reference, immutable local image ID, registry digest
@@ -291,27 +404,77 @@ reason, execution/content/overall statuses, and the restored regular-file
 count and byte total. This makes an automatic size skip, explicit disablement,
 interrupted attempt, failed restore, and successful complete restore distinct.
 
+Schema v7 adds `checks.pitr_restore.permission_modes`. The mandatory primer
+restore now proves POSIX permission bits for deliberately varied `0600`, `0440`,
+`0755`, and directory-mode fixtures on every run. Permission mismatches fail
+the overall PITR result independently of content checks. This mandatory,
+small PITR check remains limited to permission modes; the wider metadata
+profile below is part of the optional complete restore.
+
+Schema v8 adds the `portable-posix-v1` complete-restore metadata profile. It is
+the deliberately conservative intersection supported by Linux ext4, Btrfs,
+and ZFS, and verifies:
+
+- numeric UID/GID ownership for every restored entry, including symlinks
+- POSIX permission bits for every non-symlink entry
+- POSIX access ACLs and directory default ACLs
+- byte-exact `user.*` extended attributes, including empty and binary values
+- hard-link relationships without requiring source and restore inode numbers
+  themselves to match
+
+The primer contains deterministic ownership (the invoking UID plus an available
+supplemental GID, with the primary GID as fallback), access/default ACL,
+three-xattr, hard-link, file-mode, and directory-mode fixtures. A successful
+schema-v8 record must prove that these fixtures were actually encountered;
+zero or missing evidence cannot produce a verified complete-restore claim.
+
+The schema-v8 contract is explicitly **same filesystem**. `MOUNT_ROOT`, every
+source entry selected for complete comparison, `FULL_RESTORE_DIR`, and every
+restored entry must have the same `st_dev` value. The harness checks this before
+the backup and again during comparison, records both filesystem types and
+device numbers, and fails rather than presenting a cross-filesystem run as
+equivalent evidence. Pointing `FULL_RESTORE_DIR` at a separate ext4, Btrfs, or
+ZFS mount is not supported by this profile. Filesystem types outside `ext4`,
+`btrfs`, and `zfs` are rejected rather than implicitly receiving the same
+claim.
+
+The profile intentionally excludes inode numbers, physical allocation,
+filesystem-specific flags and properties, ZFS NFSv4 ACLs, `security.*`,
+`trusted.*`, and implementation-owned `system.*` xattrs other than the two
+POSIX ACL attributes. It also excludes `atime`, `ctime`, birth time, and symlink
+mode bits. These values are mutable during verification, cannot be restored
+portably, or do not have common semantics across the three filesystems.
+
 The complete restore selects archive root `.` and therefore asks `manager` to
 reconstruct every path represented by the latest FULL → DIFF → INCR chain.
+The generated configuration sets `RESTORE_OWNERSHIP = yes`, and both PITR
+invocations also pass `--preserve-ownership` explicitly so the test contract is
+visible in command traces and cannot silently inherit a weaker image default.
 Every restored regular file is SHA-256 compared with its live source path;
-symlink targets and filesystem entry types are compared as well. Because a
-custom DAR definition may intentionally exclude source files, the restored
-archive tree—not the unfiltered source root—is the general comparison
-boundary. The harness-owned primer has no intentional omissions and is also
-checked in the source-to-restore direction so missing fixture extraction is
-detected.
+symlink targets, filesystem entry types, POSIX modes, numeric ownership, POSIX
+ACLs, portable extended attributes, and hard-link topology are compared as
+well. Because a custom DAR definition may intentionally exclude source files,
+the restored archive tree—not the unfiltered source root—is the general
+comparison boundary. The harness-owned primer has no intentional omissions and
+is also checked in the source-to-restore direction so missing fixture
+extraction is detected. A definition that intentionally filters ACL or
+`user.*` extended-attribute data cannot satisfy `portable-posix-v1`.
 
-The badge adds `Full restore verified ✓` only for internally consistent schema-v6
-evidence: the complete restore must have been performed, execution, content
-comparison, and overall status must all have passed, restored file and byte
-counts must be positive, and the recorded mode and decision must agree. Older,
-skipped, failed, incomplete, or contradictory records remain publishable when
-otherwise eligible but do not receive the full-restore claim.
+The badge adds `Full restore verified ✓` only for internally consistent
+schema-v6-or-later evidence: the complete restore must have been performed,
+execution, content comparison, and overall status must all have passed,
+restored file and byte counts must be positive, and the recorded mode and
+decision must agree. Schema-v8 records must additionally contain passed,
+internally consistent `portable-posix-v1` evidence, matching filesystem types
+and device numbers, and positive fixture counts. Older, skipped, failed,
+incomplete, or contradictory records remain publishable when otherwise
+eligible but do not receive the full-restore claim.
 
-`source_file_count` and `source_bytes` measure regular files selected by the
-definition's `-g` roots immediately before the FULL backup. Overlapping roots
-are deduplicated by absolute path and symlink targets are not followed. The
-definition hash identifies the exact selection and archive options without
+`source_file_count` and `source_bytes` measure regular files in the effective
+literal selection immediately before the FULL backup: user `-g` roots plus the
+mandatory primer, minus supported `-P` pruning and cache tags. Overlapping
+roots are deduplicated by absolute path and symlink targets are not followed.
+The definition hash identifies the exact selection and archive options without
 publishing private source paths; it is not a checksum of the source data.
 
 Individual checks use `passed`, `failed`, `skipped`, or `not_run`. This makes a
@@ -335,9 +498,10 @@ build performed earlier by the wrapper.
   top` against each container's own ID) — they won't be polluted by unrelated
   `dar`/`par2`/`manager` processes elsewhere on the host, including your own
   scheduled backup jobs.
-- The disk-space preflight check estimates source size from the definition's
-  `-R`/`-g` lines and refuses to start if `BASE_DIR`'s filesystem doesn't have
-  `--min-free-multiplier` (default 2x) that much free.
+- The disk-space preflight check measures the supported definition's effective
+  `-g` minus `-P`/cache-tag selection and refuses to start if `BASE_DIR`'s
+  filesystem doesn't have `--min-free-multiplier` (default 2x) that many
+  selected apparent bytes free.
 
 ---
 

@@ -30,10 +30,10 @@
 # top-level directory (e.g. BASE_DIR=/data/... pairs with SOURCE_GLOB paths
 # under /data/...) — see doc/demo-large-scale-test.md for a worked example.
 #
-# For anything beyond SOURCE_GLOB/SLICE_SIZE/COMPRESSION (exclude patterns,
-# several -g lines, a different -am mode, ...), set DEFINITION to a complete
-# backup-definition body and it's used verbatim instead of the pieced-together
-# one below. Its own -R must still match BASE_DIR's derived mount root, e.g.:
+# For several literal -g paths and literal -P subtrees, set DEFINITION to a
+# complete backup-definition body. The harness intentionally accepts only the
+# selection subset documented in doc/demo-large-scale-test.md; it is not a
+# general DAR selection parser. Its -R must match BASE_DIR's mount root, e.g.:
 #   DEFINITION="$(cat <<'EOF'
 #   -R /data
 #   -s 10G
@@ -110,6 +110,16 @@ done
 if ! python3 "${SCRIPT_DIR}/scripts/large_scale_definition.py" \
         --definition "$DEFINITION" \
         --fallback "$EFFECTIVE_SLICE_FALLBACK" >/dev/null; then
+    exit 1
+fi
+DEFINITION_ROOT=""
+if ! DEFINITION_ROOT=$(python3 "${SCRIPT_DIR}/scripts/large_scale_definition.py" \
+        --definition "$DEFINITION" \
+        --selection-root); then
+    exit 1
+fi
+if [[ "$DEFINITION_ROOT" != "$MOUNT_ROOT" ]]; then
+    echo "ERROR: DEFINITION's -R must match mount root '${MOUNT_ROOT}', got '${DEFINITION_ROOT}'" >&2
     exit 1
 fi
 
