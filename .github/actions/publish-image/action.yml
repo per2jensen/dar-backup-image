@@ -1,0 +1,88 @@
+name: Publish signed Docker image
+description: Push, sign, attest, remotely verify, and promote one Docker image
+
+inputs:
+  local-image:
+    description: Existing local image and tag to publish
+    required: true
+  repository:
+    description: Remote Docker repository without a tag
+    required: true
+  version:
+    description: Immutable version tag to publish
+    required: true
+  expected-cli-version:
+    description: Exact version expected from dar-backup --version
+    required: true
+  sbom-file:
+    description: CycloneDX JSON predicate to attest
+    required: true
+  dockerhub-username:
+    description: Docker Hub username
+    required: true
+  dockerhub-token:
+    description: Docker Hub password or access token
+    required: true
+
+outputs:
+  digest:
+    description: Fully qualified immutable image digest
+    value: ${{ steps.publish.outputs.digest }}
+  rekor_url:
+    description: Sigstore transparency-log search URL, when reported
+    value: ${{ steps.publish.outputs.rekor_url }}
+  rekor_index:
+    description: Sigstore transparency-log index, when reported
+    value: ${{ steps.publish.outputs.rekor_index }}
+  failure_stage:
+    description: Stable failed-stage name, empty after success
+    value: ${{ steps.publish.outputs.failure_stage }}
+
+runs:
+  using: composite
+  steps:
+    # Keep the Python command non-fatal so rollback and stable outputs are
+    # available before this composite action reports the original failure.
+    - name: Publish and verify image
+      id: publish
+      shell: bash
+      env:
+        DOCKERHUB_USER: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+        COSIGN_EXPERIMENTAL: "1"
+      run: |
+        set -euo pipefail
+        set +e
+        python3 "${GITHUB_ACTION_PATH}/../../../scripts/publish_image.py" \
+          --local-image "${{ inputs.local-image }}" \
+          --repository "${{ inputs.repository }}" \
+          --version "${{ inputs.version }}" \
+          --expected-cli-version "${{ inputs.expected-cli-version }}" \
+          --sbom-file "${{ inputs.sbom-file }}"
+        publish_status=$?
+        set -e
+        echo "exit_code=${publish_status}" >> "${GITHUB_OUTPUT}"
+
+    - name: Roll back unverified candidate
+      if: >-
+        steps.publish.outputs.exit_code != '0' &&
+        steps.publish.outputs.candidate_push_attempted == 'true' &&
+        steps.publish.outputs.candidate_verified != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        DOCKERHUB_USER: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/../../../scripts/remove_dockerhub_tag.py" \
+          --repo "${{ inputs.repository }}" \
+          --tag "${{ inputs.version }}"
+
+    - name: Report publication failure
+      if: steps.publish.outputs.exit_code != '0'
+      shell: bash
+      run: |
+        set -euo pipefail
+        >&2 echo "ERROR: image publication failed at stage '${{ steps.publish.outputs.failure_stage }}'"
+        exit 1

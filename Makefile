@@ -18,6 +18,7 @@ SHELL := /bin/bash
 # Default values
 DOCKER ?= docker
 FINAL_VERSION ?= dev
+IMAGE_VERSION_FILE ?= IMAGE_VERSION
 
 UBUNTU_VERSION ?= 24.04
 UBUNTU_DIGEST := $(shell docker pull ubuntu:$(UBUNTU_VERSION) -q >/dev/null 2>&1 && \
@@ -68,7 +69,7 @@ LABEL_ARGS = \
   --label org.opencontainers.image.base.digest="$(UBUNTU_DIGEST)" \
   --label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
   --label org.opencontainers.image.created="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --label org.opencontainers.image.revision="$(shell git rev-parse --short HEAD)" \
+  --label org.opencontainers.image.revision="$(shell git rev-parse HEAD)" \
   --label org.opencontainers.image.title="dar-backup" \
   --label org.opencontainers.image.version="$(FINAL_VERSION)" \
   --label org.opencontainers.image.description="Container for DAR-based backups using \`dar-backup\`" \
@@ -89,8 +90,8 @@ LABEL_ARGS = \
 # Targets
 # ================================
 
-.PHONY: all all-dev dev-rebuild final final-noscan release clean clean-all push tag login dev dev-clean labels help \
-	check_version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
+.PHONY: all all-dev dev-rebuild final final-noscan refresh-final-noscan _finalize-image release clean clean-all push tag login dev dev-clean labels help \
+	check_version check-release-image-version check-refresh-image-version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
 	check-docker-creds test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools \
 	grype-db-status grype-db-update scan-final verify-labels validate-dar-backup-install \
 	check-publish-install-source check-anchore-tool-versions
@@ -112,6 +113,23 @@ check_version:
 		echo "   Example: make DAR_VERSION=2.7.19 final"; \
 		exit 1; \
 	fi
+
+
+# Release outputs must use the exact canonical version committed in source.
+# FINAL_VERSION=dev remains convenient for development targets but cannot pass
+# this publication guard.
+check-release-image-version: check_version
+	@python3 scripts/validate_image_version.py release \
+		--image-version-file "$(IMAGE_VERSION_FILE)" \
+		--final-version "$(FINAL_VERSION)"
+
+
+# Weekly refreshes derive their base from the latest build-history entry, not
+# IMAGE_VERSION. The selected stable x.y.z base may produce x.y.z-N.
+check-refresh-image-version: check_version
+	@python3 scripts/validate_image_version.py refresh \
+		--base-version "$(BASE_VERSION)" \
+		--final-version "$(FINAL_VERSION)"
 
 
 validate-dar-backup-install:
@@ -241,7 +259,7 @@ base:
 	@echo "Skipping separate base image build (single Dockerfile in use)"
 
 
-release: check_version check-docker-creds final verify-labels verify-cli-version login push log-pushed-build-json
+release: check-release-image-version check-docker-creds final verify-labels verify-cli-version login push log-pushed-build-json
 	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
 	@echo "🏷️ Tagging release as v$(FINAL_VERSION)..."
 	@if git rev-parse "v$(FINAL_VERSION)" >/dev/null 2>&1; then \
@@ -324,7 +342,39 @@ dev: validate validate-dar-backup-install
 
 
 
-final: check_version
+final: check-release-image-version
+	@$(MAKE) --no-print-directory _finalize-image
+
+	@echo
+	@echo "🔍 Running scans…"
+	@$(MAKE) scan-final
+
+	@echo
+	@echo "📊 Image layer size report (for audit):"
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
+
+
+final-noscan: check-release-image-version
+	@$(MAKE) --no-print-directory _finalize-image
+
+	@echo
+	@echo "📊 Image layer size report (for audit):"
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
+	@echo "ℹ️  Scan skipped — SBOM and Grype will run as dedicated workflow steps."
+
+
+refresh-final-noscan: check-refresh-image-version
+	@$(MAKE) --no-print-directory _finalize-image
+
+	@echo
+	@echo "📊 Image layer size report (for audit):"
+	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
+	@echo "ℹ️  Scan skipped — SBOM and Grype will run as dedicated workflow steps."
+
+
+# Internal shared implementation. Publication entry points above must complete
+# their policy guard before invoking this target.
+_finalize-image: $(if $(strip $(BASE_VERSION)),check-refresh-image-version,check-release-image-version)
 	@echo "🔎 Ensuring dar-backup:dev exists and is fresh…"
 	@if ! $(DOCKER) image inspect dar-backup:dev >/dev/null 2>&1; then \
 	  echo "❌ dar-backup:dev not found — run 'make dev' first"; exit 1; \
@@ -348,46 +398,6 @@ final: check_version
 	@echo
 	@echo "🔍 Verifying OCI image labels…"
 	@$(MAKE) verify-labels
-
-	@echo
-	@echo "🔍 Running scans…"
-	@$(MAKE) scan-final
-
-	@echo
-	@echo "📊 Image layer size report (for audit):"
-	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
-
-
-
-final-noscan: check_version
-	@echo "🔎 Ensuring dar-backup:dev exists and is fresh…"
-	@if ! $(DOCKER) image inspect dar-backup:dev >/dev/null 2>&1; then \
-	  echo "❌ dar-backup:dev not found — run 'make dev' first"; exit 1; \
-	fi
-
-	@echo "🧩 Creating release image with corrected labels (no rebuild)…"
-	@set -e; \
-	CID="$$( $(DOCKER) create dar-backup:dev )"; \
-	$(DOCKER) commit \
-		--change 'LABEL org.opencontainers.image.version=$(FINAL_VERSION)' \
-		--change 'LABEL org.opencontainers.image.ref.name=$(DOCKERHUB_REPO):$(FINAL_VERSION)' \
-		$$CID dar-backup:$(FINAL_VERSION) >/dev/null; \
-	$(DOCKER) rm $$CID >/dev/null
-
-	@$(DOCKER) tag dar-backup:$(FINAL_VERSION) $(DOCKERHUB_REPO):$(FINAL_VERSION)
-
-	@echo
-	@echo "🔎 Verifying CLI version…"
-	@$(MAKE) verify-cli-version
-
-	@echo
-	@echo "🔍 Verifying OCI image labels…"
-	@$(MAKE) verify-labels
-
-	@echo
-	@echo "📊 Image layer size report (for audit):"
-	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) size-report
-	@echo "ℹ️  Scan skipped — SBOM and Grype will run as dedicated workflow steps."
 
 
 verify-labels:
@@ -745,7 +755,7 @@ check-publish-install-source:
 	fi
 
 
-push: check_version check-publish-install-source check-docker-creds
+push: check-release-image-version check-publish-install-source check-docker-creds
 	@if $(DOCKER) manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
 	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
 	else \
@@ -792,7 +802,7 @@ dry-run-cleanup:
 	fi
 
 
-dry-run-release: check_version install-tools
+dry-run-release: check-release-image-version install-tools
 	@echo "🔍 Creating temporary dry-run environment..."
 	@$(MAKE) dry-run-cleanup
 	@git worktree add -f .dryrun HEAD
@@ -814,7 +824,7 @@ dry-run-release: check_version install-tools
 # DRY_RUN is intentionally not set here — nothing downstream checks it,
 # and 'final' already excludes push by design. If push-guarding via DRY_RUN
 # is added in future, set it here.
-dry-run-release-internal: check_version install-tools
+dry-run-release-internal: check-release-image-version install-tools
 	@echo "🔧 Building image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) (dry-run, no push to Docker Hub)"
 	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) \
 		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \

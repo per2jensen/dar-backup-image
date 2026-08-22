@@ -3,8 +3,8 @@
 """
 Remove a tag from Docker Hub via the v2 API.
 
-Used as a rollback step in the release workflow when cosign signing or
-SBOM attestation fails after the image has already been pushed.
+Used by the shared publication action when a candidate push was attempted but
+the candidate did not complete signing, attestation, and remote verification.
 
 Credentials are read from environment variables to avoid exposing them
 in process listings or log files:
@@ -15,7 +15,7 @@ in process listings or log files:
 Usage:
     DOCKERHUB_USER=myuser DOCKERHUB_TOKEN=mytoken \\
         python3 scripts/remove_dockerhub_tag.py \\
-            --repo per2jensen/scrubexif \\
+            --repo per2jensen/dar-backup \\
             --tag 1.2.3
 """
 
@@ -43,9 +43,9 @@ def parse_args() -> argparse.Namespace:
         Parsed namespace with repo and tag.
     """
     parser = argparse.ArgumentParser(
-        description="Remove a Docker Hub tag (cosign failure rollback)."
+        description="Remove an unverified Docker Hub candidate tag."
     )
-    parser.add_argument("--repo", required=True, help="Repository, e.g. per2jensen/scrubexif")
+    parser.add_argument("--repo", required=True, help="Repository, e.g. per2jensen/dar-backup")
     parser.add_argument("--tag", required=True, help="Tag to remove, e.g. 1.2.3")
     return parser.parse_args()
 
@@ -127,7 +127,7 @@ def main() -> None:
         raise SystemExit(1)
 
     logger.info(
-        "⚠️  Rollback: removing %s:%s from Docker Hub (cosign failure)",
+        "⚠️  Rollback: removing unverified %s:%s from Docker Hub",
         args.repo,
         args.tag,
     )

@@ -319,10 +319,16 @@ Every image released to Docker Hub is produced by a fully automated GitHub Actio
 4. **Verify** — OCI labels and the embedded `dar-backup --version` are checked against expected values.
 5. **SBOM** — [Syft](https://github.com/anchore/syft) generates a CycloneDX JSON Software Bill of Materials from the local image before it leaves the runner.
 6. **Vulnerability scan** — [Grype](https://github.com/anchore/grype) scans the SBOM and **fails the release if any High or Critical vulnerability is found**. Results are uploaded to the GitHub Security tab as SARIF.
-7. **Push** — The image is pushed to Docker Hub only after all of the above pass.
-8. **Cosign signing** — The image is signed by digest (not by mutable tag) using [cosign](https://github.com/sigstore/cosign) keyless mode.
-9. **SBOM attestation** — The SBOM is attached to the image as a signed in-toto attestation via cosign.
-10. **Rollback** — If signing or attestation fails after the push, the image tag is automatically removed from Docker Hub.
+7. **Candidate push** — Only the immutable version tag is initially pushed to Docker Hub; `:latest` still identifies the previous known-good image.
+8. **Cosign signing** — The candidate is signed by digest (not by mutable tag) using [cosign](https://github.com/sigstore/cosign) keyless mode.
+9. **SBOM attestation** — The SBOM is attached to that digest as a signed in-toto attestation via cosign.
+10. **Remote sanity check** — The immutable digest is pulled back from Docker Hub and executed. Its `dar-backup --version` output and OCI image-version label must match exactly.
+11. **Promotion** — Only the remotely verified digest is pushed as `:latest`; `:latest` is then pulled and required to resolve to the signed digest.
+12. **Rollback** — If the candidate push, signing, attestation, or remote sanity check fails, the attempted unverified version tag is removed and the previous `:latest` remains untouched.
+
+Manual releases and weekly image refreshes use the same tested publication
+component and a shared concurrency lock, so their signing, rollback, remote
+verification, and `:latest` promotion behavior cannot drift apart or race.
 
 ### What cosign keyless signing provides
 
@@ -594,7 +600,7 @@ For **long-term recovery**, do not preserve only the `:latest` reference. Save a
 - Signs the image with [cosign](https://github.com/sigstore/cosign) keyless signing and records the entry in the [Rekor](https://github.com/sigstore/rekor) transparency log
 - Attaches a signed CycloneDX SBOM attestation
 - Publishes as both `:latest` and a versioned refresh tag (e.g. `:0.5.22-1`, `:0.5.22-2`)
-- Updates the [cosign badge](https://github.com/per2jensen/dar-backup-image/blob/main/doc/cosign_badge.json) — if the badge shows `failed`, the latest image did not pass the refresh pipeline
+- Updates the [cosign badge](https://github.com/per2jensen/dar-backup-image/blob/main/doc/cosign_badge.json) — `failed` means the most recent signing attempt was rejected and rolled back; the previously published `:latest` may remain valid
 
 The [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json) file contains the full audit trail for every release and refresh, including digests, Rekor log entries, and Grype scan results.
 
@@ -996,7 +1002,7 @@ Releases are fully automated via the **Manual Docker Release** GitHub Actions wo
 Dry-run the release locally first (build, test, verify labels — no push):
 
 ```bash
-make FINAL_VERSION=0.5.15 dry-run-release
+make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
 ```
 
 This validates:
@@ -1007,13 +1013,13 @@ This validates:
 
 When ready, trigger the release by dispatching the workflow from GitHub Actions (`workflow_dispatch`). The workflow will:
 
-1. Validate `IMAGE_VERSION` and abort if the git tag already exists
-2. Build, test, and promote the image
-3. Scan with Grype — hard gate on High/Critical vulnerabilities
-4. Push `per2jensen/dar-backup:VERSION` and `:latest` to Docker Hub
-5. Sign with cosign (keyless, via GitHub OIDC → Sigstore/Rekor)
-6. Attach the SBOM as a signed in-toto attestation
-7. Update `doc/build-history.json`, README, cosign badge, and git tag
+1. Lock the build to the full commit selected from `main` and validate `IMAGE_VERSION`
+2. Build, test, and scan — hard gate on High/Critical vulnerabilities
+3. Push `per2jensen/dar-backup:VERSION` as a candidate
+4. Sign the candidate and attach its SBOM attestation
+5. Roll back a failed candidate without moving the previous `:latest`
+6. Promote the successfully signed digest to `:latest`
+7. Update build history, README, badge, pages, and the source-pointing Git tag
 
 > **Note:** Do NOT manually create the git tag before triggering the workflow — it is created automatically after all steps succeed.
 
@@ -1023,9 +1029,16 @@ Follow [dev.md](dev.md) to build and test a PyPI-sourced development image.
 Before release, validate locally:
 
 ```bash
-make FINAL_VERSION=x.y.z final          # validate your local final image
-make FINAL_VERSION=x.y.z dry-run-release
+make FINAL_VERSION="$(cat IMAGE_VERSION)" final
+make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
 ```
+
+`FINAL_VERSION` defaults to `dev` for ordinary development. Release-related
+Make targets reject that default and require an exact match with the committed
+`IMAGE_VERSION` file. Weekly refreshes use the separate guarded
+`refresh-final-noscan` target, which permits only `BASE_VERSION-N` where the
+base comes from the latest `doc/build-history.json` entry. Refreshes
+intentionally do not consult `IMAGE_VERSION`.
 
 Trigger the release:
 

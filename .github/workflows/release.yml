@@ -3,10 +3,14 @@ name: Manual Docker Release — dar-backup
 on:
   workflow_dispatch:
 
+concurrency:
+  # Shared with image-refresh.yml so two jobs cannot race the mutable tag.
+  group: dar-backup-dockerhub-publication
+  cancel-in-progress: false
+
 permissions:
   contents: write
   security-events: write
-  pull-requests: write
   id-token: write        # required for cosign keyless signing via GitHub OIDC
 
 env:
@@ -14,6 +18,7 @@ env:
   DOCKERHUB_REPO: per2jensen/dar-backup
   FINAL_IMAGE_NAME: dar-backup
   UBUNTU_VERSION: 24.04
+  SOURCE_SHA: ${{ github.sha }}
 
 jobs:
   release:
@@ -23,14 +28,52 @@ jobs:
       # -----------------------------------------------------------------------
       # 0. Source and check version number + set artifact filenames
       # -----------------------------------------------------------------------
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - name: Require a main-branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          if [[ "${DISPATCH_REF}" != "refs/heads/main" ]]; then
+            echo "❌ Releases must be dispatched from main, not ${DISPATCH_REF}"
+            exit 1
+          fi
+
+      - name: Checkout immutable release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Full history needed for git rev-parse, tags, and git push.
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          path: source
+
+      - name: Validate immutable release source
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        working-directory: source
+        run: |
+          scripts/validate_release_source.sh "${SOURCE_SHA}" "${DISPATCH_REF}"
+
+      # Release metadata is committed only after the signed image has been
+      # promoted. Keep that mutable work out of the immutable source checkout.
+      - name: Checkout release housekeeping tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          path: housekeeping
+
+      - name: Verify housekeeping starts at release source
+        working-directory: housekeeping
+        run: |
+          HOUSEKEEPING_SHA=$(git rev-parse HEAD)
+          if [[ "${HOUSEKEEPING_SHA}" != "${SOURCE_SHA}" ]]; then
+            echo "❌ Housekeeping checkout no longer matches the release source"
+            echo "   source:       ${SOURCE_SHA}"
+            echo "   housekeeping: ${HOUSEKEEPING_SHA}"
+            exit 1
+          fi
 
       # Abort release if IMAGE_VERSION is not set, is empty or if the tag already exists.
       - name: Read and validate IMAGE_VERSION
+        working-directory: source
         run: |
           if [[ ! -f IMAGE_VERSION ]]; then
             echo "❌ IMAGE_VERSION file not found — aborting."
@@ -39,10 +82,10 @@ jobs:
 
           FINAL_VERSION=$(cat IMAGE_VERSION)
 
-          if [[ -z "${FINAL_VERSION}" ]]; then
-            echo "❌ IMAGE_VERSION is empty — aborting."
+          if [[ ! "${FINAL_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "❌ IMAGE_VERSION is not a supported release version: '${FINAL_VERSION}'"
             exit 1
-          fi          
+          fi
 
           echo "FINAL_VERSION=${FINAL_VERSION}" >> $GITHUB_ENV
           if git rev-parse "v${FINAL_VERSION}" >/dev/null 2>&1; then
@@ -50,9 +93,21 @@ jobs:
             exit 1
           fi
 
+          if MANIFEST_OUTPUT=$(docker manifest inspect \
+            "${DOCKERHUB_REPO}:${FINAL_VERSION}" 2>&1); then
+            echo "❌ Docker Hub tag ${DOCKERHUB_REPO}:${FINAL_VERSION} already exists — aborting."
+            exit 1
+          elif ! grep -Eqi 'manifest unknown|no such manifest|not found' \
+            <<< "${MANIFEST_OUTPUT}"; then
+            echo "❌ Unable to determine whether the Docker Hub tag exists"
+            echo "${MANIFEST_OUTPUT}"
+            exit 1
+          fi
+
           echo "✅ Version ${FINAL_VERSION} is new — proceeding."
 
       - name: Set artifact filenames
+        working-directory: source
         run: |
           TIMESTAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
           echo "SBOM_FILE=doc/sbom/sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}-${TIMESTAMP}.cyclonedx.json" >> $GITHUB_ENV
@@ -63,6 +118,7 @@ jobs:
       # 1. install dependencies 
       # -----------------------------------------------------------------------
       - name: dependencies
+        working-directory: source
         run: |
           sudo apt-get install -y python3-pytest
 
@@ -72,23 +128,41 @@ jobs:
       # 2. Toolchain
       # -----------------------------------------------------------------------
       - name: Install pinned Syft and Grype
+        working-directory: source
         run: sudo python3 scripts/anchore_tools.py install --bin-dir /usr/local/bin
 
-      - uses: sigstore/cosign-installer@v3
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       # -----------------------------------------------------------------------
       # 3. Version files (read DAR_BACKUP_VERSION / DAR_VERSION from repo)
       # -----------------------------------------------------------------------
       - name: Read version pins
         id: versions
+        working-directory: source
         run: |
           echo "DAR_BACKUP_VERSION=$(cat DAR_BACKUP_VERSION)" >> $GITHUB_OUTPUT
           echo "DAR_VERSION=$(cat DAR_VERSION)"               >> $GITHUB_OUTPUT
+          source config/anchore-tool-versions.env
+          echo "GRYPE_VERSION=${GRYPE_VERSION}"               >> $GITHUB_OUTPUT
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Cache Grype DB
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.versions.outputs.GRYPE_VERSION }}-${{ steps.date.outputs.date }}
+          restore-keys: |
+            grype-db-${{ runner.os }}-${{ steps.versions.outputs.GRYPE_VERSION }}-
 
       # -----------------------------------------------------------------------
-      # 4. Build: dev image → test dev image  → final tagged image  (mirrors `make final`)
+      # 4. Build: dev image → test dev image → final image without duplicate scan
       # -----------------------------------------------------------------------
       - name: Build dev image
+        working-directory: source
         run: |
           make \
             FINAL_VERSION=dev \
@@ -97,6 +171,7 @@ jobs:
             dev
 
       - name: Test dev image
+        working-directory: source
         run: |
           make \
             FINAL_VERSION=dev \
@@ -105,17 +180,19 @@ jobs:
             test
 
       - name: Create final release image (re-label, no rebuild)
+        working-directory: source
         run: |
           make \
             FINAL_VERSION=${{ env.FINAL_VERSION }} \
             DAR_BACKUP_VERSION=${{ steps.versions.outputs.DAR_BACKUP_VERSION }} \
             DAR_VERSION=${{ steps.versions.outputs.DAR_VERSION }} \
-            final
+            final-noscan
 
       # -----------------------------------------------------------------------
       # 5. Verify image before it leaves the runner
       # -----------------------------------------------------------------------
       - name: Verify CLI version
+        working-directory: source
         run: |
           make \
             FINAL_VERSION=${{ env.FINAL_VERSION }} \
@@ -123,12 +200,14 @@ jobs:
             verify-cli-version
 
       - name: Verify OCI labels
+        working-directory: source
         run: |
           make \
             FINAL_VERSION=${{ env.FINAL_VERSION }} \
             verify-labels
 
       - name: Verify embedded LICENSE and exact OCI license label
+        working-directory: source
         run: |
           IMAGE="${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }}"
           EXPECTED_LICENSE_SHA256="3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
@@ -156,23 +235,23 @@ jobs:
             exit 1
           fi
 
-          echo "✅ /LICENSE SHA-256 and org.opencontainers.image.licenses=${ACTUAL_LICENSE} verified"
+          ACTUAL_REVISION=$(docker inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+            "${IMAGE}")
+          if [[ "${ACTUAL_REVISION}" != "${SOURCE_SHA}" ]]; then
+            echo "❌ org.opencontainers.image.revision mismatch"
+            echo "   expected: '${SOURCE_SHA}'"
+            echo "   actual:   '${ACTUAL_REVISION}'"
+            exit 1
+          fi
+
+          echo "✅ /LICENSE, license label, and immutable source revision verified"
 
       # -----------------------------------------------------------------------
       # 6. SBOM (CycloneDX) — generated from the local image before push
       # -----------------------------------------------------------------------
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Cache Grype DB
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/grype/db
-          key: grype-db-${{ runner.os }}-${{ steps.date.outputs.date }}
-          restore-keys: grype-db-${{ runner.os }}-
-
       - name: Generate SBOM with Syft (CycloneDX)
+        working-directory: source
         run: |
           SYFT_CHECK_FOR_APP_UPDATE=false \
             syft "docker:${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }}" \
@@ -183,6 +262,7 @@ jobs:
       # 7. Vulnerability scan (Grype) — gate: fail on High
       # -----------------------------------------------------------------------
       - name: Scan image with Grype (fail on High)
+        working-directory: source
         run: |
           GRYPE_CHECK_FOR_APP_UPDATE=false \
             grype \
@@ -193,120 +273,81 @@ jobs:
               > ${{ env.SARIF_FILE }}
 
       - name: Upload Grype SARIF to GitHub Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4.37.3
+        if: ${{ always() && env.SARIF_FILE != '' && hashFiles(format('source/{0}', env.SARIF_FILE)) != '' }}
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
-          sarif_file: ${{ env.SARIF_FILE }}
+          sarif_file: source/${{ env.SARIF_FILE }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Grype SARIF as Actions artifact
-        if: always()
-        uses: actions/upload-artifact@v7
+        if: ${{ always() && env.SARIF_FILE != '' && hashFiles(format('source/{0}', env.SARIF_FILE)) != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: grype-report-${{ env.FINAL_VERSION }}
-          path: ${{ env.SARIF_FILE }}
+          path: source/${{ env.SARIF_FILE }}
 
       # -----------------------------------------------------------------------
       # 8. Push to Docker Hub
       # -----------------------------------------------------------------------
-      - name: Docker login
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" \
-            | docker login -u "${{ secrets.DOCKERHUB_USER_NAME }}" --password-stdin
-
-      - name: Tag and push versioned and :latest
-        run: |
-          docker tag \
-            ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }} \
-            ${{ env.DOCKERHUB_REPO }}:${{ env.FINAL_VERSION }}
-          docker tag \
-            ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }} \
-            ${{ env.DOCKERHUB_REPO }}:latest
-          docker push --all-tags ${{ env.DOCKERHUB_REPO }}
-
-
-      # Capture the immutable digest — signing steps use this so signatures
-      # are never bound to a mutable tag.
-      - name: Capture image digest
-        id: image_digest
-        run: |
-          DIGEST=$(docker inspect \
-            --format='{{index .RepoDigests 0}}' \
-            ${{ env.DOCKERHUB_REPO }}:${{ env.FINAL_VERSION }})
-          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
-          echo "Pushed digest: ${DIGEST}"
-
-      # -----------------------------------------------------------------------
-      # 9. Cosign — keyless signature (Sigstore / Rekor, no key material)
-      # -----------------------------------------------------------------------
-      - name: Sign image with cosign (keyless, OIDC)
-        id: cosign_sign
+      - name: Revalidate main before publication
         env:
-          COSIGN_EXPERIMENTAL: "1"
+          DISPATCH_REF: ${{ github.ref }}
+        working-directory: source
         run: |
-          OUTPUT=$(cosign sign --yes \
-            "${{ steps.image_digest.outputs.digest }}" 2>&1)
-          echo "${OUTPUT}"
+          scripts/validate_release_source.sh "${SOURCE_SHA}" "${DISPATCH_REF}"
 
-          REKOR_INDEX=$(echo "${OUTPUT}" \
-            | grep -oP 'tlog entry created with index: \K[0-9]+' || true)
-          if [ -n "${REKOR_INDEX}" ]; then
-            REKOR_URL="https://search.sigstore.dev/?logIndex=${REKOR_INDEX}"
-          else
-            REKOR_URL=""
-          fi
-          echo "rekor_url=${REKOR_URL}"    >> $GITHUB_OUTPUT
-          echo "rekor_index=${REKOR_INDEX}" >> $GITHUB_OUTPUT
-          echo "Rekor entry: ${REKOR_URL}"
+      # The shared action owns the complete publication transaction: candidate
+      # push, digest capture, signing, attestation, immutable pull/runtime
+      # verification, and only then promotion plus verification of :latest.
+      - name: Publish, sign, and verify image
+        id: publish_image
+        uses: ./source/.github/actions/publish-image
+        with:
+          local-image: ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }}
+          repository: ${{ env.DOCKERHUB_REPO }}
+          version: ${{ env.FINAL_VERSION }}
+          expected-cli-version: ${{ steps.versions.outputs.DAR_BACKUP_VERSION }}
+          sbom-file: source/${{ env.SBOM_FILE }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USER_NAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # -----------------------------------------------------------------------
-      # 10. Cosign — attach SBOM as a signed in-toto attestation
-      # -----------------------------------------------------------------------
-      - name: Attach SBOM attestation with cosign
-        id: cosign_attest
-        env:
-          COSIGN_EXPERIMENTAL: "1"
+      - name: Publish failure badge
+        if: failure() && steps.publish_image.outcome == 'failure'
+        working-directory: housekeeping
         run: |
-          cosign attest --yes \
-            --predicate ${{ env.SBOM_FILE }} \
-            --type cyclonedx \
-            "${{ steps.image_digest.outputs.digest }}"
-
-      # -----------------------------------------------------------------------
-      # 11. Rollback — remove image from Docker Hub if signing failed
-      # -----------------------------------------------------------------------
-      - name: Rollback — remove image from Docker Hub (signing failed)
-        if: >
-          failure() && (
-            steps.cosign_sign.outcome   == 'failure' ||
-            steps.cosign_attest.outcome == 'failure'
-          )
-        env:
-          DOCKERHUB_USER:  ${{ secrets.DOCKERHUB_USER_NAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          python3 scripts/remove_dockerhub_tag.py \
-            --repo ${{ env.DOCKERHUB_REPO }} \
-            --tag  ${{ env.FINAL_VERSION }}
-
-      - name: Rollback - write cosign failure badge
-        if: failure() && (steps.cosign_sign.outcome == 'failure' || steps.cosign_attest.outcome == 'failure')
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          python3 scripts/write_cosign_badge.py --failed
-          scripts/git_commit_if_changed.sh  "cosign badge: signing failed for ${{ env.FINAL_VERSION }}"  doc/cosign_badge.json
+          scripts/publish_cosign_badge.sh \
+            failed \
+            "cosign badge: publication failed for ${{ env.FINAL_VERSION }} at ${{ steps.publish_image.outputs.failure_stage }} (run ${{ github.run_id }})"
 
 
       # -----------------------------------------------------------------------
       # 12. Git housekeeping — build log, patch README, annotated tag
       # -----------------------------------------------------------------------
       - name: Housekeeping — build log, README, badge, annotation, git tag
+        working-directory: housekeeping
         run: |
           git config --global user.name  "github-actions"
           git config --global user.email "actions@github.com"
 
-          DIGEST="${{ steps.image_digest.outputs.digest }}"
+          git fetch origin main
+          REMOTE_MAIN_SHA=$(git rev-parse refs/remotes/origin/main)
+          if [[ "${REMOTE_MAIN_SHA}" != "${SOURCE_SHA}" ]]; then
+            echo "❌ main advanced after Docker publication"
+            echo "   release source: ${SOURCE_SHA}"
+            echo "   current main:   ${REMOTE_MAIN_SHA}"
+            echo "   The signed image is valid; rerun housekeeping without rebuilding it."
+            exit 1
+          fi
+
+          install -D -m 0644 \
+            "../source/${{ env.SBOM_FILE }}" \
+            "${{ env.SBOM_FILE }}"
+          install -D -m 0644 \
+            "../source/${{ env.SARIF_FILE }}" \
+            "${{ env.SARIF_FILE }}"
+
+          DIGEST="${{ steps.publish_image.outputs.digest }}"
+          SBOM_BASENAME=$(basename "${{ env.SBOM_FILE }}")
           BUILD_NUMBER=$(jq length doc/build-history.json 2>/dev/null || echo 0)
           IMAGE_ID=$(docker inspect --format '{{ .Id }}' \
             ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }})
@@ -314,7 +355,7 @@ jobs:
             --format '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' \
             ${{ env.FINAL_IMAGE_NAME }}:${{ env.FINAL_VERSION }})
 
-          export PYTHONPATH="${PYTHONPATH}:scripts"
+          export PYTHONPATH="${PYTHONPATH:-}:scripts"
           python3 scripts/update_build_log.py \
           --dar-backup-version "${{ steps.versions.outputs.DAR_BACKUP_VERSION }}" \
           --dar-version "${{ steps.versions.outputs.DAR_VERSION }}" \
@@ -323,7 +364,7 @@ jobs:
           --version          "${{ env.FINAL_VERSION }}" \
           --base             "ubuntu:${{ env.UBUNTU_VERSION }}" \
           --base-image-digest "${BASE_IMAGE_DIGEST}" \
-          --git-rev          "$(git rev-parse --short HEAD)" \
+          --git-rev          "${SOURCE_SHA}" \
           --created          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           --url              "https://hub.docker.com/layers/${{ env.DOCKERHUB_REPO }}/${{ env.FINAL_VERSION }}/images/${DIGEST#*@}" \
           --digest           "${DIGEST#*@}" \
@@ -331,9 +372,9 @@ jobs:
           --grype-sarif      "${{ env.SARIF_FILE }}" \
           --sbom-file        "${{ env.SBOM_FILE }}" \
           --sbom-release-asset-url \
-            "https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/sbom-${{ env.FINAL_IMAGE_NAME }}-${{ env.FINAL_VERSION }}.cyclonedx.json" \
+            "https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/${SBOM_BASENAME}" \
           --cosign-signed    "true" \
-          --cosign-rekor-url "${{ steps.cosign_sign.outputs.rekor_url }}" \
+          --cosign-rekor-url "${{ steps.publish_image.outputs.rekor_url }}" \
           --cosign-image-digest "${DIGEST}" \
           --build-runner     "${{ runner.os }}-${{ runner.arch }}" \
           --github-run-id    "${{ github.run_id }}" \
@@ -370,14 +411,16 @@ jobs:
              clonepulse/fetch_clones.json
 
           git status
-          git push origin HEAD
+          git push origin HEAD:refs/heads/main
 
           if git rev-parse "v${{ env.FINAL_VERSION }}" >/dev/null 2>&1; then
-            echo "🔁 Git tag v${{ env.FINAL_VERSION }} already exists — skipping."
+            echo "❌ Git tag v${{ env.FINAL_VERSION }} appeared during the release"
+            exit 1
           else
             git tag -a "v${{ env.FINAL_VERSION }}" \
-              -m "Release version v${{ env.FINAL_VERSION }}"
-            git push origin "v${{ env.FINAL_VERSION }}"
+              -m "Release version v${{ env.FINAL_VERSION }}" \
+              "${SOURCE_SHA}"
+            git push origin "refs/tags/v${{ env.FINAL_VERSION }}"
             echo "✅ Git tag v${{ env.FINAL_VERSION }} created and pushed."
           fi
 
@@ -386,11 +429,15 @@ jobs:
       # 13. GitHub Release — attach SBOM and SARIF
       # -----------------------------------------------------------------------
       - name: Create GitHub Release with assets
-        uses: softprops/action-gh-release@v3
+        id: github_release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: v${{ env.FINAL_VERSION }}
+          target_commitish: ${{ env.SOURCE_SHA }}
           name: dar-backup-image Release v${{ env.FINAL_VERSION }}
           generate_release_notes: false
+          prerelease: ${{ contains(env.FINAL_VERSION, '-') }}
+          working_directory: housekeeping
           body: |
             ## dar-backup-image Release v${{ env.FINAL_VERSION }}
 
@@ -400,10 +447,11 @@ jobs:
 
             Based on:
 
+            - Source commit [${{ env.SOURCE_SHA }}](https://github.com/${{ github.repository }}/commit/${{ env.SOURCE_SHA }})
             - dar-backup version ${{ steps.versions.outputs.DAR_BACKUP_VERSION }}
             - dar version ${{ steps.versions.outputs.DAR_VERSION }}
             - Ubuntu ${{ env.UBUNTU_VERSION }} base image
-            - [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile)
+            - [Dockerfile](https://github.com/${{ github.repository }}/blob/${{ env.SOURCE_SHA }}/Dockerfile)
 
             ## Changelog
             See [Changelog.md](https://github.com/per2jensen/dar-backup-image/blob/main/Changelog.md) for what changed in this release.
@@ -419,7 +467,7 @@ jobs:
             ```
 
             ## Rekor transparency log
-            ${{ steps.cosign_sign.outputs.rekor_url }}
+            ${{ steps.publish_image.outputs.rekor_url }}
 
             ## SBOM
             The CycloneDX SBOM is attached to this release as an asset.
@@ -434,8 +482,10 @@ jobs:
       # 14. Job summary
       # -----------------------------------------------------------------------
       - name: Post summary
+        working-directory: housekeeping
         run: |
           SARIF=${{ env.SARIF_FILE }}
+          SBOM_BASENAME=$(basename "${{ env.SBOM_FILE }}")
           source <(python3 scripts/grype_summary_env.py "${SARIF}")
 
           echo "## ✅ dar-backup Release v${{ env.FINAL_VERSION }}"          >> $GITHUB_STEP_SUMMARY
@@ -443,12 +493,13 @@ jobs:
           echo "| Field | Value |"                                             >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|"                                             >> $GITHUB_STEP_SUMMARY
           echo "| Docker image       | \`${{ env.DOCKERHUB_REPO }}:${{ env.FINAL_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image digest       | \`${{ steps.image_digest.outputs.digest }}\` |"           >> $GITHUB_STEP_SUMMARY
+          echo "| Image digest       | \`${{ steps.publish_image.outputs.digest }}\` |"           >> $GITHUB_STEP_SUMMARY
+          echo "| Source commit      | \`${SOURCE_SHA}\` |"                                      >> $GITHUB_STEP_SUMMARY
           echo "| dar-backup version | \`${{ steps.versions.outputs.DAR_BACKUP_VERSION }}\` |"   >> $GITHUB_STEP_SUMMARY
           echo "| DAR version        | \`${{ steps.versions.outputs.DAR_VERSION }}\` |"          >> $GITHUB_STEP_SUMMARY
           echo "| Cosign signed      | ✅ keyless (Sigstore / Rekor) |"       >> $GITHUB_STEP_SUMMARY
-          echo "| Rekor entry        | ${{ steps.cosign_sign.outputs.rekor_url }} |"              >> $GITHUB_STEP_SUMMARY
-          echo "| SBOM               | [${{ env.SBOM_FILE }}](https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/${{ env.SBOM_FILE }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rekor entry        | ${{ steps.publish_image.outputs.rekor_url }} |"              >> $GITHUB_STEP_SUMMARY
+          echo "| SBOM               | [${SBOM_BASENAME}](https://github.com/${{ github.repository }}/releases/download/v${{ env.FINAL_VERSION }}/${SBOM_BASENAME}) |" >> $GITHUB_STEP_SUMMARY
           echo ""                                                               >> $GITHUB_STEP_SUMMARY
           echo "### Grype vulnerability scan"                                  >> $GITHUB_STEP_SUMMARY
           echo ""                                                               >> $GITHUB_STEP_SUMMARY

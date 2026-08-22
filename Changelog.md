@@ -4,6 +4,28 @@
 
 ### Fixed
 
+- share one tested Docker publication interface between manual releases and
+  weekly refreshes, including candidate rollback, digest signing and SBOM
+  attestation, immutable remote pull/runtime verification, and delayed
+  `:latest` promotion
+- keep weekly refresh application source, current orchestration, and mutable
+  housekeeping in separate checkouts instead of overlaying a `main` Makefile
+  onto an immutable release tag
+- serialize release and refresh publication with one concurrency group so
+  their `:latest` updates cannot race
+- keep `FINAL_VERSION=dev` for development while making release targets require
+  an exact `IMAGE_VERSION` match and refresh targets require an explicit,
+  positive numeric `BASE_VERSION-N` derivation from build history, independent
+  of `IMAGE_VERSION`
+- make manual releases build from an immutable full source commit, keep
+  housekeeping in a separate checkout, and tag the exact source revision
+- push release candidates under their version first, roll that tag back on
+  signing failure, and promote `:latest` only after signing and attestation
+- persist the cosign failure badge to `main` with bounded concurrent-push
+  retries, while preserving the previously published `:latest`
+- construct release SBOM links from the uploaded asset basename and restore
+  the Grype cache before the single dedicated release scan
+- pin every external action in the release workflow to an immutable commit SHA
 - avoid unbounded package installation before CI checkout and prevent the
   always-run SBOM summary from masking an unavailable checkout
 - describe edge-mode badge evidence as 1% bitrot at both archive edges instead
