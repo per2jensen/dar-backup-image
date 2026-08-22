@@ -1,6 +1,21 @@
 """Regression tests for generated documentation-page release selection."""
 
-from scripts.update_pages import ANY_VERSION_RE, RELEASE_RE
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+
+MODULE_PATH = Path(__file__).parents[1] / "scripts" / "update_pages.py"
+MODULE_SPEC = importlib.util.spec_from_file_location("update_pages", MODULE_PATH)
+if MODULE_SPEC is None or MODULE_SPEC.loader is None:
+    raise RuntimeError(f"Unable to load page generator from {MODULE_PATH}")
+UPDATE_PAGES_MODULE = importlib.util.module_from_spec(MODULE_SPEC)
+sys.modules[MODULE_SPEC.name] = UPDATE_PAGES_MODULE
+MODULE_SPEC.loader.exec_module(UPDATE_PAGES_MODULE)
+ANY_VERSION_RE = UPDATE_PAGES_MODULE.ANY_VERSION_RE
+RELEASE_RE = UPDATE_PAGES_MODULE.RELEASE_RE
 
 
 def test_release_filter_accepts_stable_and_release_candidate_tags() -> None:

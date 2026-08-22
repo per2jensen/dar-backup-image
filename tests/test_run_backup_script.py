@@ -155,6 +155,9 @@ def build_fake_docker_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
     command_log = write_fake_docker(fake_bin)
     environment = {
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        # An empty value exercises the script's default without inheriting the
+        # IMAGE selected by make test-nobuild for integration tests.
+        "IMAGE": "",
         "WORKDIR": str(tmp_path / "workdir"),
         "RUN_AS_UID": "1000",
         "RUN_AS_GID": "1000",
