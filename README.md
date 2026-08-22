@@ -328,7 +328,8 @@ Every image released to Docker Hub is produced by a fully automated GitHub Actio
 
 Manual releases and weekly image refreshes use the same tested publication
 component and a shared concurrency lock, so their signing, rollback, remote
-verification, and `:latest` promotion behavior cannot drift apart or race.
+verification, `:latest` promotion, and always-run Docker credential cleanup
+cannot drift apart or race.
 
 ### What cosign keyless signing provides
 

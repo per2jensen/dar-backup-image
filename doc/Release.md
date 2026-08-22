@@ -108,6 +108,9 @@ the Docker publication boundary for both workflows. It logs in, pushes the
 versioned candidate, captures its immutable digest, signs and attests it, pulls
 that digest back from Docker Hub, runs its CLI version check, verifies its OCI
 version, promotes it to `:latest`, and finally pulls and checks `:latest`.
+Whether publication succeeds or fails, its final best-effort step removes the
+Docker Hub credentials from the runner with `docker logout`; cleanup failure is
+reported as a warning and cannot mask the publication result.
 
 Promotion of the remotely verified digest to `:latest` is the publication
 boundary. A failure before remote verification removes the attempted candidate

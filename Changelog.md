@@ -7,7 +7,7 @@
 - share one tested Docker publication interface between manual releases and
   weekly refreshes, including candidate rollback, digest signing and SBOM
   attestation, immutable remote pull/runtime verification, and delayed
-  `:latest` promotion
+  `:latest` promotion, followed by always-run Docker credential cleanup
 - keep weekly refresh application source, current orchestration, and mutable
   housekeeping in separate checkouts instead of overlaying a `main` Makefile;
   select application source from the latest build-history record's Git revision

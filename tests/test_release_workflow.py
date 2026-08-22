@@ -59,6 +59,22 @@ def test_publish_action_rolls_back_only_an_unverified_candidate() -> None:
     assert '--tag "latest"' not in action
 
 
+def test_shared_publisher_always_removes_docker_credentials() -> None:
+    """Release and refresh inherit an always-run best-effort Docker logout."""
+    action = PUBLISH_ACTION.read_text(encoding="utf-8")
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    refresh = REFRESH_WORKFLOW.read_text(encoding="utf-8")
+
+    cleanup = action.index("- name: Remove Docker Hub credentials")
+    report_failure = action.index("- name: Report publication failure")
+    assert cleanup < report_failure
+    assert "if: always()" in action[cleanup:]
+    assert "continue-on-error: true" in action[cleanup:]
+    assert "if ! docker logout; then" in action[cleanup:]
+    assert "uses: ./source/.github/actions/publish-image" in release
+    assert "uses: ./orchestration/.github/actions/publish-image" in refresh
+
+
 def test_publication_workflows_share_one_concurrency_group() -> None:
     """Release and refresh jobs cannot concurrently mutate Docker Hub latest."""
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
