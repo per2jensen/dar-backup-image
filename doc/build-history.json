@@ -1410,7 +1410,7 @@
     },
     "sbom": {
       "file": "doc/sbom/sbom-dar-backup-0.9.0-2026-08-16T15-23-01Z.cyclonedx.json",
-      "release_asset_url": "https://github.com/per2jensen/dar-backup-image/releases/download/v0.9.0/sbom-dar-backup-0.9.0.cyclonedx.json"
+      "release_asset_url": "https://github.com/per2jensen/dar-backup-image/releases/download/v0.9.0/sbom-dar-backup-0.9.0-2026-08-16T15-23-01Z.cyclonedx.json"
     },
     "cosign": {
       "signed": true,

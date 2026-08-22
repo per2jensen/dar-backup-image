@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- align the README, release guide, contributor guide, demo, and generated site
+  with the implemented helper defaults, mount paths, release/refresh policy,
+  Cosign identities, and candidate verification flow
+- make `DOCKER_PULL=true` pull before inspecting the selected image, validate
+  the pull policy explicitly, and cover the helper's default image and mounts
+  with isolated subprocess tests
 - share one tested Docker publication interface between manual releases and
   weekly refreshes, including candidate rollback, digest signing and SBOM
   attestation, immutable remote pull/runtime verification, and delayed

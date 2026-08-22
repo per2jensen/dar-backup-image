@@ -382,6 +382,6 @@ jobs:
           echo "### Verify the signature" >> "${GITHUB_STEP_SUMMARY}"
           echo '```bash' >> "${GITHUB_STEP_SUMMARY}"
           echo "cosign verify ${{ env.DOCKERHUB_REPO }}:${{ env.REBUILD_VERSION }} \\" >> "${GITHUB_STEP_SUMMARY}"
-          echo '  --certificate-identity-regexp="https://github.com/${{ github.repository }}" \' >> "${GITHUB_STEP_SUMMARY}"
+          echo '  --certificate-identity-regexp="^https://github\.com/${{ github.repository }}/\.github/workflows/(release|image-refresh)\.yml@refs/heads/main$" \' >> "${GITHUB_STEP_SUMMARY}"
           echo '  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"' >> "${GITHUB_STEP_SUMMARY}"
           echo '```' >> "${GITHUB_STEP_SUMMARY}"

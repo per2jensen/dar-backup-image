@@ -159,6 +159,22 @@ def test_github_release_finalizer_requires_all_assets() -> None:
     assert "if [[ ! -s \"${asset}\" ]]" in action
 
 
+def test_release_verification_instructions_restrict_signing_identity() -> None:
+    """Published instructions accept only the two workflows on main."""
+    documents = (
+        RELEASE_WORKFLOW.read_text(encoding="utf-8"),
+        REFRESH_WORKFLOW.read_text(encoding="utf-8"),
+        FINALIZE_ACTION.read_text(encoding="utf-8"),
+    )
+
+    for document in documents:
+        assert (
+            r"/\.github/workflows/(release|image-refresh)\.yml@refs/heads/main$"
+            in document
+        )
+        assert '--certificate-identity-regexp="https://github.com/' not in document
+
+
 def test_recovery_workflow_only_finalizes_a_verified_existing_release() -> None:
     """Recovery verifies prior state and contains no publication operation."""
     workflow = FINALIZE_WORKFLOW.read_text(encoding="utf-8")

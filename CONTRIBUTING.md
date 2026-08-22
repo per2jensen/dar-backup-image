@@ -23,9 +23,19 @@ This document outlines the basic rules and workflow for contributions.
 
 **2. Run tests locally**  
 
+Build the development image and run the complete suite:
+
 ```bash
-pytest -v
+make test
 ```
+
+If `dar-backup:dev` is already current, run the suite without rebuilding:
+
+```bash
+make test-nobuild IMAGE=dar-backup:dev
+```
+
+See [dev.md](dev.md) for prerequisites and local-wheel testing.
 
 **3. Ensure no regressions**
 
@@ -39,11 +49,9 @@ pytest -v
 
 Follow the layout in existing files. Please match the current style; corrections to poorly styled code are encouraged.
 
-- Use Black for formatting in Python code.
+- Follow PEP 8 and the formatting already used in the surrounding module.
 
-- Use isort for import ordering.
-
-- Use flake8 to catch basic errors.
+- Keep Bash explicit, quoted, and guarded with `set -euo pipefail`.
 
 **5. Commit and push**
 
@@ -73,11 +81,13 @@ Checking the license box in the PR template is **not sufficient** on its own.
 
 All pull requests are automatically validated by GitHub Actions.
 
-- Code style checks (Black, isort, flake8) must pass.
+- The pytest, image-build, and vulnerability-scan jobs applicable to the change
+  must pass.
 
 - PRs will not be merged if CI fails.
 
-- Run the same commands locally before pushing to avoid unnecessary iterations.
+- Run `make test`, or the documented focused test command for the component,
+  before pushing.
 
 ## Reporting Issues
 

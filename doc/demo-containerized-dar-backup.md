@@ -2,7 +2,8 @@
 
 This demo illustrates how to use [`dar-backup`](https://github.com/per2jensen/dar-backup) to perform reliable, verifiable, and selective file backups — entirely from within a container.
 
-It is also demonstrated how to verify if the image was built & released from my Github workflow.
+It also demonstrates how to verify that the image was published by this
+repository's authorized GitHub Actions workflows.
 
 Using Docker, you can mount your data, backup, and restore directories and let `dar-backup` handle slicing, verification, cataloging, and parity (par2) redundancy generation for integrity assurance.
 
@@ -184,61 +185,42 @@ Status: Downloaded newer image for per2jensen/dar-backup:latest
 
 #### Verify image digest
 
-Notice the `Digest`, it can be found in the [build-history.json](build-history.json) which keeps an audit trail of dar-backup-image builds. This indicates with good probability you downloaded an image which has not been tampered with. It is not a guarantee as my Github project could have been tampered with.
-
-Every image has a set of labels baked in, verify the image digest this way, example using `:latest`:
-
-```bash
-# Pull the image
-docker pull per2jensen/dar-backup:latest
-
-IMG_NO=$(docker inspect per2jensen/dar-backup:latest | jq -r '.[0].Config.Labels["org.opencontainers.image.version"]')
-
-# output: 0.5.26-2  (will differ for newer images)
-echo $IMG_NO 
-0.5.26-2 
-
-# Check the digest Docker reports
-docker inspect per2jensen/dar-backup:latest \
-  | jq -r '.[0].RepoDigests[0]' \
-  | cut -d'@' -f2
-
-# Compare against the recorded digest in build-history.json
-curl -s https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/build-history.json \
-  | jq -r --arg tag "$IMG_NO" '.[] | select(.tag == $tag) | .digest'
-```
-
-If the digest that Docker reports matches the digest from the build_history.json file, the image built & released on Github matches the one you are running.
-
-Here is a verication run of `:latest`, which at the time of writing is `0.5.26-2`.
+The local registry digest can be compared with
+[build-history.json](build-history.json), which records the audit trail for
+releases and refreshes. This detects disagreement between the pulled image and
+the repository record; the subsequent Cosign check authenticates the publisher.
 
 ```bash
-docker pull per2jensen/dar-backup:latest > /dev/null 2>&1
+IMAGE_REF=per2jensen/dar-backup:latest
+docker pull "$IMAGE_REF"
 
-IMG_NO=$(docker inspect per2jensen/dar-backup:latest | jq -r '.[0].Config.Labels["org.opencontainers.image.version"]')
+IMAGE_VERSION=$(docker inspect "$IMAGE_REF" \
+  | jq -r '.[0].Config.Labels["org.opencontainers.image.version"]')
+LOCAL_DIGEST=$(docker inspect "$IMAGE_REF" \
+  | jq -r '.[0].RepoDigests[0] | split("@")[1]')
+RECORDED_DIGEST=$(curl -fsSL \
+  https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/build-history.json \
+  | jq -r --arg tag "$IMAGE_VERSION" '.[] | select(.tag == $tag) | .digest')
 
-echo $IMG_NO 
-0.5.26-2
-
-docker inspect per2jensen/dar-backup:latest \
-  | jq -r '.[0].RepoDigests[0]' \
-  | cut -d'@' -f2
-sha256:2660f696228895316c1a57fb3b92f369f85a651d50c25ac1e4981f604c8f09aa
-
-
-# Compare against the recorded digest in build-history.json
-curl -s https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/build-history.json \
-  | jq -r --arg tag "$IMG_NO" '.[] | select(.tag == $tag) | .digest'
-sha256:2660f696228895316c1a57fb3b92f369f85a651d50c25ac1e4981f604c8f09aa
+test -n "$LOCAL_DIGEST"
+test "$LOCAL_DIGEST" = "$RECORDED_DIGEST"
+printf 'Verified recorded digest for %s: %s\n' "$IMAGE_VERSION" "$LOCAL_DIGEST"
 ```
-
-the digests matches, all good :-)
 
 #### Verify the image using Cosign
 
-The images are cosigned. The signed images can be verified as being built on my Release pipeline on Github.
+Install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
+then verify the immutable digest and restrict the certificate identity to the
+two authorized workflows on `main`:
 
-Read more about cosigning and how to do the verification in the [main README](https://github.com/per2jensen/dar-backup-image#what-cosign-keyless-signing-provides).
+```bash
+cosign verify "per2jensen/dar-backup@${LOCAL_DIGEST}" \
+  --certificate-identity-regexp='^https://github\.com/per2jensen/dar-backup-image/\.github/workflows/(release|image-refresh)\.yml@refs/heads/main$' \
+  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+```
+
+Read more about signing and SBOM attestation verification in the
+[main README](../README.md#verifying-an-image-yourself).
 
 ---
 

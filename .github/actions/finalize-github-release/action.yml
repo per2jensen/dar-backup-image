@@ -96,7 +96,7 @@ runs:
           ## Verify the signature
           ```bash
           cosign verify ${{ inputs.dockerhub-repository }}:${{ inputs.version }} \
-             --certificate-identity-regexp="https://github.com/${{ inputs.github-repository }}" \
+             --certificate-identity-regexp="^https://github\.com/${{ inputs.github-repository }}/\.github/workflows/(release|image-refresh)\.yml@refs/heads/main$" \
              --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
           ```
 

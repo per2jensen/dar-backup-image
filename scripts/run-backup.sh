@@ -99,6 +99,15 @@ fi
 
 # === Config ===
 IMAGE="${IMAGE:-per2jensen/dar-backup:latest}"
+DOCKER_PULL="${DOCKER_PULL:-false}"
+
+case "$DOCKER_PULL" in
+  true|false) ;;
+  *)
+    echo "❌ DOCKER_PULL must be 'true' or 'false', got: $DOCKER_PULL"
+    exit 1
+    ;;
+esac
 
 WORKDIR="${WORKDIR:-}"
 if [[ -z "$WORKDIR" ]]; then
@@ -183,6 +192,12 @@ case "$BACKUP_TYPE_LC" in
   *) echo "❌ Invalid backup type: $BACKUP_TYPE" ; usage ;;
 esac
 
+# Pull before inspecting so DOCKER_PULL=true also supports a first run where
+# the selected image is not present in the local Docker image store.
+if [[ "$DOCKER_PULL" == "true" ]]; then
+  docker pull "$IMAGE"
+fi
+
 echo "Using image: $IMAGE"
 IMAGE_INFO=$(docker inspect "$IMAGE")
 REPO_DIGEST=$(echo "$IMAGE_INFO" | jq -r '.[0].RepoDigests[0] // empty | split("@")[1]')
@@ -225,13 +240,6 @@ echo
 DOCKER_ARGS=( "$BACKUP_FLAG" "--log-stdout" "--verbose" )
 if [[ -n "$BACKUP_DEF" ]]; then
     DOCKER_ARGS+=( "--backup-definition" "$BACKUP_DEF" )
-fi
-
-# check environment variable to avoid unwanted pulls, if you have a tried and tested image.
-DOCKER_PULL=${DOCKER_PULL:-false}
-# only pull if you state so
-if [[ "$DOCKER_PULL" == "true" ]]; then
-  docker pull "$IMAGE"
 fi
 
 docker run --rm \

@@ -4,7 +4,7 @@
 
 Update the files:
 
-- `IMAGE_VERSION` — set to the new release version (e.g. `0.5.23`)
+- `IMAGE_VERSION` — set to the new release version (for example, `1.0.0-rc1`)
 - `DAR_BACKUP_VERSION` — if dar-backup version has changed
 - `DAR_VERSION` — if DAR version has changed
 - `Changelog.md` — document what changed
@@ -22,8 +22,6 @@ make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
 ### Local sanity check (optional but recommended)
 
 ```bash
-DAR_BACKUP_IMAGE_VERSION=$(cat IMAGE_VERSION)
-
 # Start from scratch, no dev images to interfere
 make dev-nuke
 
@@ -262,11 +260,13 @@ predating the dedicated target use the same tested validator from the isolated
 orchestration checkout as an explicit compatibility path; the recorded
 application tree is still never modified.
 
-### After release
+### After a stable release
 
-The weekly image refresh (every Saturday 04:17 UTC) will automatically pick up
-the new version from `build-history.json` and publish `VERSION-1`, `VERSION-2`
-etc. as `:latest` going forward.
+After a stable `x.y.z` release, the weekly image refresh (every Saturday 04:17
+UTC) selects the newest record from `build-history.json` and publishes
+`VERSION-1`, `VERSION-2`, and so on as `:latest`. A prerelease such as
+`x.y.z-rc1` is deliberately not eligible: while it is the newest history
+record, the scheduled refresh stops without publishing or moving `:latest`.
 
 To archive the Docker image locally alongside the dar archives:
 

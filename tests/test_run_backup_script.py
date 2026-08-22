@@ -13,7 +13,7 @@ Run with:
 
 Prerequisites:
     - scripts/run-backup.sh is executable and on the path relative to CWD
-    - The Docker image referenced by IMAGE env var (default: dar-backup:dev) is present
+    - The Docker image referenced by IMAGE env var is present
     - pytest, and the utils module (sha256sum, compare_to_originals) are available
 """
 
@@ -95,6 +95,73 @@ def build_base_env(workdir: Path) -> dict:
         "RUN_AS_UID": str(os.getuid()),
         "RUN_AS_GID": str(os.getgid()),
     }
+
+
+def write_fake_docker(fake_bin: Path) -> Path:
+    """Create a deterministic Docker CLI substitute for script contract tests.
+
+    Args:
+        fake_bin: Directory in which the executable should be created.
+
+    Returns:
+        Path to the command log written by the fake executable.
+    """
+    fake_bin.mkdir()
+    command_log = fake_bin / "docker-commands.log"
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        """#!/bin/bash
+set -euo pipefail
+command_name="$1"
+shift
+printf '%s' "${command_name}" >> "${FAKE_DOCKER_LOG}"
+printf ' <%s>' "$@" >> "${FAKE_DOCKER_LOG}"
+printf '\n' >> "${FAKE_DOCKER_LOG}"
+
+if [[ "${command_name}" == "pull" ]]; then
+  : > "${FAKE_DOCKER_PULL_MARKER}"
+  exit 0
+fi
+if [[ "${command_name}" == "inspect" ]]; then
+  if [[ "${FAKE_DOCKER_REQUIRE_PULL_FIRST:-false}" == "true" && ! -f "${FAKE_DOCKER_PULL_MARKER}" ]]; then
+    echo "inspect called before pull" >&2
+    exit 1
+  fi
+  printf '[{"RepoDigests":[],"Id":"sha256:%064d"}]\n' 0
+  exit 0
+fi
+if [[ "${command_name}" == "run" ]]; then
+  exit 0
+fi
+echo "unexpected docker command: ${command_name}" >&2
+exit 1
+""",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+    return command_log
+
+
+def build_fake_docker_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    """Build an isolated environment that records Docker CLI invocations.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+
+    Returns:
+        Environment overrides and the path to the Docker command log.
+    """
+    fake_bin = tmp_path / "fake-bin"
+    command_log = write_fake_docker(fake_bin)
+    environment = {
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "WORKDIR": str(tmp_path / "workdir"),
+        "RUN_AS_UID": "1000",
+        "RUN_AS_GID": "1000",
+        "FAKE_DOCKER_LOG": str(command_log),
+        "FAKE_DOCKER_PULL_MARKER": str(tmp_path / "image-pulled"),
+    }
+    return environment, command_log
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +584,66 @@ class TestFailurePaths:
 
 
 # ===========================================================================
-# Section 4 – Image identification output
+# Section 4 – Docker invocation contract
+# ===========================================================================
+
+class TestDockerInvocationContract:
+    """Verify defaults, pull ordering, and mounts without registry access."""
+
+    def test_default_image_and_mounts_are_passed_to_docker(
+        self, tmp_path: Path
+    ) -> None:
+        """Default execution inspects and runs latest with all four mounts."""
+        environment, command_log = build_fake_docker_env(tmp_path)
+
+        run_script(environment, "-t", "FULL")
+
+        commands = command_log.read_text(encoding="utf-8").splitlines()
+        assert commands[0] == "inspect <per2jensen/dar-backup:latest>"
+        assert commands[1].startswith("run ")
+        assert "<per2jensen/dar-backup:latest>" in commands[1]
+        assert "<--full-backup>" in commands[1]
+        for host_name, container_path in (
+            ("backups", "/backups"),
+            ("backup.d", "/backup.d"),
+            ("data", "/data"),
+            ("restore", "/restore"),
+        ):
+            expected_mount = f"<{tmp_path / 'workdir' / host_name}:{container_path}>"
+            assert expected_mount in commands[1]
+
+    def test_pull_true_pulls_before_inspecting_image(self, tmp_path: Path) -> None:
+        """An explicitly requested pull occurs before the local image inspection."""
+        environment, command_log = build_fake_docker_env(tmp_path)
+        environment["DOCKER_PULL"] = "true"
+        environment["FAKE_DOCKER_REQUIRE_PULL_FIRST"] = "true"
+
+        run_script(environment, "-t", "FULL")
+
+        commands = command_log.read_text(encoding="utf-8").splitlines()
+        assert commands[:2] == [
+            "pull <per2jensen/dar-backup:latest>",
+            "inspect <per2jensen/dar-backup:latest>",
+        ]
+        assert len(commands) == 3
+        assert commands[2].startswith("run ")
+
+    def test_invalid_pull_policy_fails_before_docker_invocation(
+        self, tmp_path: Path
+    ) -> None:
+        """An invalid DOCKER_PULL value fails clearly without invoking Docker."""
+        environment, command_log = build_fake_docker_env(tmp_path)
+        environment["DOCKER_PULL"] = "sometimes"
+
+        result = run_script(environment, "-t", "FULL", expect_fail=True)
+
+        combined = result.stdout.decode() + result.stderr.decode()
+        assert "DOCKER_PULL must be 'true' or 'false'" in combined
+        assert not command_log.exists()
+
+
+# ===========================================================================
+# Section 5 – Image identification output
 # ===========================================================================
 
 class TestImageIdentificationOutput:

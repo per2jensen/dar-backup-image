@@ -31,11 +31,13 @@ NUM_RELEASES  = 5
 START_MARKER = "<!-- @@RELEASES_START@@ -->"
 END_MARKER   = "<!-- @@RELEASES_END@@ -->"
 
-# Matches versioned releases: 0.5.24
-# Does NOT match weekly refreshes: 0.5.22-1
-RELEASE_RE = re.compile(r"^\d+\.\d+\.\d+$")
-# Matches both releases and refreshes
-ANY_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-\d+)?$")
+# Matches stable and release-candidate versions, including the historical
+# four-component form. It deliberately excludes numeric weekly refreshes.
+RELEASE_RE = re.compile(r"^\d+(?:\.\d+){2,3}(?:-rc[1-9]\d*)?$")
+# Matches releases and numeric refreshes, but never refreshes of prereleases.
+ANY_VERSION_RE = re.compile(
+    r"^\d+(?:\.\d+){2,3}(?:-rc[1-9]\d*|-[1-9]\d*)?$"
+)
 
 
 def load_history(include_refreshes: bool) -> list[dict]:
