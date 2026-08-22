@@ -83,6 +83,7 @@ jobs:
             --repository .)
           RAW_TAG=$(jq -er '.raw_tag' <<< "${SELECTION}")
           BASE_TAG=$(jq -er '.base_version' <<< "${SELECTION}")
+          REBUILD_VERSION=$(jq -er '.next_refresh_version' <<< "${SELECTION}")
           RECORDED_REVISION=$(jq -er '.recorded_revision' <<< "${SELECTION}")
           APPLICATION_SHA=$(jq -er '.application_sha' <<< "${SELECTION}")
           RELEASE_TAG_SHA=$(jq -er '.release_tag_sha' <<< "${SELECTION}")
@@ -93,14 +94,6 @@ jobs:
             echo "::warning title=Historical release-tag mismatch::v${BASE_TAG} points to ${RELEASE_TAG_SHA}; rebuilding source ${APPLICATION_SHA} recorded by build ${RAW_TAG}"
           fi
 
-          ESCAPED="${BASE_TAG//./\\.}"
-          LAST_N=$(git tag --list \
-            | grep -oP "^v${ESCAPED}-\K[0-9]+$" \
-            | sort -n \
-            | tail -1 \
-            || true)
-          NEXT_N=$([[ -z "${LAST_N}" ]] && echo 1 || echo $((LAST_N + 1)))
-          REBUILD_VERSION="${BASE_TAG}-${NEXT_N}"
           git rev-parse "v${REBUILD_VERSION}" >/dev/null 2>&1 \
             && fail "Git tag v${REBUILD_VERSION} already exists"
 
@@ -157,6 +150,7 @@ jobs:
         working-directory: orchestration
         run: |
           python3 -m pytest -q \
+            tests/test_commit_refresh_housekeeping.py \
             tests/test_finalize_refresh_image.py \
             tests/test_publish_image.py \
             tests/test_select_refresh_source.py \
@@ -289,8 +283,6 @@ jobs:
       - name: Housekeeping — build log, badge, and git tag
         working-directory: housekeeping
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
           git fetch origin main
           REMOTE_MAIN_SHA=$(git rev-parse refs/remotes/origin/main)
           if [[ "${REMOTE_MAIN_SHA}" != "${ORCHESTRATION_SHA}" ]]; then
@@ -336,21 +328,17 @@ jobs:
             --github-run-url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           python3 scripts/write_cosign_badge.py
-          scripts/git_commit_if_changed.sh \
-            "refresh: ${{ env.REBUILD_VERSION }} metadata, evidence, and badge" \
+          scripts/commit_refresh_housekeeping.sh \
+            "${{ env.REBUILD_VERSION }}" \
+            "${APPLICATION_SHA}" \
+            "${DIGEST}" \
             doc/build-history.json \
             "${{ env.SARIF_FILE }}" \
             "${{ env.SBOM_FILE }}" \
             doc/cosign_badge.json
-          git push origin HEAD:refs/heads/main
-
-          git tag -a "v${{ env.REBUILD_VERSION }}" \
-            -m "Weekly image refresh v${{ env.REBUILD_VERSION }}" \
-            "${APPLICATION_SHA}"
-          git push origin "refs/tags/v${{ env.REBUILD_VERSION }}"
 
       - name: Write failure badge
-        if: failure()
+        if: failure() && steps.publish_image.outcome == 'failure'
         working-directory: housekeeping
         run: |
           scripts/publish_cosign_badge.sh \

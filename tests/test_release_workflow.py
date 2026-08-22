@@ -113,6 +113,7 @@ def test_refresh_workflow_selects_version_from_build_history_only() -> None:
     assert "scripts/select_refresh_source.py" in workflow
     assert "--history doc/build-history.json" in workflow
     assert "APPLICATION_SHA=$(jq -er '.application_sha'" in workflow
+    assert "REBUILD_VERSION=$(jq -er '.next_refresh_version'" in workflow
     assert "TAG_MATCHES_SOURCE=$(jq -er '.tag_matches_source | tostring'" in workflow
     assert 'ref: ${{ env.APPLICATION_SHA }}' in workflow
     assert 'ref: v${{ env.BASE_TAG }}' not in workflow
@@ -128,6 +129,18 @@ def test_publication_failure_badges_use_retrying_helper() -> None:
     assert "cosign badge: publication failed" in release
     assert "scripts/publish_cosign_badge.sh" in refresh
     assert "cosign badge: refresh" in refresh
+    assert "if: failure() && steps.publish_image.outcome == 'failure'" in refresh
+
+
+def test_refresh_housekeeping_uses_atomic_metadata_tag_transaction() -> None:
+    """Refresh tags the metadata commit and atomically publishes both refs."""
+    workflow = REFRESH_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "scripts/commit_refresh_housekeeping.sh" in workflow
+    assert '"${APPLICATION_SHA}"' in workflow
+    assert '"${DIGEST}"' in workflow
+    assert 'git tag -a "v${{ env.REBUILD_VERSION }}"' not in workflow
+    assert 'git push origin "refs/tags/v${{ env.REBUILD_VERSION }}"' not in workflow
 
 
 def test_make_publication_targets_apply_explicit_version_policies() -> None:

@@ -139,10 +139,19 @@ never silently falls back to the tag.
 The workflow verifies clean checkouts and exact commits before building, then
 revalidates the application commit and current `main` immediately before
 publication. The application and orchestration SHAs are included in the job
-summary, while the full application SHA is stored in build history and used as
-the target of the annotated refresh tag. Release tags created by the current
-release workflow point to that same source SHA; the mismatch warning exists for
-older tags created under the former housekeeping-tag policy.
+summary, while the full application SHA is stored in build history. The
+annotated refresh tag targets the housekeeping commit containing that history
+record and records both the application SHA and signed image digest in its
+message. The housekeeping branch and tag are pushed atomically, so neither can
+become visible without the other. Generated SBOM and SARIF evidence is
+force-staged only at this controlled boundary despite the repository's general
+ignore rules.
+
+Release tags created by the current release workflow point directly to their
+source SHA. Historical stable release tags may instead point to housekeeping;
+the mismatch warning exists for those older tags. The cosign badge is changed
+to `failed` only when the shared publication transaction itself fails, not when
+later Git housekeeping encounters a problem.
 
 Refresh finalization uses a dedicated Make target that permits only a positive
 numeric `BASE_VERSION-N` output. `BASE_VERSION` comes from the latest

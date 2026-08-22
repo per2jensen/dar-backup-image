@@ -19,7 +19,8 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 LOGGER = logging.getLogger(__name__)
 
 TAG_PATTERN = re.compile(
-    r"^(?P<base>[0-9]+\.[0-9]+\.[0-9]+)(?:-[1-9][0-9]*)?$"
+    r"^(?P<base>[0-9]+\.[0-9]+\.[0-9]+)"
+    r"(?:-(?P<refresh>[1-9][0-9]*))?$"
 )
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{7,40}$")
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -32,6 +33,9 @@ class RefreshSource:
     Attributes:
         raw_tag: Version tag from the latest build-history record.
         base_version: Stable version underlying the release or refresh tag.
+        refresh_number: Numeric refresh suffix, or zero for a base release.
+        next_refresh_number: Next unused numeric refresh suffix.
+        next_refresh_version: Complete version containing the next suffix.
         recorded_revision: Git revision stored in build history.
         application_sha: Full commit SHA resolved from the recorded revision.
         release_tag_sha: Full commit SHA targeted by the stable release tag.
@@ -40,6 +44,9 @@ class RefreshSource:
 
     raw_tag: str
     base_version: str
+    refresh_number: int
+    next_refresh_number: int
+    next_refresh_version: str
     recorded_revision: str
     application_sha: str
     release_tag_sha: str
@@ -94,14 +101,15 @@ def required_string(record: dict[str, Any], field: str) -> str:
     return value
 
 
-def base_version_from_tag(tag: str) -> str:
-    """Extract a stable base version from a release or refresh tag.
+def version_parts_from_tag(tag: str) -> tuple[str, int]:
+    """Extract a stable base and refresh number from a version tag.
 
     Args:
         tag: Version stored by the latest build-history record.
 
     Returns:
-        Stable ``x.y.z`` base version.
+        Stable ``x.y.z`` base version and numeric refresh suffix. The suffix is
+        zero for a base release.
 
     Raises:
         ValueError: If the tag is neither stable nor a canonical numeric refresh.
@@ -111,7 +119,8 @@ def base_version_from_tag(tag: str) -> str:
         raise ValueError(
             f"latest build-history tag {tag!r} must be x.y.z or x.y.z-N"
         )
-    return match.group("base")
+    refresh = match.group("refresh")
+    return match.group("base"), int(refresh) if refresh is not None else 0
 
 
 def resolve_commit(repository: Path, revision: str) -> str:
@@ -152,6 +161,46 @@ def resolve_commit(repository: Path, revision: str) -> str:
     return resolved
 
 
+def latest_refresh_tag_number(repository: Path, base_version: str) -> int:
+    """Return the highest canonical refresh suffix present in Git tags.
+
+    Args:
+        repository: Complete Git checkout containing refresh tags.
+        base_version: Stable ``x.y.z`` version whose tags should be examined.
+
+    Returns:
+        Highest positive suffix, or zero when no refresh tag exists.
+
+    Raises:
+        OSError: If Git cannot be executed.
+        ValueError: If Git cannot list tags.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "tag",
+            "--list",
+            f"v{base_version}-*",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        diagnostic = result.stderr.strip() or "Git could not list refresh tags"
+        raise ValueError(f"cannot list Git refresh tags: {diagnostic}")
+
+    pattern = re.compile(rf"^v{re.escape(base_version)}-([1-9][0-9]*)$")
+    suffixes = [
+        int(match.group(1))
+        for tag in result.stdout.splitlines()
+        if (match := pattern.fullmatch(tag)) is not None
+    ]
+    return max(suffixes, default=0)
+
+
 def select_refresh_source(history_path: Path, repository: Path) -> RefreshSource:
     """Select the exact application commit recorded by the latest build.
 
@@ -175,12 +224,17 @@ def select_refresh_source(history_path: Path, repository: Path) -> RefreshSource
             "7 to 40 lowercase hexadecimal characters"
         )
 
-    base_version = base_version_from_tag(raw_tag)
+    base_version, refresh_number = version_parts_from_tag(raw_tag)
     application_sha = resolve_commit(repository, recorded_revision)
     release_tag_sha = resolve_commit(repository, f"v{base_version}")
+    latest_tag_number = latest_refresh_tag_number(repository, base_version)
+    next_refresh_number = max(refresh_number, latest_tag_number) + 1
     return RefreshSource(
         raw_tag=raw_tag,
         base_version=base_version,
+        refresh_number=refresh_number,
+        next_refresh_number=next_refresh_number,
+        next_refresh_version=f"{base_version}-{next_refresh_number}",
         recorded_revision=recorded_revision,
         application_sha=application_sha,
         release_tag_sha=release_tag_sha,

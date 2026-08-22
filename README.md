@@ -600,6 +600,8 @@ For **long-term recovery**, do not preserve only the `:latest` reference. Save a
 - Signs the image with [cosign](https://github.com/sigstore/cosign) keyless signing and records the entry in the [Rekor](https://github.com/sigstore/rekor) transparency log
 - Attaches a signed CycloneDX SBOM attestation
 - Publishes as both `:latest` and a versioned refresh tag (e.g. `:0.5.22-1`, `:0.5.22-2`)
+- Atomically publishes the build-history commit and its annotated Git tag; the
+  annotation records the immutable application SHA and signed image digest
 - Updates the [cosign badge](https://github.com/per2jensen/dar-backup-image/blob/main/doc/cosign_badge.json) — `failed` means the most recent signing attempt was rejected and rolled back; the previously published `:latest` may remain valid
 
 The [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json) file contains the full audit trail for every release and refresh, including digests, Rekor log entries, and Grype scan results.

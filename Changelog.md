@@ -24,6 +24,9 @@
   signing failure, and promote `:latest` only after signing and attestation
 - persist the cosign failure badge to `main` with bounded concurrent-push
   retries, while preserving the previously published `:latest`
+- publish refresh history and its source/digest-annotated Git tag atomically,
+  force-stage the intended SBOM/SARIF evidence, and avoid reporting successful
+  signing as failed when only Git housekeeping fails
 - construct release SBOM links from the uploaded asset basename and restore
   the Grype cache before the single dedicated release scan
 - pin every external action in the release workflow to an immutable commit SHA

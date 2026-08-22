@@ -114,7 +114,7 @@ def test_selector_tag_mismatch_uses_recorded_source_commit(tmp_path: Path) -> No
     repository, source_sha, housekeeping_sha = _create_repository(tmp_path)
     history = _write_history(
         tmp_path,
-        {"tag": "1.2.3", "git_revision": source_sha[:7]},
+        {"tag": "1.2.3-4", "git_revision": source_sha[:7]},
     )
 
     result = _run_selector(history, repository)
@@ -124,11 +124,31 @@ def test_selector_tag_mismatch_uses_recorded_source_commit(tmp_path: Path) -> No
     assert selection == {
         "application_sha": source_sha,
         "base_version": "1.2.3",
-        "raw_tag": "1.2.3",
+        "next_refresh_number": 5,
+        "next_refresh_version": "1.2.3-5",
+        "raw_tag": "1.2.3-4",
         "recorded_revision": source_sha[:7],
+        "refresh_number": 4,
         "release_tag_sha": housekeeping_sha,
         "tag_matches_source": False,
     }
+
+
+def test_selector_existing_tag_ahead_of_history_advances_counter(tmp_path: Path) -> None:
+    """A partial prior tag publication cannot cause version-tag reuse."""
+    repository, source_sha, _ = _create_repository(tmp_path)
+    _run_git(repository, "tag", "v1.2.3-7", source_sha)
+    history = _write_history(
+        tmp_path,
+        {"tag": "1.2.3-4", "git_revision": source_sha},
+    )
+
+    result = _run_selector(history, repository)
+
+    assert result.returncode == 0, result.stderr
+    selection = json.loads(result.stdout)
+    assert selection["next_refresh_number"] == 8
+    assert selection["next_refresh_version"] == "1.2.3-8"
 
 
 def test_selector_unresolvable_recorded_revision_fails(tmp_path: Path) -> None:
