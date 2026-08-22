@@ -10,6 +10,16 @@ REPOSITORY_ROOT = Path(__file__).parents[1]
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
 REFRESH_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "image-refresh.yml"
 PUBLISH_ACTION = REPOSITORY_ROOT / ".github" / "actions" / "publish-image" / "action.yml"
+FINALIZE_ACTION = (
+    REPOSITORY_ROOT
+    / ".github"
+    / "actions"
+    / "finalize-github-release"
+    / "action.yml"
+)
+FINALIZE_WORKFLOW = (
+    REPOSITORY_ROOT / ".github" / "workflows" / "finalize-github-release.yml"
+)
 MAKEFILE = REPOSITORY_ROOT / "Makefile"
 
 
@@ -89,7 +99,7 @@ def test_publication_workflows_share_one_concurrency_group() -> None:
 
 def test_publication_workflows_pin_external_actions_to_full_shas() -> None:
     """Every external action reference is immutable and documents its version."""
-    for path in (RELEASE_WORKFLOW, REFRESH_WORKFLOW):
+    for path in (RELEASE_WORKFLOW, REFRESH_WORKFLOW, FINALIZE_WORKFLOW):
         workflow = path.read_text(encoding="utf-8")
         references, lines = _external_action_references(workflow)
 
@@ -98,14 +108,69 @@ def test_publication_workflows_pin_external_actions_to_full_shas() -> None:
         assert all(re.search(r"# v\d+(?:\.\d+)*$", line) for line in lines)
 
 
+def test_github_release_finalizer_pins_its_external_action() -> None:
+    """The shared finalizer delegates only to an immutable action revision."""
+    action = FINALIZE_ACTION.read_text(encoding="utf-8")
+    references, lines = _external_action_references(action)
+
+    assert references == [
+        "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228"
+    ]
+    assert all(re.search(r"# v\d+(?:\.\d+)*$", line) for line in lines)
+
+
 def test_release_workflow_keeps_source_and_housekeeping_checkouts_separate() -> None:
     """Build inputs and generated release records use distinct checkout paths."""
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "ref: ${{ github.sha }}\n          fetch-depth: 0\n          path: source" in workflow
     assert "ref: main\n          fetch-depth: 0\n          path: housekeeping" in workflow
-    assert 'git tag -a "v${{ env.FINAL_VERSION }}"' in workflow
-    assert '              "${SOURCE_SHA}"' in workflow
+    assert "scripts/commit_release_housekeeping.sh" in workflow
+    assert '            "${SOURCE_SHA}"' in workflow
+    assert "git push origin HEAD:refs/heads/main" not in workflow
+    assert 'git push origin "refs/tags/v${{ env.FINAL_VERSION }}"' not in workflow
+
+
+def test_release_housekeeping_uses_atomic_source_tag_transaction() -> None:
+    """Release workflow delegates evidence, commit, and tag publication."""
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    helper = (
+        REPOSITORY_ROOT / "scripts" / "commit_release_housekeeping.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "scripts/commit_release_housekeeping.sh" in workflow
+    assert 'git add -f -- "${sarif_path}" "${sbom_path}"' in helper
+    assert "git push --atomic origin" in helper
+    assert '"Housekeeping commit: ${housekeeping_sha}"' in helper
+    assert '        "${source_sha}"' in helper
+
+
+def test_github_release_finalizer_requires_all_assets() -> None:
+    """Normal and recovery release creation share strict asset handling."""
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    recovery = FINALIZE_WORKFLOW.read_text(encoding="utf-8")
+    action = FINALIZE_ACTION.read_text(encoding="utf-8")
+
+    assert "uses: ./source/.github/actions/finalize-github-release" in release
+    assert "uses: ./housekeeping/.github/actions/finalize-github-release" in recovery
+    assert "fail_on_unmatched_files: true" in action
+    assert "overwrite_files: true" in action
+    assert 'for asset in "${SBOM_FILE}" "${SARIF_FILE}"' in action
+    assert "if [[ ! -s \"${asset}\" ]]" in action
+
+
+def test_recovery_workflow_only_finalizes_a_verified_existing_release() -> None:
+    """Recovery verifies prior state and contains no publication operation."""
+    workflow = FINALIZE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "name: Finalize Existing GitHub Release" in workflow
+    assert "release_version:" in workflow
+    assert "scripts/select_release_finalization.py" in workflow
+    assert "scripts/verify_existing_release.py" in workflow
+    assert "verify-attestation" not in workflow  # Encapsulated in the verifier.
+    assert "publish-image" not in workflow
+    assert "docker push" not in workflow
+    assert ":latest" not in workflow
 
 
 def test_refresh_workflow_keeps_revisions_in_separate_checkouts() -> None:

@@ -1,0 +1,132 @@
+name: Finalize Existing GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Existing release version without v (for example 1.0.0-rc1)
+        required: true
+        type: string
+
+concurrency:
+  # Do not inspect or finalize a release while another publication is active.
+  group: dar-backup-dockerhub-publication
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOCKERHUB_REPO: per2jensen/dar-backup
+  UBUNTU_VERSION: 24.04
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Require a main-branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "${DISPATCH_REF}" != "refs/heads/main" ]]; then
+            echo "ERROR: recovery must be dispatched from main, not ${DISPATCH_REF}" >&2
+            exit 2
+          fi
+
+      - name: Checkout finalization tooling and committed evidence
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: housekeeping
+
+      - name: Validate current main checkout
+        working-directory: housekeeping
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          REMOTE_MAIN_SHA=$(git rev-parse refs/remotes/origin/main)
+          if [[ "${ACTUAL_SHA}" != "${REMOTE_MAIN_SHA}" ]]; then
+            echo "ERROR: main advanced after recovery was dispatched" >&2
+            echo "  selected: ${ACTUAL_SHA}" >&2
+            echo "  current:  ${REMOTE_MAIN_SHA}" >&2
+            exit 2
+          fi
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "ERROR: recovery checkout is not clean" >&2
+            git status --short >&2
+            exit 2
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Select and validate existing release record
+        working-directory: housekeeping
+        env:
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          SELECTION=$(python3 scripts/select_release_finalization.py \
+            --history doc/build-history.json \
+            --repository . \
+            --version "${REQUESTED_VERSION}" \
+            --dockerhub-repository "${DOCKERHUB_REPO}" \
+            --github-repository "${{ github.repository }}")
+
+          echo "FINAL_VERSION=$(jq -er '.version' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "SOURCE_SHA=$(jq -er '.source_sha' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "HOUSEKEEPING_SHA=$(jq -er '.housekeeping_sha' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "IMAGE_DIGEST=$(jq -er '.image_digest' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "DAR_BACKUP_VERSION=$(jq -er '.dar_backup_version' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "DAR_VERSION=$(jq -er '.dar_version' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "REKOR_URL=$(jq -er '.rekor_url' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "SBOM_FILE=$(jq -er '.sbom_file' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+          echo "SARIF_FILE=$(jq -er '.sarif_file' <<< "${SELECTION}")" >> "${GITHUB_ENV}"
+
+      - name: Verify existing Docker and Sigstore publication
+        working-directory: housekeeping
+        run: |
+          set -euo pipefail
+          scripts/verify_existing_release.py \
+            --repository "${DOCKERHUB_REPO}" \
+            --version "${FINAL_VERSION}" \
+            --digest "${IMAGE_DIGEST#*@}" \
+            --expected-cli-version "${DAR_BACKUP_VERSION}" \
+            --expected-source-sha "${SOURCE_SHA}" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+      - name: Create or repair GitHub Release
+        uses: ./housekeeping/.github/actions/finalize-github-release
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-repository: ${{ github.repository }}
+          dockerhub-repository: ${{ env.DOCKERHUB_REPO }}
+          version: ${{ env.FINAL_VERSION }}
+          source-sha: ${{ env.SOURCE_SHA }}
+          image-digest: ${{ env.IMAGE_DIGEST }}
+          dar-backup-version: ${{ env.DAR_BACKUP_VERSION }}
+          dar-version: ${{ env.DAR_VERSION }}
+          ubuntu-version: ${{ env.UBUNTU_VERSION }}
+          rekor-url: ${{ env.REKOR_URL }}
+          sbom-file: ${{ env.SBOM_FILE }}
+          sarif-file: ${{ env.SARIF_FILE }}
+          working-directory: housekeeping
+
+      - name: Post recovery summary
+        run: |
+          set -euo pipefail
+          echo "## ✅ Finalized existing GitHub Release v${FINAL_VERSION}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Field | Verified value |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|---|---|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Source commit | \`${SOURCE_SHA}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Housekeeping commit | \`${HOUSEKEEPING_SHA}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Image digest | \`${IMAGE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| SBOM asset | \`${SBOM_FILE}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| SARIF asset | \`${SARIF_FILE}\` |" >> "${GITHUB_STEP_SUMMARY}"

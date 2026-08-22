@@ -1,0 +1,112 @@
+name: Finalize existing GitHub Release
+description: Create or repair a GitHub Release from validated committed evidence
+
+inputs:
+  github-token:
+    description: Token permitted to create a GitHub Release
+    required: true
+  github-repository:
+    description: GitHub owner/repository used in release links
+    required: true
+  dockerhub-repository:
+    description: Published Docker repository without a tag
+    required: true
+  version:
+    description: Existing release version without a leading v
+    required: true
+  source-sha:
+    description: Full immutable source commit targeted by the release tag
+    required: true
+  image-digest:
+    description: Fully qualified signed image digest
+    required: true
+  dar-backup-version:
+    description: Packaged dar-backup version
+    required: true
+  dar-version:
+    description: Packaged DAR version
+    required: true
+  ubuntu-version:
+    description: Ubuntu base-image version
+    required: true
+  rekor-url:
+    description: Sigstore transparency-log URL
+    required: true
+  sbom-file:
+    description: SBOM path relative to the working directory
+    required: true
+  sarif-file:
+    description: SARIF path relative to the working directory
+    required: true
+  working-directory:
+    description: Checkout containing the committed release evidence
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Require complete release assets
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SBOM_FILE: ${{ inputs.sbom-file }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
+      run: |
+        set -euo pipefail
+        for asset in "${SBOM_FILE}" "${SARIF_FILE}"; do
+          if [[ ! -s "${asset}" ]]; then
+            echo "ERROR: release asset is missing or empty: ${asset}" >&2
+            exit 2
+          fi
+        done
+
+    - name: Create or repair GitHub Release
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+      with:
+        tag_name: v${{ inputs.version }}
+        target_commitish: ${{ inputs.source-sha }}
+        name: dar-backup-image Release v${{ inputs.version }}
+        generate_release_notes: false
+        prerelease: ${{ contains(inputs.version, '-') }}
+        working_directory: ${{ inputs.working-directory }}
+        fail_on_unmatched_files: true
+        overwrite_files: true
+        body: |
+          ## dar-backup-image Release v${{ inputs.version }}
+
+          `dar-backup-image` is a Docker image that packages the [dar-backup](https://github.com/per2jensen/dar-backup) CLI tool for easy use on servers/workstations or in containerized environments.
+
+          The image doubles as a time capsule of `dar-backup`, `dar` and `par2`.
+
+          Based on:
+
+          - Source commit [${{ inputs.source-sha }}](https://github.com/${{ inputs.github-repository }}/commit/${{ inputs.source-sha }})
+          - Signed image digest `${{ inputs.image-digest }}`
+          - dar-backup version ${{ inputs.dar-backup-version }}
+          - dar version ${{ inputs.dar-version }}
+          - Ubuntu ${{ inputs.ubuntu-version }} base image
+          - [Dockerfile](https://github.com/${{ inputs.github-repository }}/blob/${{ inputs.source-sha }}/Dockerfile)
+
+          ## Changelog
+          See [Changelog.md](https://github.com/${{ inputs.github-repository }}/blob/main/Changelog.md) for what changed in this release.
+
+          ## Build info
+          See [build-history.json](https://github.com/${{ inputs.github-repository }}/blob/main/doc/build-history.json) for detailed metadata about this build and past builds.
+
+          ## Verify the signature
+          ```bash
+          cosign verify ${{ inputs.dockerhub-repository }}:${{ inputs.version }} \
+             --certificate-identity-regexp="https://github.com/${{ inputs.github-repository }}" \
+             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+          ```
+
+          ## Rekor transparency log
+          ${{ inputs.rekor-url }}
+
+          ## SBOM
+          The CycloneDX SBOM is attached to this release as an asset.
+        files: |
+          ${{ inputs.sbom-file }}
+          ${{ inputs.sarif-file }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}

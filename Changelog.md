@@ -27,6 +27,10 @@
 - publish refresh history and its source/digest-annotated Git tag atomically,
   force-stage the intended SBOM/SARIF evidence, and avoid reporting successful
   signing as failed when only Git housekeeping fails
+- publish release housekeeping and its source-pointing annotated tag atomically,
+  force-stage the intended SBOM/SARIF evidence, and reject unrelated changes
+- require complete GitHub Release assets and add a verification-only recovery
+  workflow for creating or repairing a failed existing GitHub Release
 - construct release SBOM links from the uploaded asset basename and restore
   the Grype cache before the single dedicated release scan
 - pin every external action in the release workflow to an immutable commit SHA

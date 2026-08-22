@@ -321,7 +321,7 @@ jobs:
 
 
       # -----------------------------------------------------------------------
-      # 12. Git housekeeping — build log, patch README, annotated tag
+      # 12. Git housekeeping — one atomic audit commit + source tag transaction
       # -----------------------------------------------------------------------
       - name: Housekeeping — build log, README, badge, annotation, git tag
         working-directory: housekeeping
@@ -380,11 +380,6 @@ jobs:
           --github-run-id    "${{ github.run_id }}" \
           --github-run-url   "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          scripts/git_commit_if_changed.sh "build-history:  ${{ env.FINAL_VERSION }} metadata + sbom & sarif" \
-             doc/build-history.json \
-             ${{ env.SARIF_FILE }} \
-             ${{ env.SBOM_FILE }}
-
           # Regenerate the complete README release table from canonical history.
           python3 scripts/update_readme_releases.py
           python3 scripts/update_readme_releases.py --check
@@ -404,25 +399,17 @@ jobs:
           python clonepulse/add_release_annotation.py "${{ env.FINAL_VERSION }}"
           #   scripts/git_commit_if_changed.sh clonepulse/fetch_clones.json "clonepulse: add release annotation for v${{ env.FINAL_VERSION }}"
 
-          scripts/git_commit_if_changed.sh "housekeeping: README, badge, annotation for ${{ env.FINAL_VERSION }}" \
-             README.md \
-             doc/cosign_badge.json \
-             docs/index.html \
-             clonepulse/fetch_clones.json
-
-          git status
-          git push origin HEAD:refs/heads/main
-
-          if git rev-parse "v${{ env.FINAL_VERSION }}" >/dev/null 2>&1; then
-            echo "❌ Git tag v${{ env.FINAL_VERSION }} appeared during the release"
-            exit 1
-          else
-            git tag -a "v${{ env.FINAL_VERSION }}" \
-              -m "Release version v${{ env.FINAL_VERSION }}" \
-              "${SOURCE_SHA}"
-            git push origin "refs/tags/v${{ env.FINAL_VERSION }}"
-            echo "✅ Git tag v${{ env.FINAL_VERSION }} created and pushed."
-          fi
+          scripts/commit_release_housekeeping.sh \
+            "${{ env.FINAL_VERSION }}" \
+            "${SOURCE_SHA}" \
+            "${DIGEST}" \
+            doc/build-history.json \
+            "${{ env.SARIF_FILE }}" \
+            "${{ env.SBOM_FILE }}" \
+            README.md \
+            doc/cosign_badge.json \
+            docs/index.html \
+            clonepulse/fetch_clones.json
 
 
       # -----------------------------------------------------------------------
@@ -430,52 +417,21 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Create GitHub Release with assets
         id: github_release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: ./source/.github/actions/finalize-github-release
         with:
-          tag_name: v${{ env.FINAL_VERSION }}
-          target_commitish: ${{ env.SOURCE_SHA }}
-          name: dar-backup-image Release v${{ env.FINAL_VERSION }}
-          generate_release_notes: false
-          prerelease: ${{ contains(env.FINAL_VERSION, '-') }}
-          working_directory: housekeeping
-          body: |
-            ## dar-backup-image Release v${{ env.FINAL_VERSION }}
-
-            `Dar-backup-image` is a Docker image that packages the [dar-backup](https://github.com/per2jensen/dar-backup) CLI tool for easy use on servers/workstations or in containerized environments.
-
-            The image doubles as a time capsule of `dar-backup`, `dar` and `par2`.
-
-            Based on:
-
-            - Source commit [${{ env.SOURCE_SHA }}](https://github.com/${{ github.repository }}/commit/${{ env.SOURCE_SHA }})
-            - dar-backup version ${{ steps.versions.outputs.DAR_BACKUP_VERSION }}
-            - dar version ${{ steps.versions.outputs.DAR_VERSION }}
-            - Ubuntu ${{ env.UBUNTU_VERSION }} base image
-            - [Dockerfile](https://github.com/${{ github.repository }}/blob/${{ env.SOURCE_SHA }}/Dockerfile)
-
-            ## Changelog
-            See [Changelog.md](https://github.com/per2jensen/dar-backup-image/blob/main/Changelog.md) for what changed in this release.
-
-            ## Build info:
-            Take a look at the [build history](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json) json file for detailed metadata about this build and past builds.
-
-            ## Verify the signature
-            ```bash
-            cosign verify ${{ env.DOCKERHUB_REPO }}:${{ env.FINAL_VERSION }} \
-               --certificate-identity-regexp="https://github.com/${{ github.repository }}" \
-               --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
-            ```
-
-            ## Rekor transparency log
-            ${{ steps.publish_image.outputs.rekor_url }}
-
-            ## SBOM
-            The CycloneDX SBOM is attached to this release as an asset.
-          files: |
-            ${{ env.SBOM_FILE }}
-            ${{ env.SARIF_FILE }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-repository: ${{ github.repository }}
+          dockerhub-repository: ${{ env.DOCKERHUB_REPO }}
+          version: ${{ env.FINAL_VERSION }}
+          source-sha: ${{ env.SOURCE_SHA }}
+          image-digest: ${{ steps.publish_image.outputs.digest }}
+          dar-backup-version: ${{ steps.versions.outputs.DAR_BACKUP_VERSION }}
+          dar-version: ${{ steps.versions.outputs.DAR_VERSION }}
+          ubuntu-version: ${{ env.UBUNTU_VERSION }}
+          rekor-url: ${{ steps.publish_image.outputs.rekor_url }}
+          sbom-file: ${{ env.SBOM_FILE }}
+          sarif-file: ${{ env.SARIF_FILE }}
+          working-directory: housekeeping
 
 
       # -----------------------------------------------------------------------
