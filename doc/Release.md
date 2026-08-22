@@ -120,27 +120,38 @@ against the already-published digest.
 
 The weekly refresh uses three independent checkouts:
 
-- `source/` is the immutable stable release tag. Its own Makefile, application
-  files, and tests are used together; files from `main` are never overlaid.
+- `source/` is the immutable application commit recorded by the latest
+  `doc/build-history.json` entry. Its own Makefile, application files, and tests
+  are used together; files from `main` are never overlaid.
 - `orchestration/` is the full workflow commit from `main`. The shared
   publisher and its focused tests run from this exact revision.
 - `housekeeping/` starts at that same orchestration commit and is the only tree
   allowed to receive generated SBOM/SARIF evidence and metadata changes.
 
+The latest build-history record is authoritative for both the image version and
+its application source. The workflow validates its `tag` and `git_revision`,
+resolves the recorded revision to a full commit SHA, and checks out that exact
+commit. It also resolves `vBASE_VERSION` and reports a warning when a historical
+release tag points to a later housekeeping commit instead of the recorded build
+source. An invalid or unresolvable recorded revision is fatal; the workflow
+never silently falls back to the tag.
+
 The workflow verifies clean checkouts and exact commits before building, then
 revalidates the application commit and current `main` immediately before
 publication. The application and orchestration SHAs are included in the job
-summary, while the application SHA is stored in build history and used as the
-target of the annotated refresh tag.
+summary, while the full application SHA is stored in build history and used as
+the target of the annotated refresh tag. Release tags created by the current
+release workflow point to that same source SHA; the mismatch warning exists for
+older tags created under the former housekeeping-tag policy.
 
 Refresh finalization uses a dedicated Make target that permits only a positive
 numeric `BASE_VERSION-N` output. `BASE_VERSION` comes from the latest
-`doc/build-history.json` entry and selects the immutable `vBASE_VERSION`
-application checkout; refresh intentionally does not consult `IMAGE_VERSION`,
-which may already describe a future release. Tags predating that target use
-the same tested validator from the isolated orchestration checkout as an
-explicit compatibility path; the tagged application tree is still never
-modified.
+`doc/build-history.json` entry, while that same record's `git_revision` selects
+the immutable application checkout. Refresh intentionally does not consult
+`IMAGE_VERSION`, which may already describe a future release. Source revisions
+predating the dedicated target use the same tested validator from the isolated
+orchestration checkout as an explicit compatibility path; the recorded
+application tree is still never modified.
 
 ### After release
 

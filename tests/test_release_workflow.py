@@ -93,11 +93,11 @@ def test_release_workflow_keeps_source_and_housekeeping_checkouts_separate() -> 
 
 
 def test_refresh_workflow_keeps_revisions_in_separate_checkouts() -> None:
-    """Refresh never overlays current orchestration onto tagged application source."""
+    """Refresh never overlays orchestration onto recorded application source."""
     workflow = REFRESH_WORKFLOW.read_text(encoding="utf-8")
 
     assert "path: orchestration" in workflow
-    assert "ref: v${{ env.BASE_TAG }}" in workflow
+    assert "ref: ${{ env.APPLICATION_SHA }}" in workflow
     assert "path: source" in workflow
     assert "path: housekeeping" in workflow
     assert "git checkout main -- Makefile" not in workflow
@@ -107,11 +107,15 @@ def test_refresh_workflow_keeps_revisions_in_separate_checkouts() -> None:
 
 
 def test_refresh_workflow_selects_version_from_build_history_only() -> None:
-    """Refresh derives its base from history without consulting IMAGE_VERSION."""
+    """Refresh derives its base and source from the same latest history record."""
     workflow = REFRESH_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "RAW_TAG=$(jq -r '.[-1].tag' doc/build-history.json)" in workflow
-    assert 'ref: v${{ env.BASE_TAG }}' in workflow
+    assert "scripts/select_refresh_source.py" in workflow
+    assert "--history doc/build-history.json" in workflow
+    assert "APPLICATION_SHA=$(jq -er '.application_sha'" in workflow
+    assert "TAG_MATCHES_SOURCE=$(jq -er '.tag_matches_source | tostring'" in workflow
+    assert 'ref: ${{ env.APPLICATION_SHA }}' in workflow
+    assert 'ref: v${{ env.BASE_TAG }}' not in workflow
     assert "IMAGE_VERSION" not in workflow
 
 

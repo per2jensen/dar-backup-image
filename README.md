@@ -1037,8 +1037,10 @@ make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
 Make targets reject that default and require an exact match with the committed
 `IMAGE_VERSION` file. Weekly refreshes use the separate guarded
 `refresh-final-noscan` target, which permits only `BASE_VERSION-N` where the
-base comes from the latest `doc/build-history.json` entry. Refreshes
-intentionally do not consult `IMAGE_VERSION`.
+base comes from the latest `doc/build-history.json` entry. The same history
+record supplies the application Git revision, which is resolved and checked
+out as a full commit SHA. Refreshes intentionally do not consult
+`IMAGE_VERSION`.
 
 Trigger the release:
 

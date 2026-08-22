@@ -9,8 +9,9 @@
   attestation, immutable remote pull/runtime verification, and delayed
   `:latest` promotion
 - keep weekly refresh application source, current orchestration, and mutable
-  housekeeping in separate checkouts instead of overlaying a `main` Makefile
-  onto an immutable release tag
+  housekeeping in separate checkouts instead of overlaying a `main` Makefile;
+  select application source from the latest build-history record's Git revision
+  and tolerate explicitly reported historical release-tag mismatches
 - serialize release and refresh publication with one concurrency group so
   their `:latest` updates cannot race
 - keep `FINAL_VERSION=dev` for development while making release targets require

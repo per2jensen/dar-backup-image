@@ -28,7 +28,7 @@ jobs:
 
     steps:
       # Orchestration and application source intentionally live in separate
-      # trees. The immutable release tag is never overlaid with files from main.
+      # trees. The recorded source commit is never overlaid with files from main.
       - name: Require a main-branch run
         env:
           WORKFLOW_REF: ${{ github.ref }}
@@ -71,21 +71,27 @@ jobs:
       - name: Sanity checks and compute rebuild version
         working-directory: orchestration
         run: |
+          set -euo pipefail
+
           fail() {
             echo "❌ $1"
             exit 1
           }
 
-          [[ -f doc/build-history.json ]] || fail "build-history.json not found"
-          jq empty doc/build-history.json 2>/dev/null \
-            || fail "build-history.json is not valid JSON"
+          SELECTION=$(python3 scripts/select_refresh_source.py \
+            --history doc/build-history.json \
+            --repository .)
+          RAW_TAG=$(jq -er '.raw_tag' <<< "${SELECTION}")
+          BASE_TAG=$(jq -er '.base_version' <<< "${SELECTION}")
+          RECORDED_REVISION=$(jq -er '.recorded_revision' <<< "${SELECTION}")
+          APPLICATION_SHA=$(jq -er '.application_sha' <<< "${SELECTION}")
+          RELEASE_TAG_SHA=$(jq -er '.release_tag_sha' <<< "${SELECTION}")
+          TAG_MATCHES_SOURCE=$(jq -er '.tag_matches_source | tostring' \
+            <<< "${SELECTION}")
 
-          RAW_TAG=$(jq -r '.[-1].tag' doc/build-history.json)
-          BASE_TAG=$(echo "${RAW_TAG}" | sed 's/-[0-9]*$//')
-          [[ "${BASE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-            || fail "BASE_TAG '${BASE_TAG}' (from '${RAW_TAG}') is not a stable x.y.z release"
-          git rev-parse "v${BASE_TAG}^{commit}" >/dev/null 2>&1 \
-            || fail "Git tag v${BASE_TAG} does not exist"
+          if [[ "${TAG_MATCHES_SOURCE}" != "true" ]]; then
+            echo "::warning title=Historical release-tag mismatch::v${BASE_TAG} points to ${RELEASE_TAG_SHA}; rebuilding source ${APPLICATION_SHA} recorded by build ${RAW_TAG}"
+          fi
 
           ESCAPED="${BASE_TAG//./\\.}"
           LAST_N=$(git tag --list \
@@ -100,22 +106,27 @@ jobs:
 
           echo "BASE_TAG=${BASE_TAG}" >> "${GITHUB_ENV}"
           echo "REBUILD_VERSION=${REBUILD_VERSION}" >> "${GITHUB_ENV}"
-          echo "✅ Rebuilding immutable v${BASE_TAG} as ${REBUILD_VERSION}"
+          echo "RECORDED_REVISION=${RECORDED_REVISION}" >> "${GITHUB_ENV}"
+          echo "APPLICATION_SHA=${APPLICATION_SHA}" >> "${GITHUB_ENV}"
+          echo "RELEASE_TAG_SHA=${RELEASE_TAG_SHA}" >> "${GITHUB_ENV}"
+          echo "TAG_MATCHES_SOURCE=${TAG_MATCHES_SOURCE}" >> "${GITHUB_ENV}"
+          echo "✅ Rebuilding recorded source ${APPLICATION_SHA} as ${REBUILD_VERSION}"
 
       - name: Checkout immutable application source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: v${{ env.BASE_TAG }}
+          ref: ${{ env.APPLICATION_SHA }}
           fetch-depth: 0
           path: source
 
       - name: Validate immutable application source
         working-directory: source
         run: |
-          APPLICATION_SHA=$(git rev-parse HEAD)
-          TAG_SHA=$(git rev-parse "v${BASE_TAG}^{commit}")
-          if [[ "${APPLICATION_SHA}" != "${TAG_SHA}" ]]; then
-            echo "❌ Application checkout does not match v${BASE_TAG}"
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          if [[ "${ACTUAL_SHA}" != "${APPLICATION_SHA}" ]]; then
+            echo "❌ Application checkout does not match recorded source"
+            echo "   expected: ${APPLICATION_SHA}"
+            echo "   actual:   ${ACTUAL_SHA}"
             exit 1
           fi
           if [[ -n "$(git status --porcelain)" ]]; then
@@ -123,8 +134,7 @@ jobs:
             git status --short
             exit 1
           fi
-          echo "APPLICATION_SHA=${APPLICATION_SHA}" >> "${GITHUB_ENV}"
-          echo "✅ Application source locked to ${APPLICATION_SHA}"
+          echo "✅ Application source locked to recorded commit ${APPLICATION_SHA}"
 
       - name: Set artifact filenames
         run: |
@@ -149,6 +159,7 @@ jobs:
           python3 -m pytest -q \
             tests/test_finalize_refresh_image.py \
             tests/test_publish_image.py \
+            tests/test_select_refresh_source.py \
             tests/test_validate_image_version.py
 
       - name: Read version pins
@@ -360,8 +371,10 @@ jobs:
           echo "| Also pushed as | \`${{ env.DOCKERHUB_REPO }}:latest\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Image digest | \`${{ steps.publish_image.outputs.digest }}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Application source | \`${APPLICATION_SHA}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Recorded revision | \`${RECORDED_REVISION}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Orchestration source | \`${ORCHESTRATION_SHA}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Base release | \`${{ env.BASE_TAG }}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Base tag matches source | \`${TAG_MATCHES_SOURCE}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| dar-backup version | \`${{ steps.versions.outputs.DAR_BACKUP_VERSION }}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Cosign signed | ✅ keyless (Sigstore / Rekor) |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Rekor entry | ${{ steps.publish_image.outputs.rekor_url }} |" >> "${GITHUB_STEP_SUMMARY}"
