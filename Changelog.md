@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- correct unsafe host-root mount guidance, make helper source binds read-only,
+  preserve the definition-directory write access required by current preflight,
+  pass both UID and GID in direct Docker examples, and document a
+  least-privilege multi-source mount layout
+- document the per-slice PAR2 memory boundary, Docker/PAR2 memory caveats, and
+  the limits of existing large-scale RSS telemetry instead of presenting sample
+  slice sizes or historical memory values as general sizing recommendations
+- replace absolute reproducibility, CIS, CI, statelessness, and Sigstore claims
+  with descriptions that match the implemented build and trust boundaries
+- make the Pages quickstart create its directories and definition, correct
+  archive-helper defaults and limitations, label old DAR compilation notes as
+  historical, and replace stale metadata output with live inspection commands
+- record deferred archive-provenance, slice telemetry, PAR2 memory-control,
+  definition-mount hardening, refresh-recovery, and documentation-validation
+  work in a durable follow-up document
 - refuse to overwrite an existing Docker Hub refresh tag, fail closed when tag
   availability cannot be established, and require the finalized image revision
   label to match the exact recorded application source commit

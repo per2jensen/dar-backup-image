@@ -1,6 +1,6 @@
 <svg width="680" height="420" viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg" role="img">
-  <title>Scenario A — map host / to container /data</title>
-  <desc>Diagram showing that mounting the host root filesystem at /data inside the container makes all host paths accessible, enabling multiple backup definitions.</desc>
+  <title>Scenario A — map host / read-only to container /data</title>
+  <desc>Diagram showing that mounting the host root filesystem read-only at /data inside the container makes all host paths accessible, enabling multiple backup definitions.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -18,7 +18,7 @@
   <rect width="680" height="420" fill="#ffffff"/>
 
   <!-- Title -->
-  <text x="340" y="28" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="600" fill="#1a1a18">Scenario A — map host <tspan font-family="ui-monospace, monospace" font-size="14">/</tspan> to container <tspan font-family="ui-monospace, monospace" font-size="14">/data</tspan></text>
+  <text x="340" y="28" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="600" fill="#1a1a18">Scenario A — map host <tspan font-family="ui-monospace, monospace" font-size="14">/</tspan> read-only to container <tspan font-family="ui-monospace, monospace" font-size="14">/data</tspan></text>
 
   <!-- ── HOST BOX ── -->
   <rect x="24" y="46" width="252" height="250" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
@@ -48,8 +48,8 @@
 
   <!-- ── MOUNT ARROW ── -->
   <line x1="280" y1="171" x2="360" y2="171" stroke="#0F6E56" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="283" y="143" width="74" height="24" rx="4" fill="#E1F5EE"/>
-  <text x="320" y="155" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" font-weight="600" fill="#085041">-v /:/data</text>
+  <rect x="277" y="143" width="86" height="24" rx="4" fill="#E1F5EE"/>
+  <text x="320" y="158" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" font-weight="600" fill="#085041">-v /:/data:ro</text>
 
   <!-- ── CONTAINER BOX ── -->
   <rect x="368" y="46" width="288" height="250" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
@@ -57,7 +57,7 @@
 
   <!-- /data outer box -->
   <rect x="380" y="78" width="264" height="202" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width="0.8"/>
-  <text x="512" y="97" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" font-weight="600" fill="#3C3489">/data  ←  host /</text>
+  <text x="512" y="97" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" font-weight="600" fill="#3C3489">/data  ←  host / (read-only)</text>
 
   <!-- container path 1 -->
   <rect x="392" y="106" width="240" height="28" rx="5" fill="#AFA9EC" stroke="#534AB7" stroke-width="0.5"/>

@@ -80,7 +80,11 @@ def render_row(entry: dict, is_latest: bool) -> str:
     dar_bkp_ver   = entry.get("dar_backup_version", "—")
     created       = entry.get("created", "")[:10]
     git_rev       = entry.get("git_revision", "—")
-    latest_badge  = '<span class="latest">&#9679;&nbsp;Latest</span>' if is_latest else ""
+    latest_badge = (
+        '<span class="latest">&#9679;&nbsp;Latest release</span>'
+        if is_latest
+        else ""
+    )
 
     return (
         f'    <div class="release-row">\n'

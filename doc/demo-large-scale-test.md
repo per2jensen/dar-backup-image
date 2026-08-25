@@ -138,6 +138,37 @@ Every value the script uses is an environment variable with the shown default
 | `FULL_RESTORE_THRESHOLD_GIB` | `25` | Inclusive source-size threshold in GiB used only by `auto` mode |
 | `DEFINITION` | *(unset)* | Full backup-definition body — see [Full backup-definition control](#full-backup-definition-control) |
 
+### Slice size and interpreting memory
+
+`SLICE_SIZE` controls the maximum size of each numbered DAR file. The harness
+then asks `dar-backup` to create and verify a separate PAR2 set for every slice.
+Consequently, slice size bounds the largest input handled by one PAR2
+invocation: larger slices generally mean longer individual parity and repair
+operations and can require more peak PAR2 memory. Smaller slices trade that for
+more archive and parity files.
+
+Do not translate slice bytes directly into a RAM requirement. DAR's own memory
+use is also affected by catalogue scale, compression block settings, and thread
+count. PAR2 0.8.1 chooses a default memory limit from detected physical memory
+when no `-m` option is supplied; a Docker cgroup limit may be lower. Run a
+representative test with the same image, CPU count, Docker memory limit,
+compression settings, and PAR2 ratio intended for production.
+
+The historical results are observations, not a controlled slice-size study.
+They vary in source bytes, file count, compression, image revisions, and other
+conditions. Current schema-v9 records contain peak RSS and the SHA-256 of the
+effective definition, but they do **not** contain the resolved slice size or
+PAR2 memory limit as dedicated fields. Some bitrot records expose the sizes of
+affected slices, but that is not a reliable substitute. Until those telemetry
+fields and a controlled same-corpus matrix exist, do not derive a sizing formula
+from `large-scale-results.jsonl`.
+
+For an engineering comparison, hold the corpus and all other options constant,
+run several sizes such as 1G, 5G, 10G, and 20G, and compare PAR2 peak RSS plus
+create/verify/repair duration. The main README's
+[slice-size guidance](../README.md#choosing-slice-size-and-memory) covers the
+operational trade-offs.
+
 **The one thing that trips people up**: `BASE_DIR`'s top-level directory
 doubles as the read-only mount point for your real source data, and the
 generated backup definition's `-R` is derived from it automatically. That
@@ -349,8 +380,9 @@ Failures:      0
 ✓ ALL TESTS PASSED SUCCESSFULLY
 ```
 
-(Taken from a real run that produced a 116 GiB FULL archive; your own numbers will
-scale with however much data you point `SOURCE_GLOB` at.)
+(Taken from a real run that produced a 116 GiB FULL archive. Archive size and
+runtime change with the selected data; the displayed memory values are not a
+general sizing formula.)
 
 ## Output
 
@@ -508,7 +540,10 @@ build performed earlier by the wrapper.
 - **Peak-memory numbers are scoped to this run's own containers** (via `docker
   top` against each container's own ID) — they won't be polluted by unrelated
   `dar`/`par2`/`manager` processes elsewhere on the host, including your own
-  scheduled backup jobs.
+  scheduled backup jobs. Each value is the highest sampled RSS for that named
+  process, sampled every 0.5 seconds. It is not total container memory, does not
+  sum child processes, can miss shorter spikes, and is not by itself a safe
+  Docker memory-limit recommendation.
 - The disk-space preflight check measures the supported definition's effective
   `-g` minus `-P`/cache-tag selection and refuses to start if `BASE_DIR`'s
   filesystem doesn't have `--min-free-multiplier` (default 2x) that many

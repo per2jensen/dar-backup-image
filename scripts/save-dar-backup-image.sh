@@ -8,9 +8,13 @@
 # Source of truth: build-history.json from the dar-backup-image GitHub repo.
 # The latest entry (highest build_number) determines the expected image tag.
 #
+# This helper preserves image availability only. It does not verify the recorded
+# digest or Cosign identity, create a checksum, or archive registry-hosted
+# provenance material. See README.md before relying on it for long-term recovery.
+#
 # Usage:
-#   ./save-docker-image.sh
-#   DOCKER_ARCHIVE_DIR=/mnt/nas/docker-images ./save-docker-image.sh
+#   ./save-dar-backup-image.sh
+#   DOCKER_ARCHIVE_DIR=/mnt/nas/docker-images ./save-dar-backup-image.sh
 
 set -euo pipefail
 

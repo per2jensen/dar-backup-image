@@ -1,4 +1,4 @@
-# dar-backup image — reproducible backups and a long-term restore time capsule
+# dar-backup image — verifiable backups and a long-term restore time capsule
 <a href="https://github.com/per2jensen/dar-backup-image/releases"><img alt="Tag" src="https://img.shields.io/github/v/tag/per2jensen/dar-backup-image"/></a>
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
 [![Large scale torture test](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/per2jensen/dar-backup-image/main/doc/test-report/torture-test-badge.json)](https://github.com/per2jensen/dar-backup-image/blob/main/doc/test-report/large-scale-results.jsonl)
@@ -23,7 +23,7 @@
 
 ## dar-backup-image
 
-`dar-backup-image` packages `dar-backup`, `dar`, PAR2, and their runtime dependencies into a reproducible Docker image.
+`dar-backup-image` packages `dar-backup`, `dar`, PAR2, and their runtime dependencies into a versioned, auditable Docker image.
 
 It has **two equally important purposes**:
 
@@ -34,7 +34,7 @@ The second use is deliberate: the image is a **restore time capsule**. If you ne
 
 For long-term archival use, save a **specific versioned image** rather than relying only on `:latest`. The mutable `:latest` tag is useful for current operations and receives regular security refreshes; a pinned and locally archived version is the artifact you want to retain with your backups.
 
-A helper script, [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh), is provided for this purpose. It checks the latest released image against [`doc/build-history.json`](doc/build-history.json) and saves the image as a compressed tar archive. Run it periodically and let the restore environment travel with the DAR archives to your backup server, USB copies, or other offsite storage.
+A helper script, [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh), is provided for this purpose. It selects the highest-numbered release or refresh in [`doc/build-history.json`](doc/build-history.json) and saves that versioned image as a compressed tar archive. Its current integrity limitations are documented in [Preserve the restore environment with your archives](#preserve-the-restore-environment-with-your-archives).
 
 The image also works well as an everyday backup runner for cron jobs, systemd timers, CI pipelines, and FUSE-based storage. Its default entrypoint is `dar-backup`; `dar`, `par2`, or an interactive shell can be invoked directly by overriding the entrypoint.
 
@@ -112,7 +112,7 @@ The image contains man pages for `dar` and `par2` which make the image self-docu
 
 ## Table of Contents
 
-- [dar-backup image — reproducible backups and a long-term restore time capsule](#dar-backup-image--reproducible-backups-and-a-long-term-restore-time-capsule)
+- [dar-backup image — verifiable backups and a long-term restore time capsule](#dar-backup-image--verifiable-backups-and-a-long-term-restore-time-capsule)
   - [dar-backup-image](#dar-backup-image)
     - [Bundled documentation](#bundled-documentation)
     - [Highlights](#highlights)
@@ -145,6 +145,7 @@ The image contains man pages for `dar` and `par2` which make the image self-docu
     - [Tagging strategy](#tagging-strategy)
     - [Weekly image refresh](#weekly-image-refresh)
   - [Volumes / Runtime Configuration](#volumes--runtime-configuration)
+    - [Choosing slice size and memory](#choosing-slice-size-and-memory)
   - [Usage Example](#usage-example)
   - [run-backup.sh](#run-backupsh)
     - [Baked-in config file](#baked-in-config-file)
@@ -218,7 +219,28 @@ gunzip -c dar-backup-image-0.5.27.tar.gz | docker load
 docker run --rm --entrypoint dar per2jensen/dar-backup:0.5.27 --version
 ```
 
-The supplied [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh) automates this process. It is intended to be run periodically from cron or a systemd timer and only saves a new image when a new release is available.
+The supplied [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh)
+automates the pull and `docker save` operation. It is intended for cron or a
+systemd timer and saves a new archive when build history gains a higher-numbered
+release or weekly refresh.
+
+The current helper is an availability tool, not a complete provenance archiver.
+It does not yet compare the pulled tag with the recorded digest, run Cosign,
+write a checksum for the compressed archive, or preserve the build-history
+record, SBOM, signature, and attestation beside it. Cosign material stored in the
+registry is not included by `docker save`. Until the helper implements those
+checks, verify the immutable digest and Cosign identity as described below, save
+the relevant evidence beside the archive, and generate a checksum yourself:
+
+```bash
+sha256sum "dar-backup-image-${VERSION}.tar.gz" \
+  > "dar-backup-image-${VERSION}.tar.gz.sha256"
+sha256sum --check "dar-backup-image-${VERSION}.tar.gz.sha256"
+```
+
+Container images are architecture-specific. Record the image architecture with
+`docker image inspect --format '{{.Architecture}}' "$IMAGE"` and ensure the
+future recovery host can run it natively or through tested emulation.
 
 The practical preservation model is therefore:
 
@@ -238,7 +260,9 @@ a self-contained recovery set
 
 This does **not** mean Docker Hub should be treated as part of your disaster-recovery dependency chain. The opposite is the goal: save the image locally so recovery does not depend on Docker Hub, PyPI, Ubuntu repositories, the original host, or this GitHub repository still being available.
 
-The signed image digest, SBOM, build history, and Rekor record provide provenance for the preserved environment; the locally saved image provides availability.
+The signed image digest, SBOM, build history, and Rekor record provide provenance
+only when they are preserved and verified with the image; the locally saved image
+provides availability.
 
 ---
 
@@ -261,7 +285,8 @@ All performed using `docker run` — no host installation required.
 
 Starting with `dar-backup-image` **0.5.15**, `dar` (v2.7.18) is compiled from source rather than using Ubuntu 24.04’s older package.
 
-`dar` is compiled to provide the **latest features, performance optimizations, and bug fixes** (including full zstd, lz4, Argon2, GPGME, and remote repository support).
+The pinned `dar` release is compiled with the feature set verified by this
+project, including zstd, lz4, Argon2, GPGME, and remote repository support.
 
 The [Dockerfile](https://github.com/per2jensen/dar-backup-image/blob/main/Dockerfile) verifies the source tarball using **Denis Corbin’s GPG key**, checks all critical features, and only includes the built binary if everything passes.
 
@@ -312,10 +337,10 @@ Every image released to Docker Hub is produced by a fully automated GitHub Actio
 
 ### Pipeline steps
 
-1. **Build** — The `dar-backup:dev` image is built (version 0.5.22 onwards) from source using the versioned `DAR_VERSION` and `DAR_BACKUP_VERSION` pins in the repository.
+1. **Build** — The `dar-backup:dev` image is built using the repository's version pins. DAR is compiled from its GPG-verified source tarball; release images install the pinned `dar-backup` package from PyPI.
 2. **Test** — The full pytest suite runs against the dev image. The pipeline halts if any test fails.
-3. **Finalize** — The tested dev image is converted to the release tag with corrected OCI version and reference labels. Its application filesystem is retained without rebuilding packages, and the resulting image is tested again.
-4. **Verify** — OCI labels and the embedded `dar-backup --version` are checked against expected values.
+3. **Finalize** — The tested dev image is converted to the release tag with corrected OCI version and reference labels. Its application filesystem is retained without rebuilding packages.
+4. **Verify** — Focused checks validate OCI labels, the embedded `dar-backup --version`, the exact application revision, and the SHA-256 of `/LICENSE` before publication. The full pytest suite is not repeated against the relabeled image.
 5. **SBOM** — [Syft](https://github.com/anchore/syft) generates a CycloneDX JSON Software Bill of Materials from the local image before it leaves the runner.
 6. **Vulnerability scan** — [Grype](https://github.com/anchore/grype) scans the SBOM and **fails the release if any High or Critical vulnerability is found**. Results are uploaded to the GitHub Security tab as SARIF.
 7. **Candidate push** — Only the immutable version tag is initially pushed to Docker Hub; `:latest` still identifies the previous known-good image.
@@ -332,14 +357,22 @@ cannot drift apart or race.
 
 ### What cosign keyless signing provides
 
-Keyless signing means **no private key is stored anywhere** — not in GitHub Secrets, not on disk, not in the workflow. Instead, the signature is produced using a short-lived certificate issued by [Fulcio](https://github.com/sigstore/fulcio) (Sigstore's certificate authority), bound to GitHub's OIDC token for the specific workflow run.
+Keyless signing means the project does not manage or store a **long-lived signing
+private key** in GitHub Secrets or on disk. Cosign generates an ephemeral key for
+the signing operation, and [Fulcio](https://github.com/sigstore/fulcio) issues a
+short-lived certificate bound to GitHub's OIDC identity for the workflow run.
 
 Every signature is permanently recorded in [Rekor](https://github.com/sigstore/rekor), Sigstore's public, append-only transparency log. This means:
 
 - **The signing identity is public and auditable** — the Rekor entry proves exactly which GitHub workflow, repository, branch, and run produced the signature.
-- **Signatures cannot be backdated or forged** — the transparency log is immutable.
-- **No key management burden** — there is no private key that could be leaked, rotated, or forgotten.
-- **Anyone can verify** — without an account, without trusting Docker Hub, without contacting the author.
+- **Signing events are tamper-evident** — inclusion in the append-only log makes
+  unexpected or inconsistent events auditable; it does not make compromised OIDC
+  identities, workflows, or signing infrastructure impossible.
+- **No long-lived project key management burden** — there is no persistent project
+  signing key to rotate or retain.
+- **Anyone can verify identity and content** — without an account or contacting the
+  author. Verify an immutable digest; Docker Hub remains a distribution and
+  availability dependency until the image and evidence are archived locally.
 
 ### Verifying an image yourself
 
@@ -385,10 +418,14 @@ how many backup definitions you can use — and which host paths are reachable a
 
 In short:
 
-- **Map host `/` → container `/data`** — the entire host tree is visible; multiple definitions
-  can each target different subtrees (`data/home/alice/photos`, `data/srv/media`, …).
-- **Map a single subdirectory → container `/data`** — only that directory is visible inside the
-  container; only one definition (or definitions that stay within that subtree) will work.
+- **Map host `/` → container `/data` read-only** — the entire host tree is visible;
+  multiple definitions can target different subtrees, but the backup destination
+  and special filesystems can also reappear below `/data`. Use explicit exclusions.
+- **Map a single subdirectory → container `/data` read-only** — only that directory
+  is visible inside the container.
+- **Map several sources to distinct paths below `/data` read-only** — multiple
+  definitions work without exposing the full host; this is the preferred
+  multi-source layout.
 
 See **[doc/dar-backup-mount-scenarios.md](doc/dar-backup-mount-scenarios.md)** for a full explanation
 with diagrams, worked examples, and a comparison table.
@@ -402,7 +439,7 @@ with diagrams, worked examples, and a comparison table.
 | `dar-backup`       | [dar-backup on GitHub](https://github.com/per2jensen/dar-backup) |
 | `dar-backup-image` | [dar-backup-image](https://github.com/per2jensen/dar-backup-image)|
 | `Docker Hub repo`  | [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags) |
-| `dar`              | [Disk ARchive](http://dar.linux.free.fr/)|
+| `dar`              | [Disk ARchive](https://dar.sourceforge.io/)|
 
 ---
 
@@ -416,6 +453,11 @@ and is embedded in every image at `/LICENSE`. Print it without installing or sta
 
 ```bash
 docker run --rm --entrypoint cat per2jensen/dar-backup:latest /LICENSE
+
+# The release and refresh workflows require this exact SHA-256 before publishing.
+docker run --rm --entrypoint sha256sum \
+  per2jensen/dar-backup:latest /LICENSE
+# 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  /LICENSE
 ```
 
 ---
@@ -436,7 +478,8 @@ curl -s https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags | jq '
 
 A minimal, Dockerized backup runner using dar (Disk ARchive) and dar-backup, ready for automated or manual archive creation and restore.
 
-The image is continuously tested via a full CI pipeline on every commit. Weekly
+The image is tested by the full CI pipeline on pushes to `main` and on pull
+requests targeting `main`. Weekly
 refreshes keep `:latest` current with Ubuntu updates and reject images with any
 known High or Critical vulnerability detected by the configured Grype scan.
 
@@ -448,7 +491,7 @@ This image includes:
 - setpriv
 - [dar-backup](https://github.com/per2jensen/dar-backup) (my `dar` Python based wrapper)
 - Clean Ubuntu 24.04 base; image size varies with the pinned packages and architecture
-- CIS-aligned permissions and user-drop via setpriv
+- Explicit non-root execution and privilege drop via `setpriv`
 
 ---
 
@@ -459,8 +502,8 @@ The `run-backup.sh` script uses a standardized directory structure to ensure bac
 By default, the script expects (or creates) the following structure relative to `WORKDIR`:
 
 - `$WORKDIR/backups` → Mounted as `/backups` (DAR archives and logs)  
-- `$WORKDIR/backup.d` → Mounted as `/backup.d` (backup definition files)  
-- `$WORKDIR/data` → Mounted as `/data` (source data to back up)  
+- `$WORKDIR/backup.d` → Mounted as `/backup.d` (backup definitions; current preflight requires write access)
+- `$WORKDIR/data` → Mounted read-only as `/data` (source data to back up)
 - `$WORKDIR/restore` → Mounted as `/restore` (restored files)
 
 ### How Directory Overrides Work
@@ -475,7 +518,7 @@ This allows full flexibility: you can set `WORKDIR` once for a standard layout, 
 
 ### UID and GID Behavior
 
-All files written by `dar-backup` inside the container will match your host user and group:
+Files created through `run-backup.sh` use the selected numeric host UID and GID:
 
 - By default, `RUN_AS_UID` and `RUN_AS_GID` are set to your current UID and GID.
 - These are passed to Docker via `--user "$RUN_AS_UID:$RUN_AS_GID"`.
@@ -514,7 +557,8 @@ For teams or shared servers, use a group to manage permissions:
 
 ```bash
 WORKDIR=/srv/dar-backup
-Group ownership
+
+# Group ownership
 
 chown -R :backupgrp /srv/dar-backup
 chmod -R 2770 /srv/dar-backup
@@ -560,8 +604,8 @@ Here’s a quick reference for all environment variables used by the script:
 | `RUN_AS_UID`            | Current user's UID       | UID passed to Docker to avoid root-owned files.               |
 | `RUN_AS_GID`            | Current user's GID       | GID passed to Docker for correct file group ownership.        |
 | `DAR_BACKUP_DIR`        | `$WORKDIR/backups`       | Host directory for DAR archives and logs (mounted at `/backups`). |
-| `DAR_BACKUP_D_DIR`      | `$WORKDIR/backup.d`      | Host directory for backup definition files (mounted at `/backup.d`). |
-| `DAR_BACKUP_DATA_DIR`   | `$WORKDIR/data`          | Host directory containing source data (mounted at `/data`).    |
+| `DAR_BACKUP_D_DIR`      | `$WORKDIR/backup.d`      | Host directory for backup definitions (mounted at `/backup.d`; current preflight requires write access). |
+| `DAR_BACKUP_DATA_DIR`   | `$WORKDIR/data`          | Host source directory (mounted read-only at `/data`).          |
 | `DAR_BACKUP_RESTORE_DIR`| `$WORKDIR/restore`       | Host directory for restored files (mounted at `/restore`).     |
 | `DOCKER_PULL`           | `false`                  | Set exactly to `true` to pull `IMAGE` before running; `true` and `false` are the only valid values. |
 
@@ -596,6 +640,11 @@ For normal day-to-day use, `:latest` is convenient because it tracks the most
 recently verified publication. For reproducible operation and recovery, use a
 versioned tag or, preferably, its immutable digest.
 
+Publishing a release candidate also promotes its verified digest to `:latest`.
+Weekly refreshes then pause while that RC is the newest build-history record.
+Operators who require stable-only deployments must pin a stable version or digest
+instead of following `:latest` during an RC window.
+
 For **long-term recovery**, do not preserve only the `:latest` reference. Save a specific versioned image, for example `:0.5.27`, as a Docker/OCI archive alongside the backup set. A mutable registry tag is a locator; the saved image is the recovery artifact.
 
 
@@ -609,6 +658,10 @@ each refresh:
 
 - Rebuilds the exact application source commit recorded for that base, while picking up Ubuntu base-image and package updates
 - Runs the full test suite — the pipeline halts if any test fails
+- Refuses to reuse an existing Git or Docker Hub refresh tag and fails closed if
+  remote tag availability cannot be established
+- Requires the finalized image's OCI revision label to equal the complete recorded
+  application SHA and verifies the baked `/LICENSE` SHA-256
 - Scans with [Grype](https://github.com/anchore/grype) — **the refresh is aborted if any High or Critical vulnerability is found**
 - Signs the image with [cosign](https://github.com/sigstore/cosign) keyless signing and records the entry in the [Rekor](https://github.com/sigstore/rekor) transparency log
 - Attaches a signed CycloneDX SBOM attestation
@@ -638,6 +691,35 @@ The mapping between physical directories on your file system and the expected di
 
 > 💡 **How you mount `/data` determines which backup definitions work.**
 > See [Understanding Volume Mounts and Backup Definitions](#understanding-volume-mounts-and-backup-definitions).
+
+### Choosing slice size and memory
+
+`--slice` sets the maximum size of each numbered DAR archive file. Choose it
+primarily for storage, transfer, verification, and repair granularity:
+
+- Smaller slices produce more `.dar` and PAR2 files, but each damaged or
+  transferred unit is smaller.
+- Larger slices reduce file count, but make each PAR2 creation, verification, or
+  repair operation cover a larger input and can increase both runtime and peak
+  memory.
+- Slice size is not a direct DAR memory reservation. DAR documents memory growth
+  separately for compression block size and thread count; there is no supported
+  rule such as “10 GiB slices require 10 GiB RAM.” See the
+  [DAR manual](https://dar.sourceforge.io/doc/man/dar.html).
+
+`dar-backup` runs PAR2 once per DAR slice. This bounds each PAR2 problem by one
+slice rather than the complete archive, but it also means slice size materially
+affects the largest PAR2 operation. The bundled PAR2 0.8.1 selects a default
+memory limit from detected physical memory when no `-m` option is supplied. A
+container memory limit may be lower than that detected value, so test the chosen
+slice size under the same Docker memory constraints used in production and watch
+for OOM termination.
+
+The 5G, 7G, 10G, and 12G values elsewhere in this repository are examples, not
+universal recommendations. Start conservatively on memory-constrained hosts and
+measure a representative FULL backup plus PAR2 creation and repair before
+increasing the size. The [large-scale test guide](doc/demo-large-scale-test.md)
+explains what its peak-memory measurements do and do not prove.
 
 ---
 
@@ -678,8 +760,9 @@ cat > "$BACKUP_D_DIR/default" <<'EOF'
 EOF
 
 docker run --rm \
-  -e RUN_AS_UID=$(id -u) \
-  -v "$DATA_DIR":/data \
+  -e RUN_AS_UID="$(id -u)" \
+  -e RUN_AS_GID="$(id -g)" \
+  -v "$DATA_DIR":/data:ro \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
@@ -698,7 +781,8 @@ To use another config file you have multiple options:
 - Let DAR_BACKUP_CONFIG point to a config file.
 
 The container uses `setpriv` to drop root privileges. Pass
-`-e RUN_AS_UID=$(id -u)` to run as your own user inside the container.
+both `-e RUN_AS_UID="$(id -u)"` and `-e RUN_AS_GID="$(id -g)"` when
+invoking Docker directly. `run-backup.sh` supplies both automatically.
 
 ---
 
@@ -745,8 +829,8 @@ These directories are host-mounted into the container so your data and archives 
 | Host Directory (default)      | Container Mount  | Purpose                           |
 |--------------------------------|------------------|-----------------------------------|
 | `$WORKDIR/backups`             | `/backups`       | DAR archives and log files       |
-| `$WORKDIR/backup.d`            | `/backup.d`      | Backup definition files          |
-| `$WORKDIR/data`                | `/data`          | Source data for the backup       |
+| `$WORKDIR/backup.d`            | `/backup.d`       | Backup definitions; current preflight requires write access |
+| `$WORKDIR/data`                | `/data` (read-only) | Source data for the backup     |
 | `$WORKDIR/restore`             | `/restore`       | Destination for restore tests    |
 
 You can override any of these paths by setting the environment variables:
@@ -764,8 +848,8 @@ If `IMAGE` is not set, the script defaults to
 
 See the available images on [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 
-   If RUN_AS_UID is not set, it defaults to the current user's UID.
-    - running the script as root is not allowed, the script will exit with an error.
+If `RUN_AS_UID` or `RUN_AS_GID` is not set, it defaults to the current
+user's numeric UID or GID. Running the helper as root is not allowed.
 
 ### Backup Definitions
 
@@ -781,8 +865,9 @@ and is automatically mounted into the container at `/backup.d`.
 > `dar-backup` will only create one `FULL`, one `DIFF`, and one `INCR` backup **per definition per calendar day**.  
 > - You can run all three types (FULL → DIFF → INCR) on the same day.  
 > - A second run of the *same type* (e.g., another FULL) will be skipped to avoid overwriting the existing archive.
-> - To force a new run, either remove or archive the previous `.dar` files for that definition/date.
-> -- Use [`cleanup`](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#cleanup-options) for safe archive deletions
+> - To force a new run, use [`cleanup`](https://github.com/per2jensen/dar-backup?tab=readme-ov-file#cleanup-options)
+>   so DAR slices, PAR2 data, and catalogue state are handled consistently. Do
+>   not delete only the `.dar` files.
 
 #### Usage
 
@@ -838,7 +923,7 @@ This:
 
 ```bash
 mkdir -p "$HOME/dar-backup/backup.d"
-cat > $HOME/dar-backup/backup.d/projects << 'EOF'
+cat > "$HOME/dar-backup/backup.d/projects" <<'EOF'
 -R /data/projects
 -z5
 -am
@@ -861,7 +946,8 @@ The backup will:
 
 > - **Why is my backup skipped?**  
 >   Only one `FULL`, one `DIFF`, and one `INCR` backup can be created per definition per day.  
->   If a run is skipped, remove or archive the existing `.dar` files for that definition/date.
+>   If a run is skipped, use the documented `cleanup` command; do not remove
+>   only the `.dar` files and leave associated state behind.
 >
 > - **Permission issues on host files?**  
 >   Ensure `RUN_AS_UID` and `RUN_AS_GID` match the desired owner.  
@@ -912,30 +998,23 @@ docker pull per2jensen/dar-backup:latest
 docker inspect per2jensen/dar-backup:latest | jq '.[0].Config.Labels'
 ```
 
-Example output:
+Inspect the provenance-critical labels without relying on a stale example:
 
-```json
-{
-  "org.dar-backup.version": "1.1.5",
-  "org.dar.version": "2.7.21",
-  "org.opencontainers.image.authors": "Per Jensen <dar-backup@pm.me>",
-  "org.opencontainers.image.base.digest": "sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b",
-  "org.opencontainers.image.base.name": "ubuntu",
-  "org.opencontainers.image.base.version": "24.04",
-  "org.opencontainers.image.created": "2026-05-17T20:03:16Z",
-  "org.opencontainers.image.description": "Container for DAR-based backups using `dar-backup`",
-  "org.opencontainers.image.documentation": "https://github.com/per2jensen/dar-backup-image/blob/main/README.md",
-  "org.opencontainers.image.licenses": "GPL-3.0-or-later",
-  "org.opencontainers.image.ref.name": "per2jensen/dar-backup:0.5.24",
-  "org.opencontainers.image.revision": "d5bf339",
-  "org.opencontainers.image.source": "https://github.com/per2jensen/dar-backup-image",
-  "org.opencontainers.image.title": "dar-backup",
-  "org.opencontainers.image.url": "https://hub.docker.com/r/per2jensen/dar-backup",
-  "org.opencontainers.image.version": "0.5.24",
-  "org.dar-backup.documentation.command": "docs",
-  "org.dar-backup.documentation.path": "/usr/share/doc/dar-backup"
-}
+```bash
+docker inspect per2jensen/dar-backup:latest \
+  | jq '.[0].Config.Labels | {
+      image_version: .["org.opencontainers.image.version"],
+      source_revision: .["org.opencontainers.image.revision"],
+      base_digest: .["org.opencontainers.image.base.digest"],
+      dar_backup_version: .["org.dar-backup.version"],
+      dar_version: .["org.dar.version"],
+      install_source: .["org.dar-backup.install-source"],
+      license: .["org.opencontainers.image.licenses"]
+    }'
 ```
+
+Current release and refresh workflows require `source_revision` to be the full
+application commit SHA and `install_source` to be `pypi`.
 
 ### 3. List Available Image Tags
 
@@ -960,7 +1039,7 @@ mkdir -p "$DATA_DIR" "$BACKUP_DIR"
 touch "$DATA_DIR/TEST.txt"
 
 docker run --rm \
-  -v "$DATA_DIR":/data \
+  -v "$DATA_DIR":/data:ro \
   -v "$BACKUP_DIR":/backups \
   --entrypoint dar \
   "$IMAGE" -c /backups/myarchive -R /data
@@ -991,35 +1070,61 @@ No terminal found for user interaction. All questions will be assumed a negative
 
 This shows that even without dar-backup, you can still invoke dar manually — helpful for debugging, recovery scenarios, or power-user workflows.
 
-    🧠 Tip: You can also run par2 directly using --entrypoint par2 if needed.
+> Tip: You can also run PAR2 directly with `--entrypoint par2` when needed.
 
 ---
 
 ## Common `dar-backup` commands
 
+These are arguments to the image's default `dar-backup` entrypoint. Supply the
+same mounts and UID/GID settings used for backups:
+
+```bash
+RUNTIME_ARGS=(
+  -e RUN_AS_UID="$(id -u)"
+  -e RUN_AS_GID="$(id -g)"
+  -v "$DATA_DIR":/data:ro
+  -v "$BACKUP_DIR":/backups
+  -v "$RESTORE_DIR":/restore
+  -v "$BACKUP_D_DIR":/backup.d
+)
+```
+
 ### Full backup
 
-dar-backup --full-backup
+```bash
+docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --full-backup
+```
 
 ### Diff backup (requires prior FULL)
 
-dar-backup --differential-backup
+```bash
+docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --differential-backup
+```
 
 ### Incremental backup (requires DIFF)
 
-dar-backup --incremental-backup
+```bash
+docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --incremental-backup
+```
 
 ### List available archives
 
-dar-backup --list
+```bash
+docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --list
+```
 
 ### List contents of a backup
 
-dar-backup --list-contents <archive_name>
+```bash
+docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --list-contents ARCHIVE_NAME
+```
 
 ### Restore
 
-dar-backup --restore <archive_name>
+```bash
+docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --restore ARCHIVE_NAME
+```
 
 ---
 
@@ -1108,6 +1213,9 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ## Roadmap
 
+Deferred implementation work discovered during the 0.9.1 documentation audit
+is tracked in [doc/documentation-follow-ups.md](doc/documentation-follow-ups.md).
+
 ### Version 1.1
 
 - Integrate DAR 2.8
@@ -1125,7 +1233,7 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ## Software this project benefits from
 
-- [DAR of course :-)](http://dar.linux.free.fr/)
+- [DAR of course :-)](https://dar.sourceforge.io/)
 - [Ubuntu](https://ubuntu.com/)
 - [Python](https://python.org/)
 - [GNU software](https://www.fsf.org/)

@@ -30,6 +30,11 @@ You’ll need:
 - One or more backup definitions in `$BACKUP_D_DIR`
 - A `dar-backup` image (e.g., `per2jensen/dar-backup:latest`)
 
+The backup and restore commands need only Docker. The optional provenance
+verification later in the guide additionally uses `curl`, `jq`, and Cosign.
+For repeatable backup or recovery, replace `:latest` with a versioned tag or,
+preferably, the immutable digest from build history.
+
 ---
 
 ## Backup Definition
@@ -67,11 +72,17 @@ Below is a sample backup definition file named `media-demo-backup`, located in `
 --cache-directory-tagging
 ```
 
+The 12G slice is an example, not a universal recommendation. Larger slices make
+each per-slice PAR2 operation larger and can increase peak memory and repair
+time. See [Choosing slice size and memory](../README.md#choosing-slice-size-and-memory)
+before selecting a production value.
+
 ---
 
 ## Directory mapping inside container
 
-In order to avoid confusion about what is backed up, it is important take a look at how various directories are mounted inside the container.
+To avoid confusion about what is backed up, first review how the directories
+are mounted inside the container.
 
 These directories are host-mounted into the container so that all backup archives, definitions, and restored files remain accessible outside Docker.
 
@@ -79,10 +90,10 @@ These directories are used:
 
 | ENV VAR | Host path | Container path | Note |
 | --------|-------|-------------------|------|
-| DATA_DIR | /home/pj/data/2023 | /data | "-R / -g data"  in backup definition |
+| DATA_DIR | /home/pj/data/2023 | /data (read-only) | "-R / -g data" in backup definition |
 | BACKUP_DIR | /media/pj/86e85ffe-5a77-49eb-afb4-f1eb391fcdaf/demo | /backups | BACKUP_DIR in dar-backup config |
 | RESTORE_DIR | /tmp/test-restore | /restore | TEST_RESTORE_DIR in dar-backup config |
-| BACKUP_D_DIR | /tmp/test-backup.d | /backup.d | BACKUP.D_DIR in dar-backup config |
+| BACKUP_D_DIR | /tmp/test-backup.d | /backup.d | BACKUP.D_DIR in dar-backup config; must be writable for preflight |
 
 Why "-R /" and "-g data" ? The container's root is /, and /data is where the host directory is mounted. So -g data selects exactly /home/pj/data/2023 on the host — nothing above it is included.
 
@@ -123,9 +134,9 @@ fi
 
 # the pull happens if :latest is not found locally
 docker run --rm \
-  -e RUN_AS_UID=$(id -u) \
-  -e RUN_AS_GID=$(id -g) \
-  -v "$DATA_DIR":/data \
+  -e RUN_AS_UID="$(id -u)" \
+  -e RUN_AS_GID="$(id -g)" \
+  -v "$DATA_DIR":/data:ro \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
@@ -229,10 +240,10 @@ Read more about signing and SBOM attestation verification in the
 List all backups in /backups/
 
 ```bash
-$ docker run --rm  \
-  -e RUN_AS_UID=$(id -u)  \
-  -e RUN_AS_GID=$(id -g) \
-  -v "$DATA_DIR":/data \
+docker run --rm  \
+  -e RUN_AS_UID="$(id -u)"  \
+  -e RUN_AS_GID="$(id -g)" \
+  -v "$DATA_DIR":/data:ro \
   -v "$BACKUP_DIR":/backups  \
   -v "$RESTORE_DIR":/restore  \
   -v "$BACKUP_D_DIR":/backup.d  \
@@ -252,10 +263,10 @@ media-demo-backup_FULL_2026-05-17 : 86924 MB
 List the contents of the archive "media-demo-backup_FULL_2026-05-17"
 
 ```bash
-$ docker run --rm  \
-  -e RUN_AS_UID=$(id -u)  \
-  -e RUN_AS_GID=$(id -g) \
-  -v "$DATA_DIR":/data \
+docker run --rm  \
+  -e RUN_AS_UID="$(id -u)"  \
+  -e RUN_AS_GID="$(id -g)" \
+  -v "$DATA_DIR":/data:ro \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
@@ -292,10 +303,10 @@ In this step, we selectively restore only *.NEF files from the `data/2023-12-25-
 ~$ ls $RESTORE_DIR/data/2023-12-25-Merle-Hundebjerget/ 
 ls: cannot access '/tmp/test-restore/data/2023-12-25-Merle-Hundebjerget/': No such file or directory
 
-$ docker run --rm  \
-  -e RUN_AS_UID=$(id -u)  \
-  -e RUN_AS_GID=$(id -g) \
-  -v "$DATA_DIR":/data \
+docker run --rm  \
+  -e RUN_AS_UID="$(id -u)"  \
+  -e RUN_AS_GID="$(id -g)" \
+  -v "$DATA_DIR":/data:ro \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \

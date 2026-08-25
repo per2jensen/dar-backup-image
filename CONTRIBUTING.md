@@ -10,7 +10,7 @@ This document outlines the basic rules and workflow for contributions.
 - **Include test cases**: Any functional code change must include appropriate test coverage. Pull requests without tests will not be merged.  
 - **English only**: All code comments, commit messages, and documentation must be written in English.  
 - **Security awareness**: No unsafe shell expansions, unvalidated inputs, or credential leaks. Use of *external* libraries should be kept minimal.  
-- **Consistency**: Follow existing coding style (PEP8, Black formatting).  
+- **Consistency**: Follow PEP 8 and the formatting used by the surrounding code.
 - **License**: Contributions are accepted under GPL-3.0-or-later, consistent with the project license.
 
 ## Development Workflow

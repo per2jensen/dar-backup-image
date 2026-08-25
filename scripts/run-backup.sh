@@ -17,9 +17,11 @@
 #      |----------------------------------|------------------|-----------------------------------|
 #      | $WORKDIR/backups                 | /backups         | DAR archives and log files       |
 #      | $WORKDIR/backup.d                | /backup.d        | Backup definition files          |
-#      | $WORKDIR/data                    | /data            | Source data to back up           |
+#      | $WORKDIR/data                    | /data:ro         | Source data to back up           |
 #      | $WORKDIR/restore                 | /restore         | Destination for restore verification |
 #
+#    - Source data is mounted read-only. /backup.d remains writable because
+#      the current dar-backup preflight requires write access there.
 #    - WORKDIR *must* be set, otherwise the script exits with an error.
 #
 #    - Override any of these via:
@@ -44,7 +46,8 @@
 #    - Only **one FULL, one DIFF, and one INCR per definition per day**.
 #    - All three can run on the same day (FULL → DIFF → INCR).
 #    - A second run of the same type for the same day will be skipped.
-#    - To force a rerun, move or delete the day’s .dar files for that definition.
+#    - To force a rerun, use dar-backup's cleanup command so slices, PAR2 data,
+#      and catalogue state remain consistent.
 #
 # Quick start examples:
 # ----------------------
@@ -248,7 +251,7 @@ docker run --rm \
   -e RUN_AS_GID="$RUN_AS_GID" \
   -v "$DAR_BACKUP_DIR":/backups \
   -v "$DAR_BACKUP_D_DIR":/backup.d \
-  -v "$DAR_BACKUP_DATA_DIR":/data \
+  -v "$DAR_BACKUP_DATA_DIR":/data:ro \
   -v "$DAR_BACKUP_RESTORE_DIR":/restore \
   "$IMAGE" \
   "${DOCKER_ARGS[@]}"

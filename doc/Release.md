@@ -234,6 +234,13 @@ release tag points to a later housekeeping commit instead of the recorded build
 source. An invalid or unresolvable recorded revision is fatal; the workflow
 never silently falls back to the tag.
 
+Before building, refresh requires both `vBASE_VERSION-N` and the corresponding
+Docker Hub tag to be unused. Docker tag lookup fails closed: an authentication,
+network, or registry error is not treated as proof that the tag is available.
+After finalization, the image's OCI revision must equal the complete resolved
+`APPLICATION_SHA`, and `/LICENSE` must match the release workflow's expected
+SHA-256 before the SBOM, scan, or publication steps can proceed.
+
 The workflow verifies clean checkouts and exact commits before building, then
 revalidates the application commit and current `main` immediately before
 publication. The application and orchestration SHAs are included in the job
@@ -260,6 +267,20 @@ predating the dedicated target use the same tested validator from the isolated
 orchestration checkout as an explicit compatibility path; the recorded
 application tree is still never modified.
 
+### Refresh failure states
+
+| Last completed boundary | Expected result | Operator action |
+|---|---|---|
+| Before candidate publication | No remote tag or Git metadata is created | Correct the failure and rerun; tag-availability checks must still pass |
+| Before remote candidate verification | Attempted refresh tag is rolled back; previous `:latest` remains | Correct the publication failure and rerun only after confirming the tag is absent |
+| Candidate verified, but `:latest` verification failed | Valid signed refresh tag may remain; refresh is incomplete | Preserve the run evidence and reconcile Docker state before any retry |
+| Docker publication completed, but atomic Git housekeeping failed | Signed image remains, while neither `main` nor `vVERSION-N` is partially pushed | Do not rerun blindly: the Docker collision guard will reject the used tag; reconcile build history and Git metadata against the published digest |
+| Atomic Git housekeeping completed | Refresh image, history, evidence, branch, and annotated tag are authoritative | Perform the digest, signature, history, and `:latest` acceptance checks |
+
+There is not yet an automated recovery workflow for the fourth state. The
+failed Actions run, immutable digest, SBOM, SARIF, application SHA, and
+orchestration SHA must be retained for a deliberate recovery change.
+
 ### After a stable release
 
 After a stable `x.y.z` release, the weekly image refresh (every Saturday 04:17
@@ -274,6 +295,13 @@ To archive the Docker image locally alongside the dar archives:
 ~/.local/bin/save-dar-backup-image.sh
 ```
 
-This checks `build-history.json` on GitHub and saves the latest image as a
-compressed tar to `$DOCKER_ARCHIVE_DIR` (default: `~/docker-archives`) if not
-already archived.
+This selects the highest build number in `build-history.json`—a release or
+weekly refresh—and saves the image as a compressed tar to
+`$DOCKER_ARCHIVE_DIR` (default: `/mnt/dar/docker-archives`) if a file with that
+name is not already present.
+
+The current helper does not verify the recorded digest or Cosign identity,
+checksum the saved archive, or preserve registry-hosted signatures,
+attestations, SBOMs, and history beside it. Treat it as an availability helper,
+not a complete provenance bundle, and follow the preservation checks in the
+main README.

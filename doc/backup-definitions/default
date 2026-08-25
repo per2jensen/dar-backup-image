@@ -5,7 +5,7 @@
 #  Default is to backup everything in and below /data when using `scripts/run-backup.sh`
 #
 #  Use multiple -g to include various directories
-#  Use multiple -P to exclude other directoreis
+#  Use multiple -P to exclude other directories
 #
 
 # Switch to ordered selection mode, which means that the following
@@ -35,12 +35,13 @@
 # overwrite an existing archive.
  -n
 
- # size of each slice in the archive
+# Example slice size. Choose this for storage/repair granularity and validate
+# PAR2 peak memory on the target host; see README.md#choosing-slice-size-and-memory.
  --slice 12G
 
 # see https://github.com/per2jensen/dar-backup?tab=readme-ov-file#restore-test-exit-code-4
 --comparison-field=ignore-owner
 
-# bypass directores marked as cache directories
-# http://dar.linux.free.fr/doc/Features.html
+# bypass directories marked as cache directories
+# https://dar.sourceforge.io/doc/Features.html
 --cache-directory-tagging

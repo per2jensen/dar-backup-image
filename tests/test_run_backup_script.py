@@ -609,11 +609,22 @@ class TestDockerInvocationContract:
         for host_name, container_path in (
             ("backups", "/backups"),
             ("backup.d", "/backup.d"),
-            ("data", "/data"),
+            ("data", "/data:ro"),
             ("restore", "/restore"),
         ):
             expected_mount = f"<{tmp_path / 'workdir' / host_name}:{container_path}>"
             assert expected_mount in commands[1]
+
+    def test_required_writable_mounts_remain_writable(self, tmp_path: Path) -> None:
+        """Source hardening must not make required writable mounts read-only."""
+        environment, command_log = build_fake_docker_env(tmp_path)
+
+        run_script(environment, "-t", "FULL")
+
+        run_command = command_log.read_text(encoding="utf-8").splitlines()[1]
+        assert f"<{tmp_path / 'workdir' / 'backups'}:/backups:ro>" not in run_command
+        assert f"<{tmp_path / 'workdir' / 'backup.d'}:/backup.d:ro>" not in run_command
+        assert f"<{tmp_path / 'workdir' / 'restore'}:/restore:ro>" not in run_command
 
     def test_pull_true_pulls_before_inspecting_image(self, tmp_path: Path) -> None:
         """An explicitly requested pull occurs before the local image inspection."""

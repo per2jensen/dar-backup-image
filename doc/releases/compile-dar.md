@@ -1,4 +1,14 @@
-## build
+# Historical DAR compilation notes
+
+> **Historical record, not the current image build procedure.** These commands
+> and captured outputs document experiments with DAR 2.7.17 and 2.7.18 on
+> Ubuntu 24.04. They intentionally do not track the current `DAR_VERSION` pin
+> and have not been maintained as a copy/paste installation guide. The
+> authoritative container build is the repository `Dockerfile`; inspect a
+> released image's recorded source and feature set through its OCI metadata and
+> `dar --version` output.
+
+## DAR 2.7.18 experiment
 
 This worked for dar version 2.7.18 on ubuntu 24.04 as delivered from `multipass`
 
@@ -73,8 +83,8 @@ dar and libdar have been successfully configured with the following parameters:
 
 ```bash
 make
-make install-strip
- ~/.local/dar-2.7.18/bin/dar --version
+sudo make install-strip
+~/.local/dar-2.7.18/bin/dar --version
 
 
  dar version 2.7.18, Copyright (C) 2002-2025 Denis Corbin
@@ -133,7 +143,7 @@ make install-strip
 This gives:
 
 ```` code
-$HOME/.local/dar/bin/ --version
+$HOME/.local/dar/bin/dar --version
 
  dar version 2.7.17, Copyright (C) 2002-2025 Denis Corbin
    Long options support         : YES

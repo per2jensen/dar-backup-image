@@ -20,6 +20,9 @@ The `-R /` sets the working root to `/` inside the container, and `-g data/home/
 selects a subtree under it — which is actually `/data/home/alice/photos` inside the container.
 
 What lives at `/data` depends entirely on the `-v` mount you pass to `docker run`.
+Mount source data read-only. Keep `/backup.d` writable for now: the current
+`dar-backup` preflight rejects a read-only definition directory even when the
+definition itself is only being read.
 
 ---
 
@@ -27,8 +30,9 @@ What lives at `/data` depends entirely on the `-v` mount you pass to `docker run
 
 ```bash
 docker run --rm \
-  -e RUN_AS_UID=$(id -u) \
-  -v /:/data \
+  -e RUN_AS_UID="$(id -u)" \
+  -e RUN_AS_GID="$(id -g)" \
+  -v /:/data:ro \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
@@ -62,9 +66,14 @@ All three resolve correctly because the full host tree is visible under `/data`.
 **When to use this:** You want a single container invocation (or a `backup.d` directory
 with multiple definitions) to back up several unrelated locations on the host.
 
-> **Note on security:** Mounting `/` gives the container read access to the entire host
-> filesystem. Run with `--read-only` on the data volume and a non-root `RUN_AS_UID` to
-> limit the blast radius.
+> **Security and recursion warning:** Mounting `/` exposes the entire host tree to the
+> container, including other mounted filesystems. Make the bind itself read-only with
+> `-v /:/data:ro` (or `--mount type=bind,src=/,dst=/data,readonly`); Docker's separate
+> `--read-only` flag protects the container root filesystem and does not make this bind
+> read-only. A host backup destination may also reappear beneath `/data`, for example as
+> `/data/mnt/backups`. Keep every definition narrowly scoped and explicitly exclude the
+> backup destination, `/proc`, `/sys`, `/dev`, `/run`, and any other mounts that must not
+> be traversed. Prefer the narrower scenarios below whenever possible.
 
 ---
 
@@ -72,8 +81,9 @@ with multiple definitions) to back up several unrelated locations on the host.
 
 ```bash
 docker run --rm \
-  -e RUN_AS_UID=$(id -u) \
-  -v /home/alice/photos:/data \
+  -e RUN_AS_UID="$(id -u)" \
+  -e RUN_AS_GID="$(id -g)" \
+  -v /home/alice/photos:/data:ro \
   -v "$BACKUP_DIR":/backups \
   -v "$RESTORE_DIR":/restore \
   -v "$BACKUP_D_DIR":/backup.d \
@@ -86,7 +96,8 @@ docker run --rm \
 `/data` *is* that directory — its contents appear directly at `/data/`. No other host paths
 exist inside the container.
 
-**Consequence for backup definitions:** Only one definition shape works:
+**Consequence for backup definitions:** Every working definition must stay within this
+one mounted source. A definition that treats `/data` as its root looks like this:
 
 ```text
 # definition: photos-backup  ✓ works
@@ -103,33 +114,57 @@ the principle of least privilege — the container can only ever see that one di
 
 ---
 
+## Scenario C — Map several sources below `/data`
+
+Docker can mount unrelated host directories at separate destinations below `/data`:
+
+```bash
+docker run --rm \
+  -e RUN_AS_UID="$(id -u)" \
+  -e RUN_AS_GID="$(id -g)" \
+  -v /home/alice/photos:/data/photos:ro \
+  -v /home/bob/documents:/data/documents:ro \
+  -v /srv/media:/data/media:ro \
+  -v "$BACKUP_DIR":/backups \
+  -v "$RESTORE_DIR":/restore \
+  -v "$BACKUP_D_DIR":/backup.d \
+  "$IMAGE" -F --log-stdout
+```
+
+Definitions can then select `data/photos`, `data/documents`, or `data/media` with
+`-R /`. This retains most of Scenario A's flexibility without exposing the entire
+host. Give every source a distinct destination; never stack several binds on the
+same `/data` target.
+
+---
+
 ## Choosing the right approach
 
-| | Scenario A (`-v /:/data`) | Scenario B (`-v /path/to/dir:/data`) |
-|---|---|---|
-| Paths visible in container | All host paths under `/data/…` | Only the mounted dir's contents |
-| Backup definitions | Many, targeting different subtrees | One (or all targeting the same root) |
-| Host exposure | Entire filesystem (read) | Single directory only |
-| Typical use | Multi-source backup jobs | Single-purpose, least-privilege |
+| | Scenario A (`-v /:/data:ro`) | Scenario B (`-v /path:/data:ro`) | Scenario C (separate submounts) |
+|---|---|---|---|
+| Paths visible in container | All host paths under `/data/…` | Only one source's contents | Only explicitly mounted sources |
+| Backup definitions | Many, targeting different subtrees | One, or several targeting the same root | Many, targeting named subdirectories |
+| Host exposure | Entire filesystem | Single directory only | Selected directories only |
+| Typical use | Exceptional whole-host jobs | Single-purpose least privilege | Preferred multi-source layout |
 
-The practical rule: **the more host directories you need to back up with separate definitions,
-the higher up the host tree your mount point must be.** Mapping `/` is the most flexible;
-mapping a leaf directory is the most restrictive.
+The practical rule is to expose only the paths each job needs. Use one leaf mount for
+a single source and several named submounts for unrelated sources. Reserve a host-root
+mount for deliberately broad whole-host jobs with explicit exclusions.
 
 ---
 
 ## Quick reference
 
 ```bash
-# Scenario A — full host tree visible
--v /:/data
+# Scenario A — full host tree visible (broadest exposure)
+-v /:/data:ro
 
 # Scenario B — single directory
--v /home/alice/photos:/data
--v /srv/media:/data          # only one -v per /data target
+-v /home/alice/photos:/data:ro
 
-# Multiple separate mounts are not directly supported for /data
-# Use Scenario A if you need multiple sources in one run
+# Scenario C — multiple sources at distinct destinations
+-v /home/alice/photos:/data/photos:ro
+-v /srv/media:/data/media:ro
 ```
 
 ---
