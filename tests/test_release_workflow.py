@@ -217,6 +217,33 @@ def test_refresh_workflow_selects_version_from_build_history_only() -> None:
     assert "IMAGE_VERSION" not in workflow
 
 
+def test_refresh_workflow_rejects_remote_tag_reuse_before_checkout() -> None:
+    """Refresh checks Docker Hub before expensive application work begins."""
+    workflow = REFRESH_WORKFLOW.read_text(encoding="utf-8")
+
+    selection = workflow.index("- name: Sanity checks and compute rebuild version")
+    availability = workflow.index("- name: Require unused Docker Hub refresh tag")
+    checkout = workflow.index("- name: Checkout immutable application source")
+
+    assert selection < availability < checkout
+    assert "scripts/verify_docker_tag_available.sh" in workflow
+    assert '"${DOCKERHUB_REPO}"' in workflow[availability:checkout]
+    assert '"${REBUILD_VERSION}"' in workflow[availability:checkout]
+
+
+def test_refresh_workflow_verifies_exact_application_revision() -> None:
+    """Refresh requires the finalized image to identify its source commit."""
+    workflow = REFRESH_WORKFLOW.read_text(encoding="utf-8")
+
+    labels = workflow.index("- name: Verify OCI labels")
+    revision = workflow.index("- name: Verify exact application revision label")
+    publication = workflow.index("- name: Publish, sign, and verify image")
+
+    assert labels < revision < publication
+    assert "orchestration/scripts/verify_image_revision.sh" in workflow
+    assert '"${APPLICATION_SHA}"' in workflow[revision:publication]
+
+
 def test_refresh_workflow_verifies_embedded_license_before_publication() -> None:
     """Refreshes enforce the release LICENSE digest before publishing."""
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")

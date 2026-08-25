@@ -105,6 +105,13 @@ jobs:
           echo "TAG_MATCHES_SOURCE=${TAG_MATCHES_SOURCE}" >> "${GITHUB_ENV}"
           echo "✅ Rebuilding recorded source ${APPLICATION_SHA} as ${REBUILD_VERSION}"
 
+      - name: Require unused Docker Hub refresh tag
+        working-directory: orchestration
+        run: |
+          scripts/verify_docker_tag_available.sh \
+            "${DOCKERHUB_REPO}" \
+            "${REBUILD_VERSION}"
+
       - name: Checkout immutable application source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -155,6 +162,7 @@ jobs:
             tests/test_publish_image.py \
             tests/test_select_refresh_source.py \
             tests/test_validate_image_version.py \
+            tests/test_refresh_image_guards.py \
             tests/test_verify_image_license.py
 
       - name: Read version pins
@@ -209,6 +217,12 @@ jobs:
       - name: Verify OCI labels
         working-directory: source
         run: make FINAL_VERSION=${{ env.REBUILD_VERSION }} verify-labels
+
+      - name: Verify exact application revision label
+        run: |
+          orchestration/scripts/verify_image_revision.sh \
+            "${FINAL_IMAGE_NAME}:${REBUILD_VERSION}" \
+            "${APPLICATION_SHA}"
 
       - name: Verify embedded LICENSE SHA-256
         run: |

@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- refuse to overwrite an existing Docker Hub refresh tag, fail closed when tag
+  availability cannot be established, and require the finalized image revision
+  label to match the exact recorded application source commit
 - verify the baked-in `/LICENSE` SHA-256 during weekly image refreshes before
   publishing, using the same expected digest enforced by manual releases
 - align the README, release guide, contributor guide, demo, and generated site
