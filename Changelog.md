@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- verify the baked-in `/LICENSE` SHA-256 during weekly image refreshes before
+  publishing, using the same expected digest enforced by manual releases
 - align the README, release guide, contributor guide, demo, and generated site
   with the implemented helper defaults, mount paths, release/refresh policy,
   Cosign identities, and candidate verification flow

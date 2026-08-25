@@ -217,6 +217,25 @@ def test_refresh_workflow_selects_version_from_build_history_only() -> None:
     assert "IMAGE_VERSION" not in workflow
 
 
+def test_refresh_workflow_verifies_embedded_license_before_publication() -> None:
+    """Refreshes enforce the release LICENSE digest before publishing."""
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    refresh = REFRESH_WORKFLOW.read_text(encoding="utf-8")
+    digest_match = re.search(
+        r'EXPECTED_LICENSE_SHA256="([0-9a-f]{64})"',
+        release,
+    )
+
+    assert digest_match is not None
+    expected_sha256 = digest_match.group(1)
+    verification = refresh.index("- name: Verify embedded LICENSE SHA-256")
+    publication = refresh.index("- name: Publish, sign, and verify image")
+
+    assert verification < publication
+    assert "orchestration/scripts/verify_image_license.sh" in refresh
+    assert f'"{expected_sha256}"' in refresh[verification:publication]
+
+
 def test_publication_failure_badges_use_retrying_helper() -> None:
     """Both workflows persist a failed publication badge through the safe helper."""
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
