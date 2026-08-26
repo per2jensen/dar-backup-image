@@ -1,6 +1,10 @@
 # dar-backup-image Changelog
 
-## 0.9.1 - not released
+## 0.9.1 - 2026-08-26
+
+This release readies workflow hardening, doc updates and more for an -rc1.
+
+Last remaining work is to see the `release` and the `weekly image-refresh` workflows work as expected.
 
 ### Fixed
 
