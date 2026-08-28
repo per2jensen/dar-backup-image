@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: 2025 Per Jensen
+#
 # SPDX-License-Identifier: MIT
+#
+# This file is part of dar-backup-image:
+# https://github.com/per2jensen/dar-backup-image
+#
+# License terms and warranty disclaimer:
+# https://github.com/per2jensen/dar-backup-image/blob/main/LICENSES/MIT.txt
 
 """
 GitHub clone dashboard that aligns weekly totals to the following Monday.

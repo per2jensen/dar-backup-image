@@ -1,3 +1,13 @@
+# SPDX-FileCopyrightText: 2025 Per Jensen
+#
+# SPDX-License-Identifier: MIT
+#
+# This file is part of dar-backup-image:
+# https://github.com/per2jensen/dar-backup-image
+#
+# License terms and warranty disclaimer:
+# https://github.com/per2jensen/dar-backup-image/blob/main/LICENSES/MIT.txt
+
 __version__ = "1.0.5"
 
 __license__ = '''Licensed under the MIT License. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,

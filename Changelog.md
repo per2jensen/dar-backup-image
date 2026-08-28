@@ -1,4 +1,20 @@
+<!--
+SPDX-FileCopyrightText: 2025-2026 Per Jensen
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This file is part of dar-backup-image:
+https://github.com/per2jensen/dar-backup-image
+
+License terms and warranty disclaimer:
+https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
+-->
+
 # dar-backup-image Changelog
+
+## 1.0.0-rc1 - not released
+
+- Copyright and license info added
 
 ## 0.9.1 - 2026-08-26
 
@@ -8,6 +24,9 @@ Last remaining work is to see the `release` and the `weekly image-refresh` workf
 
 ### Added
 
+- add repository-wide SPDX copyright and licence notices, REUSE 3.3 metadata,
+  canonical licence texts, and CI enforcement while preserving the MIT
+  Clonepulse and GPL-2.0-or-later upstream DAR boundaries
 - add schema-v10 high-level large-scale-test dashboard records for configuration,
   workload, environment, major phases, artifacts, checks, and coarse telemetry,
   using a deliberate five-second RSS sample interval rather than profiler-scale

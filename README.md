@@ -1,3 +1,15 @@
+<!--
+SPDX-FileCopyrightText: 2025-2026 Per Jensen
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This file is part of dar-backup-image:
+https://github.com/per2jensen/dar-backup-image
+
+License terms and warranty disclaimer:
+https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
+-->
+
 # dar-backup image — verifiable backups and a long-term restore time capsule
 <a href="https://github.com/per2jensen/dar-backup-image/releases"><img alt="Tag" src="https://img.shields.io/github/v/tag/per2jensen/dar-backup-image"/></a>
 ![CI](https://github.com/per2jensen/dar-backup-image/actions/workflows/build-test-scan.yml/badge.svg)
@@ -73,8 +85,8 @@ the expanded `dar_backup/doc/` collection first appears with dar-backup
 The stable filesystem location is `/usr/share/doc/dar-backup/`. It contains:
 
 - `image/README.md` — this image repository's exact build-context README
-- `README.md` — the Markdown description embedded in package metadata
-- `doc/` — every file included under `dar_backup/doc/` or `dar_backup/docs/`
+- `README.md`, the Markdown description embedded in package metadata
+- `doc/`, every file included under `dar_backup/doc/` or `dar_backup/docs/`
 - `licenses/` and raw `METADATA`
 - `INDEX.md` and the integrity/provenance record `MANIFEST.json`
 
@@ -92,23 +104,20 @@ The image contains man pages for `dar` and `par2` which make the image self-docu
 
 ### Highlights
 
-- **Long-term restore time capsule** — preserve a known-working `dar-backup` / `dar` / PAR2 environment with your archives
-- **Reproducible backup runner** — no host installation of `dar`, Python tooling, or PAR2 required
-- **Self-documenting** — all `dar-backup`, `dar-backup-image`, `dar` and `par2` documentation is included and easily discoverable by future users
-- **Versioned and auditable** — released images are tested, scanned, signed, and accompanied by an SBOM
-- **Stateless and portable** — archive the image itself and move it with your backup sets
-- **FUSE-friendly** — works without root and is suited to user-space mounted storage
-- **Built-in configuration** — automatically loads `/etc/dar-backup/dar-backup.conf` unless overridden
-- **Ready for automation** — usable from cron, systemd timers, and CI pipelines
+- **Long-term restore time capsule**, preserve a known-working `dar-backup` / `dar` / PAR2 environment with your archives
+- **Reproducible backup runner**, no host installation of `dar`, Python tooling, or PAR2 required
+- **Self-documenting**, all `dar-backup`, `dar-backup-image`, `dar` and `par2` documentation is included and easily discoverable by future users
+- **Versioned and auditable**, released images are tested, scanned, signed, and accompanied by an SBOM
+- **Stateless and portable**, archive the image itself and move it with your backup sets
+- **FUSE-friendly**, works without root and is suited to user-space mounted storage
+- **Built-in configuration**, automatically loads `/etc/dar-backup/dar-backup.conf` unless overridden
+- **Ready for automation**, usable from cron, systemd timers, and CI pipelines
 
 > **Current operation vs. long-term preservation**
 >
 > Use `:latest` when you want the current tested and security-refreshed image.
 >
 > For disaster recovery years into the future, pin a version and save the image itself alongside your archives.
-
-
----
 
 ## Table of Contents
 
@@ -181,8 +190,6 @@ The image contains man pages for `dar` and `par2` which make the image self-docu
     - [Version 1.2](#version-12)
     - [Other tasks](#other-tasks)
   - [Software this project benefits from](#software-this-project-benefits-from)
-
----
 
 ## Preserve the restore environment with your archives
 
@@ -265,8 +272,6 @@ The signed image digest, SBOM, build history, and Rekor record provide provenanc
 only when they are preserved and verified with the image; the locally saved image
 provides availability.
 
----
-
 ## Hands-on Demo: `dar-backup` in a Container
 
 Curious how it all works in practice?
@@ -278,9 +283,7 @@ Check out the [step-by-step demo](https://github.com/per2jensen/dar-backup-image
 - Selective file restore (e.g., `.JPG` only)
 - Output logs, par2 generation, and verification
 
-All performed using `docker run` — no host installation required.
-
----
+All performed using `docker run`, no host installation required.
 
 ## `dar` versions
 
@@ -313,7 +316,7 @@ Expected (abridged) output for tag `0.5.16`, confirming core capabilities:
 <a name="dockerhub-builds"></a>
 ## Recent releases uploaded to Docker Hub
 
-> Weekly image refreshes (`:latest`) are not listed here — see the full audit trail in [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
+> Weekly image refreshes (`:latest`) are not listed here, see the full audit trail in [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
 
 <!-- BEGIN GENERATED RELEASE TABLE -->
 | Tag | `dar-backup` | `dar` | Release date | Git Revision | Docker Hub | Note |
@@ -329,27 +332,24 @@ The table is generated from `doc/build-history.json`. Refresh it at any time
 with `python3 scripts/update_readme_releases.py`, or verify it without writing
 with `python3 scripts/update_readme_releases.py --check`.
 
----
-
-
 ## Release Pipeline and Supply Chain Security
 
-Every image released to Docker Hub is produced by a fully automated GitHub Actions workflow — no manual `docker push`, no local machine involvement. The pipeline enforces a strict sequence of gates before any image becomes publicly available.
+Every image released to Docker Hub is produced by a fully automated GitHub Actions workflow, no manual `docker push`, no local machine involvement. The pipeline enforces a strict sequence of gates before any image becomes publicly available.
 
 ### Pipeline steps
 
-1. **Build** — The `dar-backup:dev` image is built using the repository's version pins. DAR is compiled from its GPG-verified source tarball; release images install the pinned `dar-backup` package from PyPI.
-2. **Test** — The full pytest suite runs against the dev image. The pipeline halts if any test fails.
-3. **Finalize** — The tested dev image is converted to the release tag with corrected OCI version and reference labels. Its application filesystem is retained without rebuilding packages.
-4. **Verify** — Focused checks validate OCI labels, the embedded `dar-backup --version`, the exact application revision, and the SHA-256 of `/LICENSE` before publication. The full pytest suite is not repeated against the relabeled image.
-5. **SBOM** — [Syft](https://github.com/anchore/syft) generates a CycloneDX JSON Software Bill of Materials from the local image before it leaves the runner.
-6. **Vulnerability scan** — [Grype](https://github.com/anchore/grype) scans the SBOM and **fails the release if any High or Critical vulnerability is found**. Results are uploaded to the GitHub Security tab as SARIF.
-7. **Candidate push** — Only the immutable version tag is initially pushed to Docker Hub; `:latest` still identifies the previous known-good image.
-8. **Cosign signing** — The candidate is signed by digest (not by mutable tag) using [cosign](https://github.com/sigstore/cosign) keyless mode.
-9. **SBOM attestation** — The SBOM is attached to that digest as a signed in-toto attestation via cosign.
-10. **Remote sanity check** — The immutable digest is pulled back from Docker Hub and executed. Its `dar-backup --version` output and OCI image-version label must match exactly.
-11. **Promotion** — Only the remotely verified digest is pushed as `:latest`; `:latest` is then pulled and required to resolve to the signed digest.
-12. **Rollback** — If the candidate push, signing, attestation, or remote sanity check fails, the attempted unverified version tag is removed and the previous `:latest` remains untouched.
+1. **Build**, The `dar-backup:dev` image is built using the repository's version pins. DAR is compiled from its GPG-verified source tarball; release images install the pinned `dar-backup` package from PyPI.
+2. **Test**, The full pytest suite runs against the dev image. The pipeline halts if any test fails.
+3. **Finalize**, The tested dev image is converted to the release tag with corrected OCI version and reference labels. Its application filesystem is retained without rebuilding packages.
+4. **Verify**, Focused checks validate OCI labels, the embedded `dar-backup --version`, the exact application revision, and the SHA-256 of `/LICENSE` before publication. The full pytest suite is not repeated against the relabeled image.
+5. **SBOM**, [Syft](https://github.com/anchore/syft) generates a CycloneDX JSON Software Bill of Materials from the local image before it leaves the runner.
+6. **Vulnerability scan**, [Grype](https://github.com/anchore/grype) scans the SBOM and **fails the release if any High or Critical vulnerability is found**. Results are uploaded to the GitHub Security tab as SARIF.
+7. **Candidate push**, Only the immutable version tag is initially pushed to Docker Hub; `:latest` still identifies the previous known-good image.
+8. **Cosign signing**, The candidate is signed by digest (not by mutable tag) using [cosign](https://github.com/sigstore/cosign) keyless mode.
+9. **SBOM attestation**, The SBOM is attached to that digest as a signed in-toto attestation via cosign.
+10. **Remote sanity check**, The immutable digest is pulled back from Docker Hub and executed. Its `dar-backup --version` output and OCI image-version label must match exactly.
+11. **Promotion**, Only the remotely verified digest is pushed as `:latest`; `:latest` is then pulled and required to resolve to the signed digest.
+12. **Rollback**, If the candidate push, signing, attestation, or remote sanity check fails, the attempted unverified version tag is removed and the previous `:latest` remains untouched.
 
 Manual releases and weekly image refreshes use the same tested publication
 component and a shared concurrency lock, so their signing, rollback, remote
@@ -365,13 +365,13 @@ short-lived certificate bound to GitHub's OIDC identity for the workflow run.
 
 Every signature is permanently recorded in [Rekor](https://github.com/sigstore/rekor), Sigstore's public, append-only transparency log. This means:
 
-- **The signing identity is public and auditable** — the Rekor entry proves exactly which GitHub workflow, repository, branch, and run produced the signature.
-- **Signing events are tamper-evident** — inclusion in the append-only log makes
+- **The signing identity is public and auditable**, the Rekor entry proves exactly which GitHub workflow, repository, branch, and run produced the signature.
+- **Signing events are tamper-evident**, inclusion in the append-only log makes
   unexpected or inconsistent events auditable; it does not make compromised OIDC
   identities, workflows, or signing infrastructure impossible.
-- **No long-lived project key management burden** — there is no persistent project
+- **No long-lived project key management burden**, there is no persistent project
   signing key to rotate or retain.
-- **Anyone can verify identity and content** — without an account or contacting the
+- **Anyone can verify identity and content**, without an account or contacting the
   author. Verify an immutable digest; Docker Hub remains a distribution and
   availability dependency until the image and evidence are archived locally.
 
@@ -408,30 +408,28 @@ Each release summary in the GitHub Actions tab includes a direct link to the Rek
 https://search.sigstore.dev/?logIndex=1273042416
 ```
 
-The entry records the signing certificate, the image digest that was signed, the GitHub workflow identity, the run URL, and the exact commit SHA — providing a complete, tamper-evident audit trail from source code to published image.
+The entry records the signing certificate, the image digest that was signed, the GitHub workflow identity, the run URL, and the exact commit SHA, providing a complete, tamper-evident audit trail from source code to published image.
 
 ---
 
 ## Understanding Volume Mounts and Backup Definitions
 
 The `-v` flag that maps host directories into the container is the key decision that controls
-how many backup definitions you can use — and which host paths are reachable at all.
+how many backup definitions you can use, and which host paths are reachable at all.
 
 In short:
 
-- **Map host `/` → container `/data` read-only** — the entire host tree is visible;
+- **Map host `/` → container `/data` read-only**, the entire host tree is visible;
   multiple definitions can target different subtrees, but the backup destination
   and special filesystems can also reappear below `/data`. Use explicit exclusions.
-- **Map a single subdirectory → container `/data` read-only** — only that directory
+- **Map a single subdirectory → container `/data` read-only**, only that directory
   is visible inside the container.
-- **Map several sources to distinct paths below `/data` read-only** — multiple
+- **Map several sources to distinct paths below `/data` read-only**, multiple
   definitions work without exposing the full host; this is the preferred
   multi-source layout.
 
 See **[doc/dar-backup-mount-scenarios.md](doc/dar-backup-mount-scenarios.md)** for a full explanation
 with diagrams, worked examples, and a comparison table.
-
----
 
 ## Useful links
 
@@ -452,6 +450,12 @@ The complete license text is available in the [repository LICENSE file](https://
 and is embedded in every image at `/LICENSE`. Print it without installing or starting
 `dar-backup`:
 
+Copyright and licensing information is also recorded per file using
+[SPDX](https://spdx.dev/) and the [REUSE specification](https://reuse.software/).
+Clonepulse files retain their MIT licence, while bundled upstream DAR source
+archives retain their upstream GPL-2.0-or-later licensing. Run `reuse lint` and
+`python3 scripts/validate_license_headers.py` to validate the complete policy.
+
 ```bash
 docker run --rm --entrypoint cat per2jensen/dar-backup:latest /LICENSE
 
@@ -460,8 +464,6 @@ docker run --rm --entrypoint sha256sum \
   per2jensen/dar-backup:latest /LICENSE
 # 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  /LICENSE
 ```
-
----
 
 ## Docker Hub image repo
 
@@ -472,8 +474,6 @@ Those fond of curl can do this:
 ```bash
 curl -s https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags | jq '.results[].name'
 ```
-
----
 
 ## Description
 
@@ -493,8 +493,6 @@ This image includes:
 - [dar-backup](https://github.com/per2jensen/dar-backup) (my `dar` Python based wrapper)
 - Clean Ubuntu 24.04 base; image size varies with the pinned packages and architecture
 - Explicit non-root execution and privilege drop via `setpriv`
-
----
 
 ## Directory Layout and Permissions
 
@@ -612,8 +610,6 @@ Here’s a quick reference for all environment variables used by the script:
 
 For details on behavior, UID/GID handling, and usage examples, see the comments in [`scripts/run-backup.sh`](scripts/run-backup.sh).
 
----
-
 ## How to test
 
 See [dev.md](dev.md) for development-image build and test instructions.
@@ -622,9 +618,7 @@ See [dev.md](dev.md) for development-image build and test instructions.
 
 All images are published to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).
 
-Every build — whether a release or a scheduled refresh — is recorded in [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
-
----
+Every build, whether a release or a scheduled refresh, is recorded in [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json).
 
 ### Tagging strategy
 
@@ -648,7 +642,6 @@ instead of following `:latest` during an RC window.
 
 For **long-term recovery**, do not preserve only the `:latest` reference. Save a specific versioned image, for example `:0.5.27`, as a Docker/OCI archive alongside the backup set. A mutable registry tag is a locator; the saved image is the recovery artifact.
 
-
 ### Weekly image refresh
 
 The refresh workflow runs every Saturday. It selects the newest build-history
@@ -658,22 +651,20 @@ workflow stops without publishing or moving `:latest`. For an eligible base,
 each refresh:
 
 - Rebuilds the exact application source commit recorded for that base, while picking up Ubuntu base-image and package updates
-- Runs the full test suite — the pipeline halts if any test fails
+- Runs the full test suite, the pipeline halts if any test fails
 - Refuses to reuse an existing Git or Docker Hub refresh tag and fails closed if
   remote tag availability cannot be established
 - Requires the finalized image's OCI revision label to equal the complete recorded
   application SHA and verifies the baked `/LICENSE` SHA-256
-- Scans with [Grype](https://github.com/anchore/grype) — **the refresh is aborted if any High or Critical vulnerability is found**
+- Scans with [Grype](https://github.com/anchore/grype), **the refresh is aborted if any High or Critical vulnerability is found**
 - Signs the image with [cosign](https://github.com/sigstore/cosign) keyless signing and records the entry in the [Rekor](https://github.com/sigstore/rekor) transparency log
 - Attaches a signed CycloneDX SBOM attestation
 - Publishes as both `:latest` and a versioned refresh tag (e.g. `:0.5.22-1`, `:0.5.22-2`)
 - Atomically publishes the build-history commit and its annotated Git tag; the
   annotation records the immutable application SHA and signed image digest
-- Updates the [cosign badge](https://github.com/per2jensen/dar-backup-image/blob/main/doc/cosign_badge.json) — `failed` means the most recent signing attempt was rejected and rolled back; the previously published `:latest` may remain valid
+- Updates the [cosign badge](https://github.com/per2jensen/dar-backup-image/blob/main/doc/cosign_badge.json), `failed` means the most recent signing attempt was rejected and rolled back; the previously published `:latest` may remain valid
 
 The [build-history.json](https://github.com/per2jensen/dar-backup-image/blob/main/doc/build-history.json) file contains the full audit trail for every release and refresh, including digests, Rekor log entries, and Grype scan results.
-
----
 
 ## Volumes / Runtime Configuration
 
@@ -725,8 +716,6 @@ explains what its peak-memory measurements do and do not prove.
 The tracked large-scale history can also be explored through the read-only
 [Datasette metrics dashboard](doc/metrics-dashboard.md). From a checkout, run
 `./run_metrics_dashboard.sh` and open the localhost URL printed by the launcher.
-
----
 
 ## Usage Example
 
@@ -788,8 +777,6 @@ To use another config file you have multiple options:
 The container uses `setpriv` to drop root privileges. Pass
 both `-e RUN_AS_UID="$(id -u)"` and `-e RUN_AS_GID="$(id -g)"` when
 invoking Docker directly. `run-backup.sh` supplies both automatically.
-
----
 
 ## run-backup.sh
 
@@ -920,8 +907,6 @@ This:
 - Adds `--backup-definition "<name>"` if `BACKUP_DEF` is non-empty.
 - Skips it entirely if no `-d` was provided (dar-backup then uses the default definition).
 
----
-
 #### Example
 
 1. Create a new definition file:
@@ -972,8 +957,6 @@ IMAGE=per2jensen/dar-backup:latest \
 ## 🔍 Discover Image Metadata
 
 Learn what's inside the `dar-backup` image: program versions, build metadata, and available versions.
-
----
 
 ### 1. Check Tool Versions
 
@@ -1031,7 +1014,7 @@ curl -s 'https://hub.docker.com/v2/repositories/per2jensen/dar-backup/tags?page_
 
 ## Image deep diving
 
-Although `dar-backup` is the primary CLI inside the container, you can also run dar directly from the image to take manual backups or inspect archives — perfect for advanced workflows or testing.
+Although `dar-backup` is the primary CLI inside the container, you can also run dar directly from the image to take manual backups or inspect archives, perfect for advanced workflows or testing.
 
 Here's a minimal example of how to use dar directly:
 
@@ -1073,11 +1056,9 @@ No terminal found for user interaction. All questions will be assumed a negative
  --------------------------------------------
 ```
 
-This shows that even without dar-backup, you can still invoke dar manually — helpful for debugging, recovery scenarios, or power-user workflows.
+This shows that even without dar-backup, you can still invoke dar manually, helpful for debugging, recovery scenarios, or power-user workflows.
 
 > Tip: You can also run PAR2 directly with `--entrypoint par2` when needed.
-
----
 
 ## Common `dar-backup` commands
 
@@ -1131,8 +1112,6 @@ docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --list-contents ARCHIVE_NAME
 docker run --rm "${RUNTIME_ARGS[@]}" "$IMAGE" --restore ARCHIVE_NAME
 ```
 
----
-
 ## Using the Makefile
 
 See [dev.md](dev.md) for the canonical development-image build and test
@@ -1154,9 +1133,9 @@ This:
 
 ### Releasing a New Version
 
-Releases are fully automated via the **Manual Docker Release** GitHub Actions workflow — no local `docker push` required.
+Releases are fully automated via the **Manual Docker Release** GitHub Actions workflow, no local `docker push` required.
 
-Dry-run the release locally first (build, test, verify labels — no push):
+Dry-run the release locally first (build, test, verify labels, no push):
 
 ```bash
 make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
@@ -1172,7 +1151,7 @@ When ready, trigger the release by dispatching the workflow from GitHub Actions
 (`workflow_dispatch`). The workflow will:
 
 1. Lock the build to the full commit selected from `main` and validate `IMAGE_VERSION`
-2. Build, test, and scan — hard gate on High/Critical vulnerabilities
+2. Build, test, and scan, hard gate on High/Critical vulnerabilities
 3. Push `per2jensen/dar-backup:VERSION` as a candidate
 4. Sign the candidate and attach its SBOM attestation
 5. Roll back a failed candidate without moving the previous `:latest`
@@ -1180,7 +1159,7 @@ When ready, trigger the release by dispatching the workflow from GitHub Actions
 7. Atomically publish build history, documentation, evidence, and the source-pointing Git tag
 8. Create the GitHub Release with non-empty SBOM and SARIF assets
 
-> **Note:** Do NOT manually create the git tag before triggering the workflow — it is created automatically after all steps succeed.
+> **Note:** Do NOT manually create the git tag before triggering the workflow, it is created automatically after all steps succeed.
 
 The complete operator procedure, failure-state table, source policy, RC
 acceptance gate, and GitHub Release recovery procedure are in
@@ -1235,8 +1214,6 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 ### Other tasks
 
 - Investigate deterministic generated test cases so test runs can be reproduced across versions and during debugging
-
----
 
 ## Software this project benefits from
 

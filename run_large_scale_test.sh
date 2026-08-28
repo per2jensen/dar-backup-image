@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
+
+# SPDX-FileCopyrightText: 2025-2026 Per Jensen
+#
 # SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This file is part of dar-backup-image:
+# https://github.com/per2jensen/dar-backup-image
+#
+# License terms and warranty disclaimer:
+# https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 #
 # Personal wrapper for scripts/large_scale_test.sh — also doubles as a demo of
 # running dar-backup's full FULL->DIFF->INCR->bitrot-repair->PITR-restore

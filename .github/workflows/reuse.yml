@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025-2026 Per Jensen
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This file is part of dar-backup-image:
+# https://github.com/per2jensen/dar-backup-image
+#
+# License terms and warranty disclaimer:
+# https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
+
+name: License compliance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reuse:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate repository-specific headers
+        run: python3 scripts/validate_license_headers.py
+
+      - name: Validate REUSE compliance
+        uses: fsfe/reuse-action@v6
