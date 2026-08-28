@@ -1,4 +1,4 @@
-"""Tests for schema-v9 large-scale test result records."""
+"""Tests for schema-v10 large-scale test result records."""
 
 from __future__ import annotations
 
@@ -58,8 +58,42 @@ def _base_environment() -> dict[str, str]:
         "LST_IMAGE_REPO_DIGEST": "per2jensen/dar-backup@sha256:manifest-digest",
         "LST_IMAGE_REVISION": "1234567",
         "LST_IMAGE_VERSION": "0.8.0-rc1",
+        "LST_DATASET_ID": "photos-2026-fixed",
+        "LST_SLICE_SIZE": "10G",
+        "LST_SLICE_SIZE_BYTES": str(10 * 1024**3),
+        "LST_SLICE_SIZE_SOURCE": "definition",
+        "LST_PAR2_RATIO": "5",
+        "LST_COMMAND_TIMEOUT_SECONDS": "86400",
+        "LST_MIN_FREE_MULTIPLIER": "2",
+        "LST_BITROT_ENABLED": "1",
+        "LST_BITROT_MODE": "contiguous",
+        "LST_BITROT_PERCENT": "2",
         "LST_SOURCE_FILE_COUNT": "42137",
         "LST_SOURCE_BYTES": "124802341776",
+        "LST_SOURCE_ALLOCATED_BYTES": "124900000000",
+        "LST_SOURCE_DIRECTORY_COUNT": "1500",
+        "LST_SOURCE_SYMLINK_COUNT": "12",
+        "LST_SOURCE_OTHER_ENTRY_COUNT": "0",
+        "LST_SOURCE_HARD_LINK_GROUP_COUNT": "4",
+        "LST_SOURCE_ZERO_FILE_COUNT": "3",
+        "LST_SOURCE_SMALL_FILE_COUNT": "12000",
+        "LST_SOURCE_MEDIUM_FILE_COUNT": "29000",
+        "LST_SOURCE_LARGE_FILE_COUNT": "1134",
+        "LST_SOURCE_MAX_FILE_BYTES": str(4 * 1024**3),
+        "LST_DIFF_MODIFIED_FILE_COUNT": "116",
+        "LST_DIFF_MODIFIED_APPARENT_BYTES": "310000000",
+        "LST_DIFF_CREATED_FILE_COUNT": "2",
+        "LST_DIFF_CREATED_BYTES": "2097250",
+        "LST_DIFF_DELETED_FILE_COUNT": "1",
+        "LST_INCR_MODIFIED_FILE_COUNT": "116",
+        "LST_INCR_MODIFIED_APPARENT_BYTES": "310000000",
+        "LST_INCR_CREATED_FILE_COUNT": "2",
+        "LST_INCR_CREATED_BYTES": "2097250",
+        "LST_INCR_DELETED_FILE_COUNT": "1",
+        "LST_HOST_LOGICAL_CPU_COUNT": "16",
+        "LST_HOST_MEMORY_BYTES": str(64 * 1024**3),
+        "LST_DISK_FREE_BYTES_START": str(2 * 1024**4),
+        "LST_DISK_FREE_BYTES_END": str(1500 * 1024**3),
         "LST_BACKUP_DEFINITION_SHA256": "definition-digest",
         "LST_FULL_BYTES": "124801234567",
         "LST_DIFF_BYTES": "622770258",
@@ -114,11 +148,18 @@ def _base_environment() -> dict[str, str]:
         "LST_RESTORE_FILESYSTEM_DEVICE": "44",
         "LST_BITROT_SEED": "987654321",
         "LST_BITROT_EVIDENCE_FILE": "",
+        "LST_EFFECTIVE_DEFINITION_FILE": "",
+        "LST_BACKUP_DIR": "",
+        "LST_PAR2_DIR": "",
+        "LST_DEFINITION_NAME": "large-scale-test",
+        "LST_PHASE_JOURNAL_FILE": "",
+        "LST_RESOURCE_LOG_FILE": "",
+        "LST_METRICS_SAMPLE_INTERVAL_SECONDS": "5",
     }
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v9_to_both_histories(
+def test_write_result_completed_run_appends_schema_v10_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -143,7 +184,7 @@ def test_write_result_completed_run_appends_schema_v9_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 9
+    assert local_record["schema_version"] == 10
     assert local_record["advertise"] is True
     assert local_record["test_name"] == "Large scale torture test"
     assert local_record["advertise_class"] == "v0.8.0-rc1"
@@ -183,6 +224,127 @@ def test_write_result_completed_run_appends_schema_v9_to_both_histories(
     }
     assert local_record["bitrot_seed"] == 987654321
     assert local_record["bitrot_evidence"] is None
+    assert {
+        "configuration",
+        "workload",
+        "environment",
+        "phases",
+        "artifacts",
+        "checks",
+        "telemetry",
+    }.issubset(local_record)
+    assert local_record["configuration"]["slice_size"] == {
+        "display": "10G",
+        "bytes": 10 * 1024**3,
+        "source": "definition",
+    }
+    assert local_record["workload"]["dataset_id"] == "photos-2026-fixed"
+    assert local_record["workload"]["source"]["entry_count"] == 43649
+    assert local_record["environment"]["logical_cpu_count"] == 16
+    assert local_record["phases"]["full_backup"]["duration_s"] == 4000.0
+    assert local_record["artifacts"]["full"]["archive_bytes"] == 124801234567
+    assert local_record["telemetry"]["sampling_interval_s"] == 5
+
+
+def test_build_record_summarizes_coarse_phase_and_artifact_evidence(
+    tmp_path: Path,
+) -> None:
+    """Major phases receive coarse RSS aggregates and artifact summaries.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    backup_dir = tmp_path / "backups"
+    par2_dir = tmp_path / "par2"
+    backup_dir.mkdir()
+    par2_dir.mkdir()
+    (backup_dir / "large-scale-test_FULL_2026-08-09.1.dar").write_bytes(b"a" * 5)
+    (backup_dir / "large-scale-test_FULL_2026-08-09.2.dar").write_bytes(b"b" * 3)
+    (par2_dir / "large-scale-test_FULL_2026-08-09.1.dar.par2").write_bytes(
+        b"p" * 2
+    )
+    definition = tmp_path / "definition"
+    definition.write_text("-R /data\n-s 10G\n-z6\n-g photos\n", encoding="utf-8")
+    journal = tmp_path / "phase-journal.tsv"
+    journal.write_text(
+        "start\tfull_backup\t1000000000\nend\tfull_backup\t2500000000\n",
+        encoding="utf-8",
+    )
+    resource_log = tmp_path / "rss.log"
+    resource_log.write_text(
+        "12:00:00 pid=10 rss=2048 kB vsz=4096 kB cmd=par2 "
+        "phase=full_backup epoch_ms=1000\n"
+        "12:00:00 sample=resource phase=full_backup epoch_ms=1000 "
+        "process_count=1 named_process_rss_kib=2048\n",
+        encoding="utf-8",
+    )
+    environment = _base_environment()
+    environment.update(
+        {
+            "LST_BACKUP_DIR": str(backup_dir),
+            "LST_PAR2_DIR": str(par2_dir),
+            "LST_EFFECTIVE_DEFINITION_FILE": str(definition),
+            "LST_PHASE_JOURNAL_FILE": str(journal),
+            "LST_RESOURCE_LOG_FILE": str(resource_log),
+            "LST_FULL_BYTES": "8",
+        }
+    )
+
+    record = build_record(environment)
+
+    assert record["configuration"]["performance_options"]["compression"] == [
+        "-z6"
+    ]
+    assert record["phases"]["full_backup"] == {
+        "status": "passed",
+        "duration_s": 1.5,
+        "resources": {
+            "sample_count": 1,
+            "peak_named_process_rss_mib": 2.0,
+            "peak_process_rss_mib": {"par2": 2.0},
+        },
+    }
+    assert record["artifacts"]["full"]["slice_count"] == 2
+    assert record["artifacts"]["full"]["smallest_slice_bytes"] == 3
+    assert record["artifacts"]["full"]["largest_slice_bytes"] == 5
+    assert record["artifacts"]["full"]["par2_file_count"] == 1
+    assert record["telemetry"]["resource_monitor_status"] == "collected"
+    assert record["telemetry"]["sample_count"] == 1
+
+
+def test_build_record_malformed_phase_journal_raises_value_error(
+    tmp_path: Path,
+) -> None:
+    """Incomplete phase timing evidence is rejected instead of guessed.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    journal = tmp_path / "phase-journal.tsv"
+    journal.write_text("start\tfull_backup\t1000000000\n", encoding="utf-8")
+    environment = _base_environment()
+    environment["LST_PHASE_JOURNAL_FILE"] = str(journal)
+
+    with pytest.raises(ValueError, match="unfinished phase"):
+        build_record(environment)
+
+
+def test_build_record_inconsistent_file_size_buckets_raise_value_error() -> None:
+    """Workload shape cannot disagree with the selected regular-file count."""
+    environment = _base_environment()
+    environment["LST_SOURCE_SMALL_FILE_COUNT"] = "11999"
+
+    with pytest.raises(ValueError, match="file-size buckets"):
+        build_record(environment)
+
+
+def test_build_record_high_frequency_sampling_interval_raises_value_error() -> None:
+    """Schema telemetry rejects a profiler-like one-second sampling interval."""
+    environment = _base_environment()
+    environment["LST_METRICS_SAMPLE_INTERVAL_SECONDS"] = "1"
+
+    with pytest.raises(ValueError, match="coarse 5-second"):
+        build_record(environment)
 
 
 def test_build_record_binary_units_use_iec_field_names() -> None:
@@ -201,7 +363,7 @@ def test_build_record_binary_units_use_iec_field_names() -> None:
 
 
 def test_build_record_misleading_si_field_names_are_absent() -> None:
-    """Schema v9 does not duplicate binary measurements under SI unit names."""
+    """Schema v10 does not duplicate binary measurements under SI unit names."""
     record = build_record(_base_environment())
 
     for misleading_key in (
@@ -328,7 +490,7 @@ def test_write_result_aborted_run_records_phase_and_unreached_checks(
 def test_write_result_existing_schema_v2_history_remains_readable(
     tmp_path: Path,
 ) -> None:
-    """Appending schema v9 preserves an existing schema-v2 JSONL record.
+    """Appending schema v10 preserves an existing schema-v2 JSONL record.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -349,11 +511,11 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 9
+    assert records[1]["schema_version"] == 10
 
 
 def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
-    """Schema v9 retains per-phase bitrot and PAR2 block evidence.
+    """Schema v10 retains per-phase bitrot and PAR2 block evidence.
 
     Args:
         tmp_path: Isolated pytest temporary directory.
@@ -379,7 +541,7 @@ def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> No
 
     record = build_record(environment)
 
-    assert record["schema_version"] == 9
+    assert record["schema_version"] == 10
     assert record["bitrot_evidence"] == evidence
 
 

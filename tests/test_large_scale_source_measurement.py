@@ -106,6 +106,68 @@ def test_measure_source_overlapping_includes_count_each_file_once(
     assert measurement.selected_bytes == 24
 
 
+def test_measure_source_records_high_level_workload_shape(tmp_path: Path) -> None:
+    """Selected entries, allocation, links, and size bands are summarized.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    root = tmp_path / "source"
+    data = root / "data"
+    data.mkdir(parents=True)
+    (data / "empty.bin").touch()
+    _write_bytes(data / "small.bin", 1)
+    (data / "medium.bin").touch()
+    os.truncate(data / "medium.bin", 2 * 1024**2)
+    (data / "large.bin").touch()
+    os.truncate(data / "large.bin", 101 * 1024**2)
+    _write_bytes(data / "linked-a.bin", 4)
+    os.link(data / "linked-a.bin", data / "linked-b.bin")
+    os.symlink("small.bin", data / "small-link")
+    _write_bytes(root / "diff-primer" / "primer.bin", 5)
+    definition = f"-R {root}\n-g data"
+
+    measurement = measure_source(
+        root, parse_selection_contract(definition), "diff-primer"
+    )
+
+    assert measurement.selected_file_count == 7
+    assert measurement.selected_directory_count == 2
+    assert measurement.selected_symlink_count == 1
+    assert measurement.selected_other_entry_count == 0
+    assert measurement.selected_hard_link_group_count == 1
+    assert measurement.selected_zero_file_count == 1
+    assert measurement.selected_small_file_count == 4
+    assert measurement.selected_medium_file_count == 1
+    assert measurement.selected_large_file_count == 1
+    assert measurement.selected_max_file_bytes == 101 * 1024**2
+    assert measurement.selected_allocated_bytes >= 0
+
+
+def test_measure_source_pruned_entries_do_not_inflate_workload_shape(
+    tmp_path: Path,
+) -> None:
+    """Directories and links under a literal prune are excluded from shape metrics.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    root = tmp_path / "source"
+    _write_bytes(root / "data" / "keep.bin", 7)
+    _write_bytes(root / "data" / "private" / "hidden.bin", 9)
+    os.symlink("hidden.bin", root / "data" / "private" / "hidden-link")
+    _write_bytes(root / "diff-primer" / "primer.bin", 5)
+    definition = f"-R {root}\n-g data\n-P data/private"
+
+    measurement = measure_source(
+        root, parse_selection_contract(definition), "diff-primer"
+    )
+
+    assert measurement.selected_file_count == 2
+    assert measurement.selected_directory_count == 2
+    assert measurement.selected_symlink_count == 0
+
+
 def test_measure_source_cache_tagging_excludes_tagged_directory_contents(
     tmp_path: Path,
 ) -> None:

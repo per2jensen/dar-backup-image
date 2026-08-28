@@ -176,6 +176,7 @@ The image contains man pages for `dar` and `par2` which make the image self-docu
     - [Releasing a New Version](#releasing-a-new-version)
     - [Recommended Release Workflow](#recommended-release-workflow)
   - [Roadmap](#roadmap)
+    - [Version 1.0](#version-10)
     - [Version 1.1](#version-11)
     - [Version 1.2](#version-12)
     - [Other tasks](#other-tasks)
@@ -721,6 +722,10 @@ measure a representative FULL backup plus PAR2 creation and repair before
 increasing the size. The [large-scale test guide](doc/demo-large-scale-test.md)
 explains what its peak-memory measurements do and do not prove.
 
+The tracked large-scale history can also be explored through the read-only
+[Datasette metrics dashboard](doc/metrics-dashboard.md). From a checkout, run
+`./run_metrics_dashboard.sh` and open the localhost URL printed by the launcher.
+
 ---
 
 ## Usage Example
@@ -1213,17 +1218,19 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ## Roadmap
 
-Deferred implementation work discovered during the 0.9.1 documentation audit
-is tracked in [doc/documentation-follow-ups.md](doc/documentation-follow-ups.md).
+### Version 1.0
+
+1.0.0-rc1 is expected sometime Septemper 2026, with a 1.0.0 release following relative shortly thereafter.
 
 ### Version 1.1
 
 - Integrate DAR 2.8
-- Investigate and document compatibility between 1.0 and 1.1 backup archives and restore environments
+- Investigate and document compatibility between 1.0 and 1.1 backup archives and restore environments (1.0 uses dar-2.7, 1.1 uses dar-2.8)
 
 ### Version 1.2
 
 - Investigate DAR's encryption features
+- Possibly implement a dar supported encryption scheme
 
 ### Other tasks
 
@@ -1234,6 +1241,7 @@ is tracked in [doc/documentation-follow-ups.md](doc/documentation-follow-ups.md)
 ## Software this project benefits from
 
 - [DAR of course :-)](https://dar.sourceforge.io/)
+- [Par2](https://github.com/Parchive)
 - [Ubuntu](https://ubuntu.com/)
 - [Python](https://python.org/)
 - [GNU software](https://www.fsf.org/)

@@ -133,6 +133,7 @@ Every value the script uses is an environment variable with the shown default
 | `BITROT_MODE` | `contiguous` | `contiguous` for one random 2% range, `fragmented` for the same budget across 2–10 separated regions, or `edges` for bounded windows at the start of slice 1 and end of the numerically final slice |
 | `ADVERTISE` | `false` | Set `true` to request badge publication; the harness still requires a successful run whose measured source is at least 100 GiB |
 | `TEST_NAME` | `Large scale torture test` | Human-readable public badge label stored with the result |
+| `DATASET_ID` | *(unset)* | Optional opaque corpus identifier used to group comparable runs without publishing source paths |
 | `ADVERTISE_CLASS` | *(image version or revision)* | Public tested version/class; set explicitly for specialized engineering tests |
 | `FULL_RESTORE_MODE` | `auto` | `auto` restores sources at or below the threshold, `forced` restores at any size, and `disabled` skips the complete restore |
 | `FULL_RESTORE_THRESHOLD_GIB` | `25` | Inclusive source-size threshold in GiB used only by `auto` mode |
@@ -156,12 +157,12 @@ compression settings, and PAR2 ratio intended for production.
 
 The historical results are observations, not a controlled slice-size study.
 They vary in source bytes, file count, compression, image revisions, and other
-conditions. Current schema-v9 records contain peak RSS and the SHA-256 of the
-effective definition, but they do **not** contain the resolved slice size or
-PAR2 memory limit as dedicated fields. Some bitrot records expose the sizes of
-affected slices, but that is not a reliable substitute. Until those telemetry
-fields and a controlled same-corpus matrix exist, do not derive a sizing formula
-from `large-scale-results.jsonl`.
+conditions. Schema-v10 records make the resolved slice size, selected workload
+shape, coarse phase timings, artifact layout, host resources, and five-second
+RSS sampling context directly queryable. PAR2 has no explicit memory limit in
+this harness, so that field is recorded as unavailable instead of inferred.
+These dimensions make controlled comparisons possible; they do not turn mixed
+historical runs into a sizing formula.
 
 For an engineering comparison, hold the corpus and all other options constant,
 run several sizes such as 1G, 5G, 10G, and 20G, and compare PAR2 peak RSS plus
@@ -277,8 +278,10 @@ contract and measurement tests; there is no fallback interpretation.
 Before backup, the harness walks the literal `-g` roots plus its primer without
 following symlinks, deduplicates overlapping roots, subtracts literal `-P`
 subtrees and valid cache-tagged directories, and reports candidate, pruned, and
-selected regular-file counts and apparent bytes. The selected byte total drives
-both disk-space preflight and the automatic complete-restore threshold. A
+selected regular-file counts and apparent bytes. Schema v10 also summarizes
+allocated bytes, entry types, hard-link groups, and broad file-size bands. The
+selected apparent-byte total drives both disk-space preflight and the automatic
+complete-restore threshold. A
 Docker-backed regression test compares this model with a real DAR
 archive/restore selection.
 
@@ -293,6 +296,7 @@ Anything you pass on the command line is forwarded straight through to
 | `--smoketest` | Don't mirror this run's JSONL result into the tracked repo history file |
 | `--advertise` | Request badge publication; cannot override failed, incomplete, or source-size-ineligible results |
 | `--test-name NAME` | Override the human-readable public test name |
+| `--dataset-id ID` | Set an opaque comparable-corpus identity without publishing source paths |
 | `--advertise-class CLASS` | Override the tested public version/classification |
 | `--par2-ratio N` | PAR2 error-correction percentage (default 5) |
 | `--bitrot-seed N` | Replay the random bitrot selections made with seed N |
@@ -400,8 +404,16 @@ general sizing formula.)
 - **`BASE_DIR/runs/<timestamp>/`** — archives, par2 files, and restore output
   for this specific run. Deleted automatically unless `--keep` is given.
 
-New records use schema version 9. Existing schema-version-2 through -8 history
-lines remain valid and are not rewritten. Schema v9 replaces the misleading
+To explore the tracked history and, when available, the operational
+`dar-backup-metrics.db` in a read-only Datasette dashboard, see the
+[metrics dashboard guide](metrics-dashboard.md). The quickstart is:
+
+```bash
+./run_metrics_dashboard.sh
+```
+
+New records use schema version 10. Existing schema-version-2 through -9 history
+lines remain valid and are not rewritten. Schema v9 replaced the misleading
 rounded fields `full_size_gb`, `diff_size_gb`, and `incr_size_gb` with
 `*_size_gib`, and replaces `memory_mb` with `memory_mib`. Exact archive sizes
 remain available in the `*_size_bytes` fields. Trend analysis accepts both the
@@ -410,6 +422,14 @@ present for consumers. Provenance includes the full harness commit and dirty
 state, the requested image reference, immutable local image ID, registry digest
 when available, OCI image revision/version labels, harness script version, and
 the sha256 of the effective generated backup definition.
+
+Schema v10 adds seven high-level dashboard sections: `configuration`,
+`workload`, `environment`, `phases`, `artifacts`, `checks`, and `telemetry`.
+They record the resolved slice size, safe optional dataset identity, selected
+entry and file-size summaries, synthetic DIFF/INCR mutation scale, host and disk
+context, major-phase status/duration/resource aggregates, actual slice and PAR2
+file layout, lifecycle outcomes, and collection completeness. Existing
+top-level fields remain for compatibility.
 
 Schema v4 adds `bitrot_seed` and `bitrot_evidence`. Each completed bitrot phase
 records the mode, region count, exact slice names, region indexes, offsets and
@@ -541,9 +561,11 @@ build performed earlier by the wrapper.
   top` against each container's own ID) — they won't be polluted by unrelated
   `dar`/`par2`/`manager` processes elsewhere on the host, including your own
   scheduled backup jobs. Each value is the highest sampled RSS for that named
-  process, sampled every 0.5 seconds. It is not total container memory, does not
-  sum child processes, can miss shorter spikes, and is not by itself a safe
-  Docker memory-limit recommendation.
+  process. Schema v10 deliberately samples every five seconds and stores only
+  major-phase aggregates: this is operational telemetry, not profiling. Short
+  processes can be missed, and the values are not by themselves a safe Docker
+  memory-limit recommendation. Sample counts and availability are explicit in
+  `telemetry`.
 - The disk-space preflight check measures the supported definition's effective
   `-g` minus `-P`/cache-tag selection and refuses to start if `BASE_DIR`'s
   filesystem doesn't have `--min-free-multiplier` (default 2x) that many

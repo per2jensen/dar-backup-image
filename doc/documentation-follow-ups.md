@@ -21,12 +21,13 @@ A future implementation should:
 
 ## Slice-size and memory evidence
 
-Schema-v9 large-scale results do not directly record the resolved slice size,
-PAR2 memory limit, Docker memory limit, CPU count, or relevant DAR thread/block
-settings. Add explicit normalized fields and compatibility tests before using
-the JSONL history for slice-size sizing claims.
+Schema-v10 large-scale results record the resolved slice size, absence of an
+explicit PAR2 memory limit, host CPU/memory context, recognized DAR performance
+options, coarse phase timing/RSS aggregates, workload shape, and artifact
+layout. Docker invocations intentionally have no configured CPU or memory
+limit, which is represented explicitly rather than inferred.
 
-After telemetry exists, run a controlled same-corpus matrix—holding image,
+Run a controlled same-corpus matrix—holding image,
 compression, PAR2 ratio, CPU/thread settings, and memory limits constant—across
 representative slice sizes. Publish measured PAR2 create/verify/repair duration
 and peak-memory results without presenting them as a universal formula.

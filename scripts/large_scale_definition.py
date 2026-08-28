@@ -14,6 +14,15 @@ from typing import Sequence
 
 LOGGER = logging.getLogger(__name__)
 SLICE_SIZE_PATTERN = re.compile(r"^[1-9][0-9]*[kMGTEZY]$")
+SLICE_UNIT_MULTIPLIERS = {
+    "k": 1024,
+    "M": 1024**2,
+    "G": 1024**3,
+    "T": 1024**4,
+    "E": 1024**6,
+    "Z": 1024**7,
+    "Y": 1024**8,
+}
 SLICE_OPTIONS = {"-s", "--slice"}
 ROOT_OPTIONS = {"-R", "--fs-root"}
 INCLUDE_PATH_OPTIONS = {"-g", "--go-into"}
@@ -303,6 +312,24 @@ def validate_slice_size(value: str) -> str:
     return value
 
 
+def slice_size_to_bytes(value: str) -> int:
+    """Convert one validated DAR slice size to an exact byte count.
+
+    Args:
+        value: Slice size with an explicit DAR binary unit.
+
+    Returns:
+        Exact number of bytes represented by the value.
+
+    Raises:
+        ValueError: If the value is empty, unitless, or malformed.
+    """
+    validated = validate_slice_size(value)
+    magnitude = int(validated[:-1])
+    unit = validated[-1]
+    return magnitude * SLICE_UNIT_MULTIPLIERS[unit]
+
+
 def _definition_slice_sizes(definition: str) -> list[str]:
     """Extract slice sizes declared in a DAR backup definition.
 
@@ -386,6 +413,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--definition", required=True)
     parser.add_argument("--fallback")
     parser.add_argument(
+        "--slice-bytes",
+        action="store_true",
+        help="validate --fallback as a slice size and print exact bytes",
+    )
+    parser.add_argument(
         "--selection-root",
         action="store_true",
         help="validate the harness selection contract and print its -R root",
@@ -403,6 +435,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
         Zero for a valid configuration or two for invalid input.
     """
     parsed = _build_parser().parse_args(arguments)
+    if parsed.slice_bytes:
+        if parsed.fallback is None:
+            LOGGER.error("Invalid large-scale slice configuration: --fallback is required")
+            return 2
+        try:
+            print(slice_size_to_bytes(parsed.fallback))
+        except ValueError as error:
+            LOGGER.error("Invalid large-scale slice configuration: %s", error)
+            return 2
+        return 0
     if parsed.selection_root:
         try:
             selection = parse_selection_contract(parsed.definition)

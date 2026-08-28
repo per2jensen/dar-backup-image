@@ -41,6 +41,17 @@ def test_validate_slice_size_accepts_documented_dar_units(value: str) -> None:
     assert DEFINITION_MODULE.validate_slice_size(value) == value
 
 
+def test_slice_size_to_bytes_converts_binary_unit_exactly() -> None:
+    """A dashboard slice dimension uses exact binary bytes."""
+    assert DEFINITION_MODULE.slice_size_to_bytes("10G") == 10 * 1024**3
+
+
+def test_slice_size_to_bytes_rejects_unitless_value() -> None:
+    """A malformed slice value cannot produce misleading telemetry."""
+    with pytest.raises(ValueError, match="explicit DAR unit"):
+        DEFINITION_MODULE.slice_size_to_bytes("10")
+
+
 @pytest.mark.parametrize(
     "declaration",
     ("-s 20G", "-s20G", "--slice 20G", "--slice=20G"),

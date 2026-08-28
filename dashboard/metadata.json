@@ -1,0 +1,361 @@
+{
+  "title": "dar-backup large-scale metrics",
+  "description": "Read-only engineering evidence from the dar-backup large-scale test harness.",
+  "databases": {
+    "large-scale-dashboard": {
+      "source": "dar-backup-image large-scale test results",
+      "source_url": "https://github.com/per2jensen/dar-backup-image/blob/main/doc/test-report/large-scale-results.jsonl",
+      "tables": {
+        "runs": {
+          "description": "One normalized row per large-scale harness result.",
+          "sort_desc": "datestamp",
+          "facets": ["schema_version", "passed", "dataset_id", "image_version"]
+        },
+        "phases": {
+          "description": "Schema-v10 lifecycle timing and coarse resource-sample totals.",
+          "facets": ["phase_name", "status"]
+        },
+        "phase_process_memory": {
+          "description": "Per-process peak RSS grouped by harness lifecycle phase.",
+          "facets": ["phase_name", "process_name"]
+        },
+        "artifacts": {
+          "description": "Archive slice and PAR2 layout recorded by schema-v10 runs.",
+          "facets": ["tier"]
+        },
+        "mutations": {
+          "description": "Synthetic DIFF and INCR workload mutations.",
+          "facets": ["tier"]
+        },
+        "check_results": {
+          "description": "Flattened lifecycle-check evidence; value_json preserves the original JSON scalar.",
+          "facets": ["check_path", "value_type"]
+        },
+        "bitrot_phases": {
+          "description": "Aggregate corruption and PAR2 repair evidence per archive tier.",
+          "facets": ["tier", "mode", "status"]
+        },
+        "bitrot_segments": {
+          "description": "Exact bit-rot regions and PAR2 block evidence.",
+          "facets": ["tier", "repair_status"]
+        },
+        "engine_backup_runs": {
+          "description": "Optional dar-backup operational metrics copied from dar-backup-metrics.db.",
+          "sort_desc": "run_started_at",
+          "facets": ["backup_type", "status"]
+        },
+        "engine_restore_samples": {
+          "description": "Optional sampled restore-test evidence copied from dar-backup-metrics.db.",
+          "facets": ["result", "backup_definition"]
+        }
+      },
+      "queries": {
+        "recent-successful-runs": {
+          "title": "Recent successful runs",
+          "description": "Comparable workload, throughput, timing, and memory fields from completed runs.",
+          "sql": "select * from run_performance where passed = 1 and completed = 1 order by datestamp desc limit 50"
+        },
+        "failed-or-aborted-runs": {
+          "title": "Failed or aborted runs",
+          "description": "Runs that did not complete successfully, including preflight aborts.",
+          "sql": "select datestamp, schema_version, completed, exit_code, failure_count, aborted_phase, image_version from runs where passed = 0 or completed = 0 order by datestamp desc"
+        }
+      }
+    }
+  },
+  "plugins": {
+    "datasette-dashboards": {
+      "large-scale": {
+        "title": "dar-backup large-scale test dashboard",
+        "description": "Run history, throughput, phase timing, memory, artifacts, and engine evidence.",
+        "layout": [
+          ["latest-source-size", "latest-overall-time"],
+          ["throughput-trend", "scale-versus-duration"],
+          ["latest-phase-duration", "memory-trend"],
+          ["archive-size-trend", "latest-engine-split"],
+          ["recent-runs", "recent-runs"]
+        ],
+        "charts": {
+          "latest-source-size": {
+            "title": "Latest successful source",
+            "db": "large-scale-dashboard",
+            "query": "select round(source_bytes / 1073741824.0, 2) as source_gib from runs where passed = 1 and completed = 1 and source_bytes is not null order by datestamp desc limit 1",
+            "library": "metric",
+            "display": {
+              "field": "source_gib",
+              "suffix": " GiB"
+            }
+          },
+          "latest-overall-time": {
+            "title": "Latest successful lifecycle",
+            "db": "large-scale-dashboard",
+            "query": "select round(overall_elapsed_s / 60.0, 1) as overall_minutes from runs where passed = 1 and completed = 1 and overall_elapsed_s is not null order by datestamp desc limit 1",
+            "library": "metric",
+            "display": {
+              "field": "overall_minutes",
+              "suffix": " min"
+            }
+          },
+          "throughput-trend": {
+            "title": "FULL backup and restore throughput",
+            "db": "large-scale-dashboard",
+            "query": "select substr(datestamp, 1, 10) || 'T' || replace(substr(datestamp, 12), '-', ':') as run_timestamp, 'FULL backup' as activity, full_throughput_mib_s as throughput_mib_s from run_performance where passed = 1 and full_throughput_mib_s is not null union all select substr(datestamp, 1, 10) || 'T' || replace(substr(datestamp, 12), '-', ':') as run_timestamp, 'Full restore' as activity, full_restore_throughput_mib_s as throughput_mib_s from run_performance where passed = 1 and full_restore_throughput_mib_s is not null order by run_timestamp",
+            "library": "vega-lite",
+            "display": {
+              "mark": "line",
+              "encoding": {
+                "x": {
+                  "field": "run_timestamp",
+                  "type": "temporal",
+                  "title": "Run"
+                },
+                "y": {
+                  "field": "throughput_mib_s",
+                  "type": "quantitative",
+                  "title": "Throughput (MiB/s)",
+                  "scale": {
+                    "zero": false
+                  }
+                },
+                "color": {
+                  "field": "activity",
+                  "type": "nominal",
+                  "title": "Activity"
+                },
+                "tooltip": [
+                  {
+                    "field": "run_timestamp",
+                    "type": "temporal",
+                    "title": "Run"
+                  },
+                  {
+                    "field": "activity",
+                    "type": "nominal",
+                    "title": "Activity"
+                  },
+                  {
+                    "field": "throughput_mib_s",
+                    "type": "quantitative",
+                    "title": "MiB/s"
+                  }
+                ]
+              }
+            }
+          },
+          "scale-versus-duration": {
+            "title": "Source scale versus FULL duration",
+            "db": "large-scale-dashboard",
+            "query": "select source_gib, round(full_backup_seconds / 60.0, 2) as full_minutes, coalesce(dataset_id, 'unlabelled') as dataset from run_performance where passed = 1 and source_gib is not null and full_backup_seconds > 0 order by source_gib",
+            "library": "vega-lite",
+            "display": {
+              "mark": "point",
+              "encoding": {
+                "x": {
+                  "field": "source_gib",
+                  "type": "quantitative",
+                  "title": "Source (GiB)",
+                  "scale": {
+                    "zero": false
+                  }
+                },
+                "y": {
+                  "field": "full_minutes",
+                  "type": "quantitative",
+                  "title": "FULL duration (minutes)",
+                  "scale": {
+                    "zero": false
+                  }
+                },
+                "color": {
+                  "field": "dataset",
+                  "type": "nominal",
+                  "title": "Dataset"
+                },
+                "tooltip": [
+                  {
+                    "field": "source_gib",
+                    "type": "quantitative",
+                    "title": "Source (GiB)"
+                  },
+                  {
+                    "field": "full_minutes",
+                    "type": "quantitative",
+                    "title": "FULL minutes"
+                  },
+                  {
+                    "field": "dataset",
+                    "type": "nominal",
+                    "title": "Dataset"
+                  }
+                ]
+              }
+            }
+          },
+          "latest-phase-duration": {
+            "title": "Latest run phase duration",
+            "db": "large-scale-dashboard",
+            "query": "select phase_name, round(duration_s / 60.0, 2) as duration_minutes from phases where datestamp = (select max(datestamp) from runs where passed = 1 and completed = 1) and phase_name != 'overall' and duration_s is not null order by duration_s desc",
+            "library": "vega-lite",
+            "display": {
+              "mark": "bar",
+              "encoding": {
+                "x": {
+                  "field": "phase_name",
+                  "type": "nominal",
+                  "title": "Phase",
+                  "sort": "-y"
+                },
+                "y": {
+                  "field": "duration_minutes",
+                  "type": "quantitative",
+                  "title": "Duration (minutes)"
+                },
+                "tooltip": [
+                  {
+                    "field": "phase_name",
+                    "type": "nominal",
+                    "title": "Phase"
+                  },
+                  {
+                    "field": "duration_minutes",
+                    "type": "quantitative",
+                    "title": "Minutes"
+                  }
+                ]
+              }
+            }
+          },
+          "memory-trend": {
+            "title": "Peak process RSS",
+            "db": "large-scale-dashboard",
+            "query": "select substr(datestamp, 1, 10) || 'T' || replace(substr(datestamp, 12), '-', ':') as run_timestamp, process_name, peak_rss_mib from memory_trends order by datestamp, process_name",
+            "library": "vega-lite",
+            "display": {
+              "mark": "line",
+              "encoding": {
+                "x": {
+                  "field": "run_timestamp",
+                  "type": "temporal",
+                  "title": "Run"
+                },
+                "y": {
+                  "field": "peak_rss_mib",
+                  "type": "quantitative",
+                  "title": "Peak RSS (MiB)",
+                  "scale": {
+                    "zero": false
+                  }
+                },
+                "color": {
+                  "field": "process_name",
+                  "type": "nominal",
+                  "title": "Process"
+                },
+                "tooltip": [
+                  {
+                    "field": "run_timestamp",
+                    "type": "temporal",
+                    "title": "Run"
+                  },
+                  {
+                    "field": "process_name",
+                    "type": "nominal",
+                    "title": "Process"
+                  },
+                  {
+                    "field": "peak_rss_mib",
+                    "type": "quantitative",
+                    "title": "Peak RSS (MiB)"
+                  }
+                ]
+              }
+            }
+          },
+          "archive-size-trend": {
+            "title": "Archive size by tier",
+            "db": "large-scale-dashboard",
+            "query": "select substr(datestamp, 1, 10) || 'T' || replace(substr(datestamp, 12), '-', ':') as run_timestamp, upper(tier) as tier, archive_gib from artifact_summary order by datestamp, tier",
+            "library": "vega-lite",
+            "display": {
+              "mark": "line",
+              "encoding": {
+                "x": {
+                  "field": "run_timestamp",
+                  "type": "temporal",
+                  "title": "Run"
+                },
+                "y": {
+                  "field": "archive_gib",
+                  "type": "quantitative",
+                  "title": "Archive (GiB)"
+                },
+                "color": {
+                  "field": "tier",
+                  "type": "nominal",
+                  "title": "Tier"
+                },
+                "tooltip": [
+                  {
+                    "field": "run_timestamp",
+                    "type": "temporal",
+                    "title": "Run"
+                  },
+                  {
+                    "field": "tier",
+                    "type": "nominal",
+                    "title": "Tier"
+                  },
+                  {
+                    "field": "archive_gib",
+                    "type": "quantitative",
+                    "title": "Archive (GiB)"
+                  }
+                ]
+              }
+            }
+          },
+          "latest-engine-split": {
+            "title": "Latest operational FULL timing split",
+            "db": "large-scale-dashboard",
+            "query": "with latest as (select dar_duration_secs, verify_duration_secs, par2_duration_secs from engine_backup_runs where backup_type = 'FULL' and status = 'SUCCESS' order by run_started_at desc limit 1) select 'DAR' as component, round(dar_duration_secs, 2) as seconds from latest union all select 'Verification', round(verify_duration_secs, 2) from latest union all select 'PAR2', round(par2_duration_secs, 2) from latest",
+            "library": "vega-lite",
+            "display": {
+              "mark": "bar",
+              "encoding": {
+                "x": {
+                  "field": "component",
+                  "type": "nominal",
+                  "title": "Component"
+                },
+                "y": {
+                  "field": "seconds",
+                  "type": "quantitative",
+                  "title": "Duration (seconds)"
+                },
+                "tooltip": [
+                  {
+                    "field": "component",
+                    "type": "nominal",
+                    "title": "Component"
+                  },
+                  {
+                    "field": "seconds",
+                    "type": "quantitative",
+                    "title": "Seconds"
+                  }
+                ]
+              }
+            }
+          },
+          "recent-runs": {
+            "title": "Recent runs",
+            "db": "large-scale-dashboard",
+            "query": "select datestamp, case when passed = 1 and completed = 1 then 'passed' else 'failed/aborted' end as result, source_gib, full_backup_seconds, full_throughput_mib_s, full_restore_seconds, full_restore_throughput_mib_s, overall_minutes, image_version from run_performance order by datestamp desc limit 12",
+            "library": "table",
+            "display": {}
+          }
+        }
+      }
+    }
+  }
+}

@@ -55,6 +55,7 @@ def test_wrapper_advertise_options_are_forwarded_to_harness(tmp_path: Path) -> N
             "BITROT": "false",
             "ADVERTISE": "true",
             "TEST_NAME": "Cross-version restore",
+            "DATASET_ID": "photos-2026-fixed",
             "ADVERTISE_CLASS": "2.7-to-2.8",
             "BASE_DIR": "/data/tmp/test",
             "SOURCE_GLOB": "source",
@@ -71,6 +72,7 @@ def test_wrapper_advertise_options_are_forwarded_to_harness(tmp_path: Path) -> N
     arguments = result.stdout.splitlines()[1:]
     assert "--advertise" in arguments
     assert arguments[arguments.index("--test-name") + 1] == "Cross-version restore"
+    assert arguments[arguments.index("--dataset-id") + 1] == "photos-2026-fixed"
     assert arguments[arguments.index("--advertise-class") + 1] == "2.7-to-2.8"
     assert arguments[arguments.index("--full-restore-mode") + 1] == "forced"
     assert arguments[arguments.index("--full-restore-threshold-gib") + 1] == "40"
@@ -93,6 +95,24 @@ def test_wrapper_invalid_advertise_value_fails_before_harness(tmp_path: Path) ->
 
     assert result.returncode != 0
     assert "ADVERTISE must be 'true' or 'false'" in result.stderr
+
+
+def test_wrapper_invalid_dataset_id_fails_before_harness(tmp_path: Path) -> None:
+    """A dataset identity cannot accidentally expose a source path.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+    """
+    wrapper = _isolated_wrapper(tmp_path)
+    environment = os.environ.copy()
+    environment.update({"BUILD_IMAGE": "false", "DATASET_ID": "/private/photos"})
+
+    result = subprocess.run(
+        [str(wrapper)], env=environment, capture_output=True, text=True
+    )
+
+    assert result.returncode != 0
+    assert "DATASET_ID must be" in result.stderr
 
 
 def test_wrapper_default_full_restore_is_auto_at_25_gib(tmp_path: Path) -> None:

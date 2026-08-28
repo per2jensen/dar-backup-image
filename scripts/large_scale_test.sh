@@ -22,6 +22,7 @@ MOUNT_ROOT=""                                       # Set after option parsing f
 DEFINITION_NAME="large-scale-test"                  # Backup definition name (also the archive filename prefix); fixed, not currently a CLI option
 DEFINITION_CONTENT=""                               # --definition (required): the backup definition body (-R/-g/etc. lines) supplied by the caller
 SLICE_SIZE="10G"                                    # --slice: dar -s slice size; only injected into DEFINITION_CONTENT if it doesn't already set one
+SLICE_SIZE_BYTES=""                                 # Exact binary byte count for the resolved effective slice size
 PAR2_RATIO=5                                        # --par2-ratio: PAR2 ERROR_CORRECTION_PERCENT written into the generated config
 DO_BITROT=0                                         # --bitrot: when 1, runs do_bitrot_test (corrupt + par2 repair) on FULL, DIFF, and INCR
 BITROT_SEED=""                                      # --bitrot-seed: optional unsigned 64-bit seed; generated once per run when omitted
@@ -32,6 +33,7 @@ BITROT_BUFFER_BYTES=1048576                         # 1 MiB dd buffer while pres
 SLICE_SIZE_SOURCE="fallback"                        # Set to definition when the supplied definition contains its own validated slice option
 ADVERTISE_REQUESTED=0                               # --advertise: requests publication; the result writer still enforces success and source-size eligibility
 TEST_NAME="Large scale torture test"                 # --test-name: human-readable badge label stored with every result
+DATASET_ID=""                                       # --dataset-id: optional opaque corpus identity for comparable dashboard cohorts
 ADVERTISE_CLASS=""                                  # --advertise-class: tested version/class; defaults from image metadata after preflight
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
@@ -56,8 +58,9 @@ RESTORE_FILESYSTEM_TYPE=""                          # Host filesystem type conta
 SOURCE_FILESYSTEM_DEVICE=""                         # Host st_dev number for MOUNT_ROOT
 RESTORE_FILESYSTEM_DEVICE=""                        # Host st_dev number for FULL_RESTORE_DIR
 OWNERSHIP_FIXTURE_GID=""                            # Supplemental GID used when available, otherwise the invoking user's primary GID
-SCRIPT_VERSION="23"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="24"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
+METRICS_SAMPLE_INTERVAL_SECONDS=5                   # Deliberately coarse resource sample interval; this harness is not a profiler
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
 PRIMER_NON_LINK_COUNT=0                             # Set by create_diff_primer(); expected-modified-file-count threshold used by verify_diff_contents/verify_incr_contents
 DAR_BACKUP_VERSION=""                               # Set by preflight() from the image's org.dar-backup.version label
@@ -76,7 +79,26 @@ OS_DESC=""                                           # Set by preflight() from `
 KERNEL=""                                           # Set by preflight() from `uname -r` (the Docker host's kernel)
 SOURCE_FILE_COUNT=""                                # Regular-file count after supported -P/cache pruning, captured before FULL
 SOURCE_BYTES=""                                     # Apparent regular-file bytes after supported -P/cache pruning, captured before FULL
+SOURCE_ALLOCATED_BYTES=""                           # Allocated filesystem bytes for the selected regular files
+SOURCE_DIRECTORY_COUNT=""                           # Selected directory count
+SOURCE_SYMLINK_COUNT=""                             # Selected symbolic-link count
+SOURCE_OTHER_ENTRY_COUNT=""                         # Selected non-file, non-directory, non-link entry count
+SOURCE_HARD_LINK_GROUP_COUNT=""                     # Selected multi-path hard-link groups
+SOURCE_ZERO_FILE_COUNT=""                           # Selected zero-byte regular files
+SOURCE_SMALL_FILE_COUNT=""                          # Selected regular files from 1 byte through 1 MiB
+SOURCE_MEDIUM_FILE_COUNT=""                         # Selected regular files over 1 MiB through 100 MiB
+SOURCE_LARGE_FILE_COUNT=""                          # Selected regular files over 100 MiB
+SOURCE_MAX_FILE_BYTES=""                            # Largest selected regular file
+HOST_LOGICAL_CPU_COUNT=""                           # Online logical CPUs visible to the harness host
+HOST_MEMORY_BYTES=""                                # Host MemTotal captured once during preflight
+DISK_FREE_BYTES_START=""                            # Free bytes under BASE_DIR after source measurement
+DISK_FREE_BYTES_END=""                              # Free bytes under BASE_DIR when the result is prepared
 BACKUP_DEFINITION_SHA256=""                         # Hash of the effective generated backup definition, including injected primer and slice options
+
+DIFF_MODIFIED_FILE_COUNT=""; DIFF_MODIFIED_APPARENT_BYTES=""
+DIFF_CREATED_FILE_COUNT=""; DIFF_CREATED_BYTES=""; DIFF_DELETED_FILE_COUNT=""
+INCR_MODIFIED_FILE_COUNT=""; INCR_MODIFIED_APPARENT_BYTES=""
+INCR_CREATED_FILE_COUNT=""; INCR_CREATED_BYTES=""; INCR_DELETED_FILE_COUNT=""
 
 # Explicit lifecycle state is serialized by the EXIT trap. Values use the
 # schema-v4 status vocabulary: passed, failed, skipped, or not_run.
@@ -127,6 +149,7 @@ while [[ $# -gt 0 ]]; do
         --bitrot-mode) BITROT_MODE="$2"; BITROT_MODE_EXPLICIT=1; shift 2 ;;
         --advertise)  ADVERTISE_REQUESTED=1; shift ;;
         --test-name)  TEST_NAME="$2"; shift 2 ;;
+        --dataset-id) DATASET_ID="$2"; shift 2 ;;
         --advertise-class) ADVERTISE_CLASS="$2"; shift 2 ;;
         --keep)       KEEP=1;                  shift   ;;
         --smoketest)  SMOKETEST=1;             shift   ;;
@@ -141,6 +164,13 @@ done
 
 [[ -z "$DEFINITION_CONTENT" ]] && { echo "ERROR: --definition is required"; exit 1; }
 [[ -z "$TEST_NAME" ]] && { echo "ERROR: --test-name must not be empty" >&2; exit 1; }
+[[ "$PAR2_RATIO" =~ ^([1-9]|[1-9][0-9]|100)$ ]] || { echo "ERROR: --par2-ratio must be an integer from 1 through 100" >&2; exit 1; }
+[[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --timeout must be a positive integer" >&2; exit 1; }
+[[ "$MIN_FREE_MULTIPLIER" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --min-free-multiplier must be a positive integer" >&2; exit 1; }
+if [[ -n "$DATASET_ID" && ! "$DATASET_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+    echo "ERROR: --dataset-id must be 1-128 characters using letters, digits, '.', '_', or '-'" >&2
+    exit 1
+fi
 [[ $DO_BITROT -eq 0 && -n "$BITROT_SEED" ]] && { echo "ERROR: --bitrot-seed requires --bitrot" >&2; exit 1; }
 [[ $DO_BITROT -eq 0 && $BITROT_MODE_EXPLICIT -eq 1 ]] && { echo "ERROR: --bitrot-mode requires --bitrot" >&2; exit 1; }
 case "$BITROT_MODE" in
@@ -166,6 +196,13 @@ if [[ -z "$SLICE_SIZE_SOURCE" || -z "$SLICE_SIZE" ]]; then
     echo "ERROR: unable to resolve the effective slice size" >&2
     exit 1
 fi
+if ! SLICE_SIZE_BYTES=$(python3 "$(dirname "${BASH_SOURCE[0]}")/large_scale_definition.py" \
+        --definition "$DEFINITION_CONTENT" \
+        --fallback "$SLICE_SIZE" \
+        --slice-bytes); then
+    exit 1
+fi
+[[ "$SLICE_SIZE_BYTES" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: unable to convert the effective slice size to bytes" >&2; exit 1; }
 
 if [[ $DO_BITROT -eq 0 ]]; then
     FULL_BITROT_STATUS="skipped"
@@ -250,6 +287,10 @@ preflight() {
     PYTHON_VERSION=$(docker run --rm --entrypoint /opt/venv/bin/python3 "$IMAGE" --version 2>/dev/null || echo "unknown")
     OS_DESC=$(lsb_release -d 2>/dev/null | awk -F':	' '{print $2}' || echo "unknown")
     KERNEL=$(uname -r)
+    HOST_LOGICAL_CPU_COUNT=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
+    HOST_MEMORY_BYTES=$(awk '/^MemTotal:/ { printf "%.0f", $2 * 1024; exit }' /proc/meminfo 2>/dev/null || true)
+    [[ "$HOST_LOGICAL_CPU_COUNT" =~ ^[1-9][0-9]*$ ]] || HOST_LOGICAL_CPU_COUNT=""
+    [[ "$HOST_MEMORY_BYTES" =~ ^[1-9][0-9]*$ ]] || HOST_MEMORY_BYTES=""
 }
 preflight
 
@@ -314,6 +355,16 @@ measurement = json.loads(sys.argv[1])
 keys = (
     "selected_file_count",
     "selected_bytes",
+    "selected_allocated_bytes",
+    "selected_directory_count",
+    "selected_symlink_count",
+    "selected_other_entry_count",
+    "selected_hard_link_group_count",
+    "selected_zero_file_count",
+    "selected_small_file_count",
+    "selected_medium_file_count",
+    "selected_large_file_count",
+    "selected_max_file_bytes",
     "pruned_file_count",
     "pruned_bytes",
     "candidate_file_count",
@@ -329,12 +380,21 @@ print("\t".join(str(measurement[key]) for key in keys))
 
     local pruned_file_count pruned_bytes candidate_file_count candidate_bytes
     local prune_path_count cache_tagged_directory_count
-    IFS=$'\t' read -r SOURCE_FILE_COUNT SOURCE_BYTES \
+    IFS=$'\t' read -r SOURCE_FILE_COUNT SOURCE_BYTES SOURCE_ALLOCATED_BYTES \
+        SOURCE_DIRECTORY_COUNT SOURCE_SYMLINK_COUNT SOURCE_OTHER_ENTRY_COUNT \
+        SOURCE_HARD_LINK_GROUP_COUNT SOURCE_ZERO_FILE_COUNT \
+        SOURCE_SMALL_FILE_COUNT SOURCE_MEDIUM_FILE_COUNT SOURCE_LARGE_FILE_COUNT \
+        SOURCE_MAX_FILE_BYTES \
         pruned_file_count pruned_bytes candidate_file_count candidate_bytes \
         prune_path_count cache_tagged_directory_count <<< "$source_measurement"
     local measurement_value
     for measurement_value in \
-        "$SOURCE_FILE_COUNT" "$SOURCE_BYTES" "$pruned_file_count" "$pruned_bytes" \
+        "$SOURCE_FILE_COUNT" "$SOURCE_BYTES" "$SOURCE_ALLOCATED_BYTES" \
+        "$SOURCE_DIRECTORY_COUNT" "$SOURCE_SYMLINK_COUNT" \
+        "$SOURCE_OTHER_ENTRY_COUNT" "$SOURCE_HARD_LINK_GROUP_COUNT" \
+        "$SOURCE_ZERO_FILE_COUNT" "$SOURCE_SMALL_FILE_COUNT" \
+        "$SOURCE_MEDIUM_FILE_COUNT" "$SOURCE_LARGE_FILE_COUNT" \
+        "$SOURCE_MAX_FILE_BYTES" "$pruned_file_count" "$pruned_bytes" \
         "$candidate_file_count" "$candidate_bytes" "$prune_path_count" \
         "$cache_tagged_directory_count"; do
         if [[ ! "$measurement_value" =~ ^[0-9]+$ ]]; then
@@ -364,6 +424,7 @@ print("\t".join(str(measurement[key]) for key in keys))
         info "Could not determine available disk space for '${BASE_DIR}'; skipping preflight check."
         return
     fi
+    DISK_FREE_BYTES_START="$available_bytes"
 
     local total_gib required_gib available_gib
     total_gib=$(awk -v b="$total_bytes" 'BEGIN{printf "%.2f", b/1024/1024/1024}')
@@ -401,6 +462,8 @@ CONFIG_FILE="${RUN_DIR}/dar-backup.conf"            # Generated dar-backup.conf 
 DARRC="${RUN_DIR}/.darrc"                           # Copied/generated .darrc for this run — gone after the run unless --keep
 RSS_LOGFILE="${RUN_DIR}/rss.log"                    # Raw per-process RSS samples written by start_rss_monitor — gone after the run unless --keep
 CID_FILE="${RUN_DIR}/current-container.cid"         # Written by each Docker invocation helper; scopes start_rss_monitor to this run's own container instead of a host-wide process scan
+PHASE_STATE_FILE="${RUN_DIR}/current-phase"          # Tiny synchronization file read by the coarse resource monitor
+PHASE_JOURNAL_FILE="${RUN_DIR}/phase-journal.tsv"    # Major-phase monotonic start/end evidence consumed by the result writer
 BITROT_EVIDENCE_FILE="${RUN_DIR}/bitrot-evidence.json" # Incrementally persisted evidence included in the JSONL record by the EXIT trap
 DIFF_PRIMER_DIR="${BASE_DIR}/diff-primer"           # NOT under RUN_DIR — reused/reset by create_diff_primer() at the start of every run
 PERMISSION_FIXTURE_DIR="${DIFF_PRIMER_DIR}/permission-fixtures" # Stable entries with varied POSIX modes for mandatory restore verification
@@ -446,10 +509,10 @@ fi
 RUN_VARIABLES=(
     DATESTAMP DATE_OF_RUN SCRIPT_VERSION RUN_STARTED_EPOCH
     IMAGE DEFINITION_ROOT MOUNT_ROOT
-    BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE SLICE_SIZE_SOURCE PAR2_RATIO
+    BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE SLICE_SIZE_BYTES SLICE_SIZE_SOURCE PAR2_RATIO
     DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES
-    ADVERTISE_REQUESTED TEST_NAME ADVERTISE_CLASS
-    KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER
+    ADVERTISE_REQUESTED TEST_NAME DATASET_ID ADVERTISE_CLASS
+    KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER METRICS_SAMPLE_INTERVAL_SECONDS
     FULL_RESTORE_MODE FULL_RESTORE_THRESHOLD_GIB FULL_RESTORE_THRESHOLD_BYTES
     RESTORE_METADATA_PROFILE SOURCE_FILESYSTEM_TYPE RESTORE_FILESYSTEM_TYPE
     SOURCE_FILESYSTEM_DEVICE RESTORE_FILESYSTEM_DEVICE OWNERSHIP_FIXTURE_GID
@@ -458,6 +521,7 @@ RUN_VARIABLES=(
     PYTHON_VERSION OS_DESC KERNEL
     RUN_DIR BACKUP_DIR PAR2_DIR RESTORE_DIR FULL_RESTORE_DIR BACKUP_D_DIR
     RESULTS_DIR METRICS_DB LOGFILE SUMMARY CONFIG_FILE DARRC RSS_LOGFILE CID_FILE
+    PHASE_STATE_FILE PHASE_JOURNAL_FILE
     BITROT_EVIDENCE_FILE
     DIFF_PRIMER_DIR PERMISSION_FIXTURE_DIR
 )
@@ -467,6 +531,32 @@ print_run_variables() {
     for name in "${RUN_VARIABLES[@]}"; do
         printf '  %-22s = %s\n' "$name" "${!name}"
     done
+}
+
+ACTIVE_PHASE=""
+ACTIVE_PHASE_STARTED_NS=""
+
+finish_current_phase() {
+    if [[ -z "$ACTIVE_PHASE" || -z "$ACTIVE_PHASE_STARTED_NS" ]]; then
+        return 0
+    fi
+    printf 'end\t%s\t%s\n' "$ACTIVE_PHASE" "$(date +%s%N)" >> "$PHASE_JOURNAL_FILE"
+    ACTIVE_PHASE=""
+    ACTIVE_PHASE_STARTED_NS=""
+}
+
+set_current_phase() {
+    local next_phase="$1"
+    if [[ -z "$next_phase" || ! "$next_phase" =~ ^[a-z0-9_]+$ ]]; then
+        echo "ERROR: invalid metrics phase '${next_phase}'" >&2
+        return 2
+    fi
+    finish_current_phase
+    CURRENT_PHASE="$next_phase"
+    ACTIVE_PHASE="$next_phase"
+    ACTIVE_PHASE_STARTED_NS=$(date +%s%N)
+    printf '%s\n' "$CURRENT_PHASE" > "$PHASE_STATE_FILE"
+    printf 'start\t%s\t%s\n' "$ACTIVE_PHASE" "$ACTIVE_PHASE_STARTED_NS" >> "$PHASE_JOURNAL_FILE"
 }
 
 # ── docker invocation helpers ─────────────────────────────────────────────────
@@ -631,16 +721,30 @@ start_rss_monitor() {
             if [[ -s "$CID_FILE" ]]; then
                 cid=$(cat "$CID_FILE" 2>/dev/null)
                 if [[ -n "$cid" ]]; then
+                    phase=$(head -n 1 "$PHASE_STATE_FILE" 2>/dev/null || echo "unknown")
+                    sample_epoch_ms=$(date +%s%3N)
+                    named_process_rss_kib=0
+                    sampled_process_count=0
+                    top_output=$(docker top "$cid" -eo pid,comm,rss,vsz 2>/dev/null | tail -n +2 || true)
                     while read -r pid cmd rss vsz; do
                         [[ -z "$pid" ]] && continue
                         if [[ "$cmd" =~ ^(dar|dar-backup|par2|manager)$ ]]; then
-                            [[ "$rss" -gt 0 ]] && printf '%s pid=%-6s rss=%-8s kB peak=%-8s kB cmd=%s\n' \
-                                "$(date '+%H:%M:%S')" "$pid" "$rss" "$vsz" "$cmd"
+                            if [[ "$rss" -gt 0 ]]; then
+                                printf '%s pid=%-6s rss=%-8s kB vsz=%-8s kB cmd=%s phase=%s epoch_ms=%s\n' \
+                                    "$(date '+%H:%M:%S')" "$pid" "$rss" "$vsz" "$cmd" "$phase" "$sample_epoch_ms"
+                                named_process_rss_kib=$((named_process_rss_kib + rss))
+                                sampled_process_count=$((sampled_process_count + 1))
+                            fi
                         fi
-                    done < <(docker top "$cid" -eo pid,comm,rss,vsz 2>/dev/null | tail -n +2)
+                    done <<< "$top_output"
+                    if [[ $sampled_process_count -gt 0 ]]; then
+                        printf '%s sample=resource phase=%s epoch_ms=%s process_count=%s named_process_rss_kib=%s\n' \
+                            "$(date '+%H:%M:%S')" "$phase" "$sample_epoch_ms" \
+                            "$sampled_process_count" "$named_process_rss_kib"
+                    fi
                 fi
             fi
-            sleep 0.5
+            sleep "$METRICS_SAMPLE_INTERVAL_SECONDS"
         done
     ) >> "${RSS_LOGFILE:-/dev/null}" 2>/dev/null &
     RSS_MONITOR_PID=$!
@@ -735,14 +839,25 @@ create_diff_primer() {
 
 update_diff_primer() {
     info "Updating diff-primer data..."
+    DIFF_MODIFIED_FILE_COUNT=0
+    DIFF_MODIFIED_APPARENT_BYTES=0
     while IFS= read -r -d '' f; do
         dd if=/dev/urandom of="$f" bs="$(stat -c%s "$f")" count=1 2>/dev/null
+        DIFF_MODIFIED_FILE_COUNT=$((DIFF_MODIFIED_FILE_COUNT + 1))
+        DIFF_MODIFIED_APPARENT_BYTES=$((DIFF_MODIFIED_APPARENT_BYTES + $(stat -c%s "$f")))
     done < <(find "$DIFF_PRIMER_DIR" -type f \
         ! -name "link_*" ! -path "${PERMISSION_FIXTURE_DIR}/*" -print0)
     rm "${DIFF_PRIMER_DIR}/link_original.txt"
+    DIFF_DELETED_FILE_COUNT=1
     echo "Appended text block mutating target1 inode before execution of DIFF backup." >> "${DIFF_PRIMER_DIR}/link_target1.txt"
+    DIFF_MODIFIED_FILE_COUNT=$((DIFF_MODIFIED_FILE_COUNT + 1))
+    DIFF_MODIFIED_APPARENT_BYTES=$((DIFF_MODIFIED_APPARENT_BYTES + $(stat -c%s "${DIFF_PRIMER_DIR}/link_target1.txt")))
     ln "${DIFF_PRIMER_DIR}/link_target1.txt" "${DIFF_PRIMER_DIR}/link_target2.txt"
-    dd if=/dev/urandom of="${DIFF_PRIMER_DIR}/diff_new_$(date +%s).bin" bs=1M count=2 2>/dev/null
+    local created_file
+    created_file="${DIFF_PRIMER_DIR}/diff_new_$(date +%s).bin"
+    dd if=/dev/urandom of="$created_file" bs=1M count=2 2>/dev/null
+    DIFF_CREATED_FILE_COUNT=2
+    DIFF_CREATED_BYTES=$(( $(stat -c%s "$created_file") + $(stat -c%s "${DIFF_PRIMER_DIR}/link_target2.txt") ))
 }
 
 verify_diff_contents() {
@@ -772,15 +887,24 @@ verify_diff_contents() {
 
 update_incr_primer() {
     info "Updating diff-primer data for INCR..."
+    INCR_MODIFIED_FILE_COUNT=0
+    INCR_MODIFIED_APPARENT_BYTES=0
     while IFS= read -r -d '' f; do
         dd if=/dev/urandom of="$f" bs="$(stat -c%s "$f")" count=1 2>/dev/null
+        INCR_MODIFIED_FILE_COUNT=$((INCR_MODIFIED_FILE_COUNT + 1))
+        INCR_MODIFIED_APPARENT_BYTES=$((INCR_MODIFIED_APPARENT_BYTES + $(stat -c%s "$f")))
     done < <(find "$DIFF_PRIMER_DIR" -type f \
         ! -name "link_*" ! -path "${PERMISSION_FIXTURE_DIR}/*" -print0)
     # Remove one of the two current hardlink names; the underlying inode/content
     # survives via link_target2.txt, extending the hardlink-tracking chain one tier.
     rm "${DIFF_PRIMER_DIR}/link_target1.txt"
+    INCR_DELETED_FILE_COUNT=1
     ln "${DIFF_PRIMER_DIR}/link_target2.txt" "${DIFF_PRIMER_DIR}/link_target3.txt"
-    dd if=/dev/urandom of="${DIFF_PRIMER_DIR}/incr_new_$(date +%s).bin" bs=1M count=2 2>/dev/null
+    local created_file
+    created_file="${DIFF_PRIMER_DIR}/incr_new_$(date +%s).bin"
+    dd if=/dev/urandom of="$created_file" bs=1M count=2 2>/dev/null
+    INCR_CREATED_FILE_COUNT=2
+    INCR_CREATED_BYTES=$(( $(stat -c%s "$created_file") + $(stat -c%s "${DIFF_PRIMER_DIR}/link_target3.txt") ))
 }
 
 verify_incr_contents() {
@@ -1219,6 +1343,8 @@ prepare_result_metrics() {
     DIFF_SIZE_GIB=$(bytes_to_gib "$DIFF_SIZE_BYTES")
     INCR_SIZE_GIB=$(bytes_to_gib "$INCR_SIZE_BYTES")
     OVERALL_ELAPSED=$(( $(date +%s) - RUN_STARTED_EPOCH ))
+    DISK_FREE_BYTES_END=$(df --output=avail -B1 "$BASE_DIR" 2>/dev/null | tail -1 | tr -d ' ' || true)
+    [[ "$DISK_FREE_BYTES_END" =~ ^[0-9]+$ ]] || DISK_FREE_BYTES_END=""
 }
 
 # Invoked indirectly from the EXIT trap via on_exit.
@@ -1270,8 +1396,42 @@ write_json_record() {
     LST_IMAGE_REPO_DIGEST="${IMAGE_REPO_DIGEST:-}" \
     LST_IMAGE_REVISION="${IMAGE_REVISION:-}" \
     LST_IMAGE_VERSION="${IMAGE_VERSION:-}" \
+    LST_DATASET_ID="${DATASET_ID:-}" \
+    LST_SLICE_SIZE="$SLICE_SIZE" \
+    LST_SLICE_SIZE_BYTES="$SLICE_SIZE_BYTES" \
+    LST_SLICE_SIZE_SOURCE="$SLICE_SIZE_SOURCE" \
+    LST_PAR2_RATIO="$PAR2_RATIO" \
+    LST_COMMAND_TIMEOUT_SECONDS="$TIMEOUT" \
+    LST_MIN_FREE_MULTIPLIER="$MIN_FREE_MULTIPLIER" \
+    LST_BITROT_ENABLED="$DO_BITROT" \
+    LST_BITROT_MODE="$BITROT_MODE" \
+    LST_BITROT_PERCENT="$BITROT_PERCENT" \
     LST_SOURCE_FILE_COUNT="${SOURCE_FILE_COUNT:-}" \
     LST_SOURCE_BYTES="${SOURCE_BYTES:-}" \
+    LST_SOURCE_ALLOCATED_BYTES="${SOURCE_ALLOCATED_BYTES:-}" \
+    LST_SOURCE_DIRECTORY_COUNT="${SOURCE_DIRECTORY_COUNT:-}" \
+    LST_SOURCE_SYMLINK_COUNT="${SOURCE_SYMLINK_COUNT:-}" \
+    LST_SOURCE_OTHER_ENTRY_COUNT="${SOURCE_OTHER_ENTRY_COUNT:-}" \
+    LST_SOURCE_HARD_LINK_GROUP_COUNT="${SOURCE_HARD_LINK_GROUP_COUNT:-}" \
+    LST_SOURCE_ZERO_FILE_COUNT="${SOURCE_ZERO_FILE_COUNT:-}" \
+    LST_SOURCE_SMALL_FILE_COUNT="${SOURCE_SMALL_FILE_COUNT:-}" \
+    LST_SOURCE_MEDIUM_FILE_COUNT="${SOURCE_MEDIUM_FILE_COUNT:-}" \
+    LST_SOURCE_LARGE_FILE_COUNT="${SOURCE_LARGE_FILE_COUNT:-}" \
+    LST_SOURCE_MAX_FILE_BYTES="${SOURCE_MAX_FILE_BYTES:-}" \
+    LST_DIFF_MODIFIED_FILE_COUNT="${DIFF_MODIFIED_FILE_COUNT:-}" \
+    LST_DIFF_MODIFIED_APPARENT_BYTES="${DIFF_MODIFIED_APPARENT_BYTES:-}" \
+    LST_DIFF_CREATED_FILE_COUNT="${DIFF_CREATED_FILE_COUNT:-}" \
+    LST_DIFF_CREATED_BYTES="${DIFF_CREATED_BYTES:-}" \
+    LST_DIFF_DELETED_FILE_COUNT="${DIFF_DELETED_FILE_COUNT:-}" \
+    LST_INCR_MODIFIED_FILE_COUNT="${INCR_MODIFIED_FILE_COUNT:-}" \
+    LST_INCR_MODIFIED_APPARENT_BYTES="${INCR_MODIFIED_APPARENT_BYTES:-}" \
+    LST_INCR_CREATED_FILE_COUNT="${INCR_CREATED_FILE_COUNT:-}" \
+    LST_INCR_CREATED_BYTES="${INCR_CREATED_BYTES:-}" \
+    LST_INCR_DELETED_FILE_COUNT="${INCR_DELETED_FILE_COUNT:-}" \
+    LST_HOST_LOGICAL_CPU_COUNT="${HOST_LOGICAL_CPU_COUNT:-}" \
+    LST_HOST_MEMORY_BYTES="${HOST_MEMORY_BYTES:-}" \
+    LST_DISK_FREE_BYTES_START="${DISK_FREE_BYTES_START:-}" \
+    LST_DISK_FREE_BYTES_END="${DISK_FREE_BYTES_END:-}" \
     LST_BACKUP_DEFINITION_SHA256="${BACKUP_DEFINITION_SHA256:-}" \
     LST_FULL_BYTES="${FULL_SIZE_BYTES:-}" \
     LST_DIFF_BYTES="${DIFF_SIZE_BYTES:-}" \
@@ -1326,6 +1486,13 @@ write_json_record() {
     LST_RESTORE_FILESYSTEM_DEVICE="$RESTORE_FILESYSTEM_DEVICE" \
     LST_BITROT_SEED="${BITROT_SEED:-}" \
     LST_BITROT_EVIDENCE_FILE="${BITROT_EVIDENCE_FILE:-}" \
+    LST_EFFECTIVE_DEFINITION_FILE="${BACKUP_D_DIR}/${DEFINITION_NAME}" \
+    LST_BACKUP_DIR="$BACKUP_DIR" \
+    LST_PAR2_DIR="$PAR2_DIR" \
+    LST_DEFINITION_NAME="$DEFINITION_NAME" \
+    LST_PHASE_JOURNAL_FILE="$PHASE_JOURNAL_FILE" \
+    LST_RESOURCE_LOG_FILE="$RSS_LOGFILE" \
+    LST_METRICS_SAMPLE_INTERVAL_SECONDS="$METRICS_SAMPLE_INTERVAL_SECONDS" \
     LST_RESULTS_DIR="$RESULTS_DIR" \
     LST_REPO_DIR="$effective_repo_dir" \
     python3 "${REPO_DIR}/scripts/large_scale_result.py"
@@ -1371,6 +1538,7 @@ on_exit() {
 
     trap - EXIT HUP INT QUIT TERM
     set +e
+    finish_current_phase
     stop_rss_monitor
     if [[ $RUN_RESULT_READY -eq 1 && $RESULT_WRITTEN -eq 0 ]]; then
         prepare_result_metrics
@@ -1414,7 +1582,7 @@ banner "dar-backup large-scale test  ${DATESTAMP}"
 
 print_run_variables
 
-CURRENT_PHASE="setup"
+set_current_phase "setup"
 write_config
 create_diff_primer
 write_backup_def
@@ -1428,7 +1596,7 @@ fi
 start_rss_monitor
 
 # ── PHASE 1 ──
-CURRENT_PHASE="full_backup"
+set_current_phase "full_backup"
 banner "Phase 1 — FULL backup"
 t0=$(date +%s)
 if docker_run_backup -F -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --darrc "$DARRC" --log-level debug; then
@@ -1448,7 +1616,7 @@ if ! FULL_BASE=$(find_archive_base "FULL"); then
 fi
 FULL_SLICES=$(count_slices "$FULL_BASE")
 
-CURRENT_PHASE="full_verification"
+set_current_phase "full_verification"
 if check_dar_integrity "$FULL_BASE" "FULL"; then FULL_ARCHIVE_STATUS="passed"; else FULL_ARCHIVE_STATUS="failed"; fi
 if check_par2_per_slice "$FULL_BASE" "$FULL_SLICES"; then FULL_PAR2_FILES_STATUS="passed"; else FULL_PAR2_FILES_STATUS="failed"; fi
 if check_par2_verify "$FULL_BASE" "FULL"; then FULL_PAR2_VERIFY_STATUS="passed"; else FULL_PAR2_VERIFY_STATUS="failed"; fi
@@ -1457,7 +1625,7 @@ if [[ $DO_BITROT -eq 1 ]]; then
 fi
 
 # ── PHASE 2 ──
-CURRENT_PHASE="diff_backup"
+set_current_phase "diff_backup"
 banner "Phase 2 — DIFF backup"
 update_diff_primer
 t0=$(date +%s)
@@ -1477,7 +1645,7 @@ if ! DIFF_BASE=$(find_archive_base "DIFF"); then
     exit 1
 fi
 DIFF_SLICES=$(count_slices "$DIFF_BASE")
-CURRENT_PHASE="diff_verification"
+set_current_phase "diff_verification"
 if check_dar_integrity "$DIFF_BASE" "DIFF"; then DIFF_ARCHIVE_STATUS="passed"; else DIFF_ARCHIVE_STATUS="failed"; fi
 if check_par2_per_slice "$DIFF_BASE" "$DIFF_SLICES"; then DIFF_PAR2_FILES_STATUS="passed"; else DIFF_PAR2_FILES_STATUS="failed"; fi
 if check_par2_verify "$DIFF_BASE" "DIFF"; then DIFF_PAR2_VERIFY_STATUS="passed"; else DIFF_PAR2_VERIFY_STATUS="failed"; fi
@@ -1487,7 +1655,7 @@ fi
 if verify_diff_contents "$FULL_BASE" "$DIFF_BASE"; then DIFF_CONTENTS_STATUS="passed"; else DIFF_CONTENTS_STATUS="failed"; fi
 
 # ── PHASE 2c ──
-CURRENT_PHASE="incr_backup"
+set_current_phase "incr_backup"
 banner "Phase 2c — INCR backup"
 info "Waiting ~2-3 minutes before mutating data for INCR (keeps primer mtimes cleanly separated in the log)..."
 sleep 150
@@ -1509,7 +1677,7 @@ if ! INCR_BASE=$(find_archive_base "INCR"); then
     exit 1
 fi
 INCR_SLICES=$(count_slices "$INCR_BASE")
-CURRENT_PHASE="incr_verification"
+set_current_phase "incr_verification"
 if check_dar_integrity "$INCR_BASE" "INCR"; then INCR_ARCHIVE_STATUS="passed"; else INCR_ARCHIVE_STATUS="failed"; fi
 if check_par2_per_slice "$INCR_BASE" "$INCR_SLICES"; then INCR_PAR2_FILES_STATUS="passed"; else INCR_PAR2_FILES_STATUS="failed"; fi
 if check_par2_verify "$INCR_BASE" "INCR"; then INCR_PAR2_VERIFY_STATUS="passed"; else INCR_PAR2_VERIFY_STATUS="failed"; fi
@@ -1521,7 +1689,7 @@ if verify_incr_contents "$DIFF_BASE" "$INCR_BASE"; then INCR_CONTENTS_STATUS="pa
 capture_primer_checksums
 
 # ── PHASE 3 ──
-CURRENT_PHASE="pitr_restore"
+set_current_phase "pitr_restore"
 banner "Phase 3a — Point-In-Time Restore Validation (latest state)"
 
 info "Cleaning restore target directory to satisfy manager safety checks..."
@@ -1595,7 +1763,7 @@ fi
 # ── PHASE 3b ──
 banner "Phase 3b — Complete Point-In-Time Restore Validation"
 if [[ $FULL_RESTORE_SELECTED -eq 1 ]]; then
-    CURRENT_PHASE="full_restore"
+    set_current_phase "full_restore"
     info "Cleaning the complete restore target..."
     if ! prepare_root_restore_target "$FULL_RESTORE_DIR"; then
         FULL_RESTORE_EXECUTION_STATUS="failed"
@@ -1687,7 +1855,7 @@ else
 fi
 
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
-CURRENT_PHASE="summary"
+set_current_phase "summary"
 banner "Summary"
 
 stop_rss_monitor
@@ -1709,7 +1877,7 @@ echo -e "Failures:      ${FAILURES:-0}"
 
 # Final status validation routing
 RUN_COMPLETED=1
-CURRENT_PHASE="completed"
+set_current_phase "completed"
 if [ "${FAILURES:-0}" -eq 0 ]; then
     echo -e "\n${GREEN}${BOLD}✓ ALL TESTS PASSED SUCCESSFULLY${RESET}\n"
     exit 0

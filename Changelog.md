@@ -6,8 +6,19 @@ This release readies workflow hardening, doc updates and more for an -rc1.
 
 Last remaining work is to see the `release` and the `weekly image-refresh` workflows work as expected.
 
+### Added
+
+- add schema-v10 high-level large-scale-test dashboard records for configuration,
+  workload, environment, major phases, artifacts, checks, and coarse telemetry,
+  using a deliberate five-second RSS sample interval rather than profiler-scale
+  collection
+- add a read-only Datasette dashboard, normalized JSONL/SQLite importer, and
+  one-command `run_metrics_dashboard.sh` launcher for exploring test history
+
 ### Fixed
 
+- render Datasette line, scatter, and bar dashboard charts with valid
+  Vega-Lite specifications instead of unsupported shorthand renderer names
 - correct unsafe host-root mount guidance, make helper source binds read-only,
   preserve the definition-directory write access required by current preflight,
   pass both UID and GID in direct Docker examples, and document a

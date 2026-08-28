@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure files selected by the constrained large-scale DEFINITION contract."""
+"""Measure workload shape selected by the large-scale DEFINITION contract."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ CACHE_TAG_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
 
 @dataclass(frozen=True)
 class SourceMeasurement:
-    """File-count and apparent-byte evidence for one source selection.
+    """High-level workload evidence for one source selection.
 
     Args:
         candidate_file_count: Unique regular files beneath effective inclusions.
@@ -31,6 +31,16 @@ class SourceMeasurement:
         pruned_bytes: Apparent bytes excluded from the measurement.
         selected_file_count: Candidate regular files retained for backup evidence.
         selected_bytes: Apparent bytes retained for backup evidence.
+        selected_allocated_bytes: Filesystem blocks allocated to selected files.
+        selected_directory_count: Selected directories, including inclusion roots.
+        selected_symlink_count: Selected symbolic links without following targets.
+        selected_other_entry_count: Selected non-file, non-directory entries.
+        selected_hard_link_group_count: Selected inodes represented by multiple paths.
+        selected_zero_file_count: Selected empty regular files.
+        selected_small_file_count: Selected files from 1 byte through 1 MiB.
+        selected_medium_file_count: Selected files over 1 MiB through 100 MiB.
+        selected_large_file_count: Selected files over 100 MiB.
+        selected_max_file_bytes: Largest selected regular file, or zero when empty.
         prune_path_count: Number of unique literal ``-P`` rules applied.
         cache_tagged_directory_count: Valid cache-tagged directories encountered.
     """
@@ -41,6 +51,16 @@ class SourceMeasurement:
     pruned_bytes: int
     selected_file_count: int
     selected_bytes: int
+    selected_allocated_bytes: int
+    selected_directory_count: int
+    selected_symlink_count: int
+    selected_other_entry_count: int
+    selected_hard_link_group_count: int
+    selected_zero_file_count: int
+    selected_small_file_count: int
+    selected_medium_file_count: int
+    selected_large_file_count: int
+    selected_max_file_bytes: int
     prune_path_count: int
     cache_tagged_directory_count: int
 
@@ -167,6 +187,32 @@ def _candidate_files(scan_root: Path) -> Sequence[Path]:
     return tuple(files)
 
 
+def _candidate_entries(scan_root: Path) -> Sequence[Path]:
+    """Collect lexical filesystem entries beneath one inclusion root.
+
+    Args:
+        scan_root: Existing literal inclusion file, link, or directory.
+
+    Returns:
+        Entries without following symbolic-link targets.
+
+    Raises:
+        OSError: If an entry cannot be inspected or traversal fails.
+    """
+    root_stat = scan_root.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode):
+        return (scan_root,)
+
+    entries: list[Path] = [scan_root]
+    for directory, directory_names, filenames in os.walk(
+        scan_root, followlinks=False, onerror=_raise_walk_error
+    ):
+        directory_path = Path(directory)
+        entries.extend(directory_path / name for name in directory_names)
+        entries.extend(directory_path / name for name in filenames)
+    return tuple(entries)
+
+
 def _validate_prune_intersections(
     prune_paths: Sequence[Path], user_include_paths: Sequence[Path]
 ) -> None:
@@ -234,8 +280,10 @@ def measure_source(
 
     scan_roots = _minimal_scan_roots((*user_includes, required_include))
     candidate_paths: set[Path] = set()
+    candidate_entries: set[Path] = set()
     for scan_root in scan_roots:
         candidate_paths.update(_candidate_files(scan_root))
+        candidate_entries.update(_candidate_entries(scan_root))
 
     cache_roots: set[Path] = set()
     if selection.cache_directory_tagging:
@@ -254,6 +302,17 @@ def measure_source(
     pruned_bytes = 0
     selected_file_count = 0
     selected_bytes = 0
+    selected_allocated_bytes = 0
+    selected_directory_count = 0
+    selected_symlink_count = 0
+    selected_other_entry_count = 0
+    selected_zero_file_count = 0
+    selected_small_file_count = 0
+    selected_medium_file_count = 0
+    selected_large_file_count = 0
+    selected_max_file_bytes = 0
+    selected_allocated_inodes: set[tuple[int, int]] = set()
+    selected_link_inodes: dict[tuple[int, int], int] = {}
     required_file_count = 0
     required_selected_count = 0
     for candidate in sorted(candidate_paths, key=str):
@@ -272,8 +331,39 @@ def measure_source(
             continue
         selected_file_count += 1
         selected_bytes += file_size
+        candidate_stat = candidate.lstat()
+        inode_key = (candidate_stat.st_dev, candidate_stat.st_ino)
+        if inode_key not in selected_allocated_inodes:
+            selected_allocated_bytes += candidate_stat.st_blocks * 512
+            selected_allocated_inodes.add(inode_key)
+        selected_max_file_bytes = max(selected_max_file_bytes, file_size)
+        if file_size == 0:
+            selected_zero_file_count += 1
+        elif file_size <= 1024**2:
+            selected_small_file_count += 1
+        elif file_size <= 100 * 1024**2:
+            selected_medium_file_count += 1
+        else:
+            selected_large_file_count += 1
+        if candidate_stat.st_nlink > 1:
+            selected_link_inodes[inode_key] = selected_link_inodes.get(inode_key, 0) + 1
         if required_candidate:
             required_selected_count += 1
+
+    for candidate in sorted(candidate_entries, key=str):
+        cache_excluded = any(_contains(candidate, cache) for cache in cache_roots)
+        explicitly_pruned = any(_contains(candidate, prune) for prune in prune_paths)
+        required_candidate = _contains(candidate, required_include)
+        required_reincluded = selection.ordered_masks and required_candidate
+        if cache_excluded or (explicitly_pruned and not required_reincluded):
+            continue
+        candidate_stat = candidate.lstat()
+        if stat.S_ISDIR(candidate_stat.st_mode):
+            selected_directory_count += 1
+        elif stat.S_ISLNK(candidate_stat.st_mode):
+            selected_symlink_count += 1
+        elif not stat.S_ISREG(candidate_stat.st_mode):
+            selected_other_entry_count += 1
 
     if required_file_count == 0:
         raise ValueError(
@@ -292,6 +382,18 @@ def measure_source(
         pruned_bytes=pruned_bytes,
         selected_file_count=selected_file_count,
         selected_bytes=selected_bytes,
+        selected_allocated_bytes=selected_allocated_bytes,
+        selected_directory_count=selected_directory_count,
+        selected_symlink_count=selected_symlink_count,
+        selected_other_entry_count=selected_other_entry_count,
+        selected_hard_link_group_count=sum(
+            1 for path_count in selected_link_inodes.values() if path_count > 1
+        ),
+        selected_zero_file_count=selected_zero_file_count,
+        selected_small_file_count=selected_small_file_count,
+        selected_medium_file_count=selected_medium_file_count,
+        selected_large_file_count=selected_large_file_count,
+        selected_max_file_bytes=selected_max_file_bytes,
         prune_path_count=len(prune_paths),
         cache_tagged_directory_count=len(cache_roots),
     )

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# dar-backup image with modern DAR (2.7.18) built from source.
+# `dar-backup` image with a modern DAR built from source.
 # Based on Ubuntu 24.04 (slim, multi-stage).
 ARG UBUNTU_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
 
