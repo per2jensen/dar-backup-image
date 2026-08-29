@@ -16,6 +16,11 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 - Copyright and license info added
 
+### Fixed
+
+- report Grype vulnerability severities in build metadata instead of SARIF
+  presentation levels, and correct retained scan-backed history records
+
 ## 0.9.1 - 2026-08-26
 
 This release readies workflow hardening, doc updates and more for an -rc1.

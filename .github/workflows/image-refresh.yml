@@ -169,6 +169,7 @@ jobs:
           python3 -m pytest -q \
             tests/test_commit_refresh_housekeeping.py \
             tests/test_finalize_refresh_image.py \
+            tests/test_grype_sarif_summary.py \
             tests/test_publish_image.py \
             tests/test_select_refresh_source.py \
             tests/test_validate_image_version.py \
