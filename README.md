@@ -1204,7 +1204,8 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 ### Version 1.1
 
 - Integrate DAR 2.8
-- Investigate and document compatibility between 1.0 and 1.1 backup archives and restore environments (1.0 uses dar-2.7, 1.1 uses dar-2.8)
+- Use Ubuntu 26.04 instead of 24.04 as base image and for local development
+- Investigate and document compatibility between 1.0 and 1.1 backup archives and restore environments (1.0 uses ubuntu 24.04 / dar-2.7, 1.1 will use ubuntu 26.04 / dar-2.8)
 
 ### Version 1.2
 
