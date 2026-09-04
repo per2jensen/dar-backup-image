@@ -332,7 +332,7 @@ jobs:
 
       - name: Upload SARIF
         if: ${{ always() && hashFiles('grype.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@v4.37.3
+        uses: github/codeql-action/upload-sarif@v4.37.9
         with:
           sarif_file: grype.sarif
 
