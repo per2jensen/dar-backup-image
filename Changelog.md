@@ -12,7 +12,7 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 # dar-backup-image Changelog
 
-## 1.0.0-rc1 - not released
+## 1.0.0-rc1 - 2026-09-06
 
 - Copyright and license info added
 
