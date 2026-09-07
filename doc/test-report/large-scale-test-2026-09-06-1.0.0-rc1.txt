@@ -1,0 +1,213 @@
+══════════════════════════════════════════
+  dar-backup large-scale test  2026-09-06_14-00-46
+══════════════════════════════════════════
+
+══════════════════════════════════════════
+  Run configuration
+══════════════════════════════════════════
+  DATESTAMP              = 2026-09-06_14-00-46
+  DATE_OF_RUN            = 2026-09-06
+  SCRIPT_VERSION         = 24
+  RUN_STARTED_EPOCH      = 1788696046
+  IMAGE                  = per2jensen/dar-backup:1.0.0-rc1
+  DEFINITION_ROOT        = /data
+  MOUNT_ROOT             = /data
+  BASE_DIR               = /data/tmp/image-large-scale-test
+  DEFINITION_NAME        = large-scale-test
+  DEFINITION_CONTENT     = -R /data
+-z1
+-am
+--cache-directory-tagging
+-g SteamLibrary
+  SLICE_SIZE             = 20G
+  SLICE_SIZE_BYTES       = 21474836480
+  SLICE_SIZE_SOURCE      = fallback
+  PAR2_RATIO             = 5
+  DO_BITROT              = 1
+  BITROT_SEED            = 3755890067982360212
+  BITROT_MODE            = edges
+  BITROT_PERCENT         = 2
+  BITROT_BUFFER_BYTES    = 1048576
+  ADVERTISE_REQUESTED    = 1
+  TEST_NAME              = Real life SteamLibrary
+  DATASET_ID             = 
+  ADVERTISE_CLASS        = 1.0.0-rc1
+  KEEP                   = 0
+  SMOKETEST              = 0
+  TIMEOUT                = 86400
+  MIN_FREE_MULTIPLIER    = 2
+  METRICS_SAMPLE_INTERVAL_SECONDS = 5
+  FULL_RESTORE_MODE      = forced
+  FULL_RESTORE_THRESHOLD_GIB = 25
+  FULL_RESTORE_THRESHOLD_BYTES = 26843545600
+  RESTORE_METADATA_PROFILE = portable-posix-v1
+  SOURCE_FILESYSTEM_TYPE = zfs
+  RESTORE_FILESYSTEM_TYPE = zfs
+  SOURCE_FILESYSTEM_DEVICE = 45
+  RESTORE_FILESYSTEM_DEVICE = 45
+  OWNERSHIP_FIXTURE_GID  = 4
+  DAR_BACKUP_VERSION     = 1.1.11
+  GIT_COMMIT             = 73f2dd3
+  HARNESS_GIT_COMMIT     = 73f2dd357944bf3f60fd189ddd4a0355d01464fd
+  HARNESS_GIT_DIRTY      = 1
+  REPO_DIR               = /home/pj/git/dar-backup-image
+  IMAGE_ID               = sha256:1fd037b1eac721023aaf62c96ad46b0e72ffafb607fa716bf4433213d246f46d
+  IMAGE_REPO_DIGEST      = per2jensen/dar-backup@sha256:4a7e54fca3cd1a1c8fc935f868eed8082322b8ac39bf5cef76cd1c33500f5fe3
+  IMAGE_REVISION         = 9a27ba88a11ae340c9ea95ec72e6271269c5ff2e
+  IMAGE_VERSION          = 1.0.0-rc1
+  DAR_VERSION            = 2.7.21
+  PAR2_VERSION           = par2cmdline version 0.8.1
+  PYTHON_VERSION         = Python 3.12.3
+  OS_DESC                = Ubuntu 24.04.4 LTS
+  KERNEL                 = 7.0.0-30-generic
+  RUN_DIR                = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46
+  BACKUP_DIR             = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/backups
+  PAR2_DIR               = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/par2
+  RESTORE_DIR            = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/restore
+  FULL_RESTORE_DIR       = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/full-restore
+  BACKUP_D_DIR           = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/backup.d
+  RESULTS_DIR            = /data/tmp/image-large-scale-test/results
+  METRICS_DB             = /data/tmp/image-large-scale-test/results/dar-backup-metrics.db
+  LOGFILE                = /data/tmp/image-large-scale-test/results/large-scale-test-2026-09-06_14-00-46.dar-backup.log
+  SUMMARY                = /data/tmp/image-large-scale-test/results/summary-2026-09-06_14-00-46.txt
+  CONFIG_FILE            = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/dar-backup.conf
+  DARRC                  = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/.darrc
+  RSS_LOGFILE            = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/rss.log
+  CID_FILE               = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/current-container.cid
+  PHASE_STATE_FILE       = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/current-phase
+  PHASE_JOURNAL_FILE     = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/phase-journal.tsv
+  BITROT_EVIDENCE_FILE   = /data/tmp/image-large-scale-test/runs/2026-09-06_14-00-46/bitrot-evidence.json
+  DIFF_PRIMER_DIR        = /data/tmp/image-large-scale-test/diff-primer
+  PERMISSION_FIXTURE_DIR = /data/tmp/image-large-scale-test/diff-primer/permission-fixtures
+  INFO  Creating diff-primer data...
+  INFO  Source selection: 219439 file(s), ~326.95 GiB selected from 219439 candidate file(s), ~326.95 GiB.
+  INFO  Source pruning: 0 file(s), ~0.00 GiB excluded by 0 literal -P path(s) and 0 cache-tagged subtree(s).
+  INFO  Complete restore forced for 351054866296 source byte(s); automatic threshold is ignored.
+  INFO  Disk-space preflight OK: source ~326.95 GiB, need ~653.89 GiB (2x), have ~1680.03 GiB free under '/data/tmp/image-large-scale-test'.
+  INFO  Using .darrc bundled in per2jensen/dar-backup:1.0.0-rc1
+  PASS  manager --create-db succeeded
+
+══════════════════════════════════════════
+  Phase 1 — FULL backup
+══════════════════════════════════════════
+  PASS  FULL backup completed in 15322s
+  INFO  Running dar -t on FULL...
+  PASS  dar -t passed: FULL
+  PASS  Manifest present
+  PASS  par2 verify passed all slices: FULL
+
+══════════════════════════════════════════
+  Bitrot test on large-scale-test_FULL_2026-09-06
+══════════════════════════════════════════
+  INFO  Injecting bitrot mode=edges, seed=3755890067982360212, segments=2...
+  INFO  Corrupting large-scale-test_FULL_2026-09-06.1.dar: region=0, offset=0, bytes=214748364, slice_bytes=21474836480
+  INFO  Corrupting large-scale-test_FULL_2026-09-06.14.dar: region=1, offset=13066709202, bytes=131986961, slice_bytes=13198696163
+  PASS  dar -t correctly detected corruption
+  INFO  Repairing 2 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 2 affected slice(s)
+  PASS  dar -t passed after repair
+
+══════════════════════════════════════════
+  Phase 2 — DIFF backup
+══════════════════════════════════════════
+  INFO  Updating diff-primer data...
+  PASS  DIFF backup completed in 29s
+  INFO  Running dar -t on DIFF...
+  PASS  dar -t passed: DIFF
+  PASS  Manifest present
+  PASS  par2 verify passed all slices: DIFF
+
+══════════════════════════════════════════
+  Bitrot test on large-scale-test_DIFF_2026-09-06
+══════════════════════════════════════════
+  INFO  Injecting bitrot mode=edges, seed=3755890067982360212, segments=2...
+  INFO  Corrupting large-scale-test_DIFF_2026-09-06.1.dar: region=0, offset=0, bytes=3415266, slice_bytes=341526609
+  INFO  Corrupting large-scale-test_DIFF_2026-09-06.1.dar: region=1, offset=338111343, bytes=3415266, slice_bytes=341526609
+  PASS  dar -t correctly detected corruption
+  INFO  Repairing 1 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 1 affected slice(s)
+  PASS  dar -t passed after repair
+
+══════════════════════════════════════════
+  Phase 2b — DIFF contents verification
+══════════════════════════════════════════
+  PASS  Modified file count OK (118)
+  PASS  New file count OK
+
+══════════════════════════════════════════
+  Phase 2c — INCR backup
+══════════════════════════════════════════
+  INFO  Waiting ~2-3 minutes before mutating data for INCR (keeps primer mtimes cleanly separated in the log)...
+  INFO  Updating diff-primer data for INCR...
+  PASS  INCR backup completed in 28s
+  INFO  Running dar -t on INCR...
+  PASS  dar -t passed: INCR
+  PASS  Manifest present
+  PASS  par2 verify passed all slices: INCR
+
+══════════════════════════════════════════
+  Bitrot test on large-scale-test_INCR_2026-09-06
+══════════════════════════════════════════
+  INFO  Injecting bitrot mode=edges, seed=3755890067982360212, segments=2...
+  INFO  Corrupting large-scale-test_INCR_2026-09-06.1.dar: region=0, offset=0, bytes=3436240, slice_bytes=343624077
+  INFO  Corrupting large-scale-test_INCR_2026-09-06.1.dar: region=1, offset=340187837, bytes=3436240, slice_bytes=343624077
+  PASS  dar -t correctly detected corruption
+  INFO  Repairing 1 affected slice(s) with PAR2...
+  PASS  par2 repair succeeded for 1 affected slice(s)
+  PASS  dar -t passed after repair
+
+══════════════════════════════════════════
+  Phase 2c — INCR contents verification
+══════════════════════════════════════════
+  PASS  Modified file count OK (119)
+  PASS  New file count OK
+  INFO  Capturing sha256 checksums of current primer files for restore verification...
+
+══════════════════════════════════════════
+  Phase 3a — Point-In-Time Restore Validation (latest state)
+══════════════════════════════════════════
+  INFO  Cleaning restore target directory to satisfy manager safety checks...
+  INFO  Invoking manager to process PITR extraction for diff-primer data...
+  PASS  Restore sequence completed execution via manager
+  PASS  link_original.txt correctly absent from latest-state restore
+  PASS  link_target1.txt correctly absent from latest-state restore
+  PASS  Hard Link Inodes match (69464)
+  PASS  INCR-tier new file present in latest-state restore
+
+══════════════════════════════════════════
+  Phase 3a — Content checksum verification
+══════════════════════════════════════════
+  PASS  All 125 restored file(s) match source sha256 checksums
+
+══════════════════════════════════════════
+  Phase 3a — POSIX permission verification
+══════════════════════════════════════════
+  PASS  All 128 restored non-symlink entry mode(s) match the source
+
+══════════════════════════════════════════
+  Phase 3b — Complete Point-In-Time Restore Validation
+══════════════════════════════════════════
+  INFO  Cleaning the complete restore target...
+  INFO  Restoring the complete archive root via manager...
+  PASS  Complete archive-root restore executed successfully
+  PASS  All 219441 restored regular-file path(s) (351059060752 byte(s)) and 267364 portable metadata entry set(s) match the live source
+
+══════════════════════════════════════════
+  Summary
+══════════════════════════════════════════
+dar-backup test pass: 2026-09-06_14-00-46
+FULL elapsed: 15322s (~272.29 GiB)
+DIFF elapsed: 29s (~0.32 GiB)
+INCR elapsed: 28s (~0.32 GiB)
+Complete restore: passed (forced_by_user)
+Restore metadata: passed (portable-posix-v1, zfs, same filesystem st_dev=45)
+Peak Engine Memory Consumption:
+  ├── dar-backup : 91.5 MiB
+  ├── dar backend: 434.1 MiB
+  ├── par2 engine: 160.5 MiB
+  └── db manager : 41.3 MiB
+Failures:      0
+
+✓ ALL TESTS PASSED SUCCESSFULLY
+
+
