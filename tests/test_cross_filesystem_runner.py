@@ -115,6 +115,25 @@ def test_runner_home_source_overlapping_restore_fails_before_docker() -> None:
     assert "overlaps the home restore base" in result.stderr
 
 
+def test_home_source_argument_below_home_root_is_accepted() -> None:
+    """A safe home selection passes host-independent validation."""
+    result = _run_function(
+        "validate_home_source_argument", "/home/pj/Documents"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_home_source_argument_traversing_outside_home_root_is_rejected() -> None:
+    """Path traversal cannot escape the configured home root."""
+    result = _run_function(
+        "validate_home_source_argument", "/home/pj/../../etc"
+    )
+
+    assert result.returncode != 0
+    assert "must be below /home/pj" in result.stderr
+
+
 def test_runner_invalid_dataset_id_fails_before_docker() -> None:
     """Personal paths cannot be placed in the opaque dataset identifier."""
     result = _run("--dataset-id", "/home/pj/Documents")

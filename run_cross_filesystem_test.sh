@@ -181,6 +181,42 @@ path_device() {
     stat -c %d -- "$1"
 }
 
+validate_home_source_argument() {
+    [[ $# -eq 1 ]] || { error "validate_home_source_argument requires exactly one path"; return 2; }
+    local source_path="$1"
+    local normalized_source normalized_home normalized_restore normalized_base
+    [[ "$source_path" == /* ]] || { error "--home-source must be absolute"; return 2; }
+    [[ "$source_path" != *$'\n'* && "$source_path" != *$'\r'* ]] || { error "--home-source must not contain line breaks"; return 2; }
+    [[ ! -L "$source_path" ]] || { error "a top-level --home-source must not be a symbolic link: ${source_path}"; return 2; }
+
+    # Use canonicalized paths without requiring them to exist so unsafe arguments
+    # fail before host-specific identity and filesystem checks.
+    normalized_home="$(readlink -m -- "$HOME_ROOT")"
+    normalized_source="$(readlink -m -- "$source_path")"
+    [[ "$normalized_source" != "$normalized_home" && "$normalized_source" == "$normalized_home"/* ]] || { error "--home-source must be below ${normalized_home}, not the whole home directory"; return 2; }
+
+    normalized_restore="$(readlink -m -- "$HOME_RESTORE_BASE")"
+    if [[ "$normalized_restore" == "$normalized_source" || "$normalized_restore" == "$normalized_source"/* || "$normalized_source" == "$normalized_restore"/* ]]; then
+        error "--home-source overlaps the home restore base"
+        return 2
+    fi
+
+    normalized_base="$(readlink -m -- "$BASE_DIR")"
+    if [[ "$normalized_base" == "$normalized_source" || "$normalized_base" == "$normalized_source"/* || "$normalized_source" == "$normalized_base"/* ]]; then
+        error "--home-source overlaps the archive base"
+        return 2
+    fi
+    return 0
+}
+
+validate_home_source_arguments() {
+    local source_path
+    for source_path in "${HOME_SOURCES[@]}"; do
+        validate_home_source_argument "$source_path" || return $?
+    done
+    return 0
+}
+
 validate_home_sources() {
     local source_path resolved_source resolved_home resolved_restore resolved_base existing
     local -a candidates=()
@@ -871,6 +907,9 @@ main() {
     for command_name in python3 findmnt stat readlink getent id sha256sum awk find grep sort wc mktemp; do
         command -v "$command_name" >/dev/null || { error "required command is unavailable: ${command_name}"; return 1; }
     done
+    if [[ "$SCENARIO" == "home-to-data" || "$SCENARIO" == "both" ]]; then
+        validate_home_source_arguments
+    fi
     resolve_identity
     if [[ "$SCENARIO" == "home-to-data" || "$SCENARIO" == "both" ]]; then
         validate_home_sources
