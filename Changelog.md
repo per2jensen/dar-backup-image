@@ -12,6 +12,14 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 # dar-backup-image Changelog
 
+## 1.0.0 - not released
+
+### Added
+
+- add an independent Btrfs/ZFS FULL-backup and restore harness with selectable
+  root or `pj` execution, portable metadata comparison, and durable local JSONL
+  result history
+
 ## 1.0.0-rc1 - 2026-09-06
 
 - Copyright and license info added

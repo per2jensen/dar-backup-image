@@ -717,6 +717,11 @@ The tracked large-scale history can also be explored through the read-only
 [Datasette metrics dashboard](doc/metrics-dashboard.md). From a checkout, run
 `./run_metrics_dashboard.sh` and open the localhost URL printed by the launcher.
 
+For the host layout where `/home` is Btrfs and `/data` is ZFS, the
+[cross-filesystem test guide](doc/cross-filesystem-test.md) covers FULL backup,
+PAR2 verification, restore comparison in both directions, non-root permission
+testing, and its separate local JSONL history.
+
 ## Usage Example
 
 Determine whether you want to build an image yourself or use one from Docker
