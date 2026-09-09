@@ -48,7 +48,7 @@ For long-term archival use, save a **specific versioned image** rather than rely
 
 A helper script, [`scripts/save-dar-backup-image.sh`](scripts/save-dar-backup-image.sh), is provided for this purpose. It selects the highest-numbered release or refresh in [`doc/build-history.json`](doc/build-history.json) and saves that versioned image as a compressed tar archive. Its current integrity limitations are documented in [Preserve the restore environment with your archives](#preserve-the-restore-environment-with-your-archives).
 
-The image also works well as an everyday backup runner for cron jobs, systemd timers, CI pipelines, and FUSE-based storage. Its default entrypoint is `dar-backup`; `dar`, `par2`, or an interactive shell can be invoked directly by overriding the entrypoint.
+The image also works well as an everyday backup runner for cron jobs, systemd timers, and CI pipelines. Its default entrypoint is `dar-backup`; `dar`, `par2`, or an interactive shell can be invoked directly by overriding the entrypoint.
 
 At its core, `dar-backup` wraps `dar` and PAR2 for reliable FULL, DIFF, and INCR backups. It validates archives, performs restore tests, manages catalog databases, and can generate redundancy files to protect archives against bit rot.
 
@@ -109,7 +109,6 @@ The image contains man pages for `dar` and `par2` which make the image self-docu
 - **Self-documenting**, all `dar-backup`, `dar-backup-image`, `dar` and `par2` documentation is included and easily discoverable by future users
 - **Versioned and auditable**, released images are tested, scanned, signed, and accompanied by an SBOM
 - **Stateless and portable**, archive the image itself and move it with your backup sets
-- **FUSE-friendly**, works without root and is suited to user-space mounted storage
 - **Built-in configuration**, automatically loads `/etc/dar-backup/dar-backup.conf` unless overridden
 - **Ready for automation**, usable from cron, systemd timers, and CI pipelines
 
@@ -514,6 +513,17 @@ The script resolves its directory paths in the following priority order:
 3. If `WORKDIR` is unset or empty, the script exits before creating directories or running Docker.
 
 This allows full flexibility: you can set `WORKDIR` once for a standard layout, or override specific directories individually.
+
+### FUSE-backed Source Directories
+
+The Docker runner does not claim support for FUSE-backed host paths. Such paths
+are not covered by the integration tests and may be inaccessible to the Docker
+daemon when it prepares a bind mount. This happens before the container starts,
+so `RUN_AS_UID` and `RUN_AS_GID` do not grant the daemon access.
+
+This limitation belongs to the Docker bind-mount boundary; it does not imply the
+same limitation when running the PyPI `dar-backup` application directly on the
+host.
 
 ### UID and GID Behavior
 

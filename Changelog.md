@@ -19,6 +19,13 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 - add an independent Btrfs/ZFS FULL-backup and restore harness with selectable
   root or `pj` execution, portable metadata comparison, and durable local JSONL
   result history
+- add experimental Ubuntu 24.04 field notes for accessing a nested pCloud FUSE
+  mount through an explicit, read-only parent bind
+
+### Changed
+
+- remove unverified FUSE-friendly claims and document that Docker bind mounts
+  are prepared before the container's selected UID and GID take effect
 
 ## 1.0.0-rc1 - 2026-09-06
 

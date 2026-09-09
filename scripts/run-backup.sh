@@ -35,6 +35,9 @@
 #
 #    - Override any of these via:
 #        DAR_BACKUP_DIR, DAR_BACKUP_D_DIR, DAR_BACKUP_DATA_DIR, DAR_BACKUP_RESTORE_DIR
+#    - FUSE-backed host paths are not covered by the integration tests and may
+#      be inaccessible to the Docker daemon. The daemon prepares bind mounts
+#      before the container's RUN_AS_UID and RUN_AS_GID take effect.
 #
 # 3. UID/GID handling:
 #    - Defaults to your current UID/GID via `id -u` and `id -g`.
