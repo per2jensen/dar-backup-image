@@ -161,7 +161,7 @@ jobs:
         run: sudo python3 scripts/anchore_tools.py install --bin-dir /usr/local/bin
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Test orchestration publisher
         working-directory: orchestration
@@ -271,7 +271,7 @@ jobs:
 
       - name: Upload Grype SARIF to GitHub Security tab
         if: ${{ always() && env.SARIF_FILE != '' && hashFiles(format('source/{0}', env.SARIF_FILE)) != '' }}
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: source/${{ env.SARIF_FILE }}
           token: ${{ secrets.GITHUB_TOKEN }}
