@@ -10,10 +10,9 @@
 #
 # Usage examples:
 # ---------------
-# make dev-clean dev
+# make dev-nuke
+# make IMAGE=dar-backup:dev test-nobuild
 # make FINAL_VERSION=0.9.9-rc1 final
-# make FINAL_VERSION=0.9.9-rc1 dry-run-release
-# make FINAL_VERSION=0.9.9-rc1 release
 
 
 
@@ -29,9 +28,9 @@ FINAL_VERSION ?= dev
 IMAGE_VERSION_FILE ?= IMAGE_VERSION
 
 UBUNTU_VERSION ?= 24.04
-UBUNTU_DIGEST := $(shell docker pull ubuntu:$(UBUNTU_VERSION) -q >/dev/null 2>&1 && \
-    docker inspect ubuntu:$(UBUNTU_VERSION) \
-    --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
+UBUNTU_DIGEST ?=
+UBUNTU_DIGEST_FILE ?= build/ubuntu-digest
+IMAGE_LICENSE_SHA256 ?= 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986
 
 
 DAR_BACKUP_VERSION ?= $(shell cat DAR_BACKUP_VERSION)
@@ -51,6 +50,7 @@ DOCKERHUB_REPO = per2jensen/dar-backup
 
 
 IMAGE_REF        ?= $(FINAL_IMAGE_NAME):$(FINAL_VERSION)
+IMAGE            ?= dar-backup:dev
 GRYPE_FAIL_ON    ?= High
 GRYPE_DB_AUTO_UPDATE ?= false
 GRYPE_CACHE_DIR  ?= $(HOME)/.cache/grype
@@ -74,7 +74,6 @@ BUILD_LOG_PATH := $(BUILD_LOG_DIR)/$(BUILD_LOG_FILE)
 LABEL_ARGS = \
   --label org.opencontainers.image.base.name=ubuntu \
   --label org.opencontainers.image.base.version="$(UBUNTU_VERSION)" \
-  --label org.opencontainers.image.base.digest="$(UBUNTU_DIGEST)" \
   --label org.opencontainers.image.source="https://github.com/per2jensen/dar-backup-image" \
   --label org.opencontainers.image.created="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --label org.opencontainers.image.revision="$(shell git rev-parse HEAD)" \
@@ -99,10 +98,10 @@ LABEL_ARGS = \
 # ================================
 
 .PHONY: all all-dev dev-rebuild final final-noscan refresh-final-noscan _finalize-image release clean clean-all push tag login dev dev-clean labels help \
-	check_version check-release-image-version check-refresh-image-version test test-integration all-dev dry-run-release dry-run-release-internal dry-run-cleanup \
+	check_version check-release-image-version check-refresh-image-version test test-integration all-dev \
 	check-docker-creds test-log-pushed-build-json sbom-sarif sbom-sarif-docker install-tools \
 	grype-db-status grype-db-update scan-final verify-labels validate-dar-backup-install \
-	check-publish-install-source check-anchore-tool-versions
+	check-publish-install-source check-anchore-tool-versions verify-dev-image
 
 
 check_version:
@@ -267,16 +266,10 @@ base:
 	@echo "Skipping separate base image build (single Dockerfile in use)"
 
 
-release: check-release-image-version check-docker-creds final verify-labels verify-cli-version login push log-pushed-build-json
-	@echo "✅ Release complete for: $(DOCKERHUB_REPO):$(FINAL_VERSION)"
-	@echo "🏷️ Tagging release as v$(FINAL_VERSION)..."
-	@if git rev-parse "v$(FINAL_VERSION)" >/dev/null 2>&1; then \
-		echo "🔁 Git tag 'v$(FINAL_VERSION)' already exists — skipping tag creation."; \
-	else \
-		git tag -a "v$(FINAL_VERSION)" -m "Release version v$(FINAL_VERSION)"; \
-		git push origin "v$(FINAL_VERSION)"; \
-		echo "✅ Git tag 'v$(FINAL_VERSION)' created and pushed."; \
-	fi
+release:
+	@echo "ERROR: remote releases must be published through the Manual Docker Release workflow" >&2
+	@echo "Optional local finalization and scanning remain available through 'make final'." >&2
+	@exit 2
 
 # ================================
 # Dev build
@@ -298,10 +291,20 @@ dev-clean: check_version
 # and includes LABEL_ARGS so the nuked image is labeled consistently with 'make dev'.
 dev-nuke: validate-dar-backup-install
 	@echo "🧨 Full nuke: Pruning ALL Docker build caches and images (this may take a while)..."
-	-$(DOCKER) builder prune -a -f
-	-$(DOCKER) image prune -a -f
+	@if ! $(DOCKER) builder prune -a -f; then \
+	  echo "ERROR: unable to prune Docker build cache; refusing to claim a clean build" >&2; \
+	  exit 2; \
+	fi
+	@if ! $(DOCKER) image prune -a -f; then \
+	  echo "ERROR: unable to prune unused Docker images; refusing to claim a clean build" >&2; \
+	  exit 2; \
+	fi
 	@echo "Rebuilding image from scratch..."
 	@set -euo pipefail; \
+	mkdir -p "$(dir $(UBUNTU_DIGEST_FILE))"; \
+	rm -f "$(UBUNTU_DIGEST_FILE)"; \
+	ubuntu_digest="$$(scripts/resolve_ubuntu_digest.sh \
+	  "$(DOCKER)" "ubuntu:$(UBUNTU_VERSION)" "$(UBUNTU_DIGEST)")"; \
 	package_sha="not-applicable"; \
 	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
 	  package_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
@@ -315,19 +318,26 @@ dev-nuke: validate-dar-backup-install
 	  --build-arg DAR_BACKUP_LOCAL_WHEEL="$(DAR_BACKUP_LOCAL_WHEEL)" \
 	  --build-arg DAR_BACKUP_LOCAL_WHEEL_SHA256="$$package_sha" \
 	  --build-arg DAR_VERSION="$(DAR_VERSION)" \
-	  --build-arg UBUNTU_DIGEST="$(UBUNTU_DIGEST)" \
+	  --build-arg UBUNTU_DIGEST="$$ubuntu_digest" \
 	  $(LABEL_ARGS) \
+	  --label org.opencontainers.image.base.digest="$$ubuntu_digest" \
 	  --label org.dar-backup.wheel.sha256="$$package_sha" \
-	  -t dar-backup:$(FINAL_VERSION) .
+	  -t dar-backup:$(FINAL_VERSION) .; \
+	printf '%s\n' "$$ubuntu_digest" > "$(UBUNTU_DIGEST_FILE)"
 
 
-dev-rebuild: dev-nuke dev
+dev-rebuild:
+	@$(MAKE) --no-print-directory dev-nuke
 
 
 # Dev image build (always produce a fully labeled dar-backup:dev)
 dev: validate validate-dar-backup-install
 	@echo "Building development image (cached & labeled): $(FINAL_VERSION)"
 	@set -euo pipefail; \
+	mkdir -p "$(dir $(UBUNTU_DIGEST_FILE))"; \
+	rm -f "$(UBUNTU_DIGEST_FILE)"; \
+	ubuntu_digest="$$(scripts/resolve_ubuntu_digest.sh \
+	  "$(DOCKER)" "ubuntu:$(UBUNTU_VERSION)" "$(UBUNTU_DIGEST)")"; \
 	package_sha="not-applicable"; \
 	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
 	  package_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
@@ -342,11 +352,13 @@ dev: validate validate-dar-backup-install
 	  --build-arg DAR_BACKUP_INSTALL_SOURCE="$(DAR_BACKUP_INSTALL_SOURCE)" \
 	  --build-arg DAR_BACKUP_LOCAL_WHEEL="$(DAR_BACKUP_LOCAL_WHEEL)" \
 	  --build-arg DAR_BACKUP_LOCAL_WHEEL_SHA256="$$package_sha" \
-	  --build-arg UBUNTU_DIGEST="$(UBUNTU_DIGEST)" \
+	  --build-arg UBUNTU_DIGEST="$$ubuntu_digest" \
 	  $(LABEL_ARGS) \
+	  --label org.opencontainers.image.base.digest="$$ubuntu_digest" \
 	  --label org.dar-backup.wheel.sha256="$$package_sha" \
 	  -t dar-backup:dev \
-	  .
+	  .; \
+	printf '%s\n' "$$ubuntu_digest" > "$(UBUNTU_DIGEST_FILE)"
 
 
 
@@ -383,19 +395,30 @@ refresh-final-noscan: check-refresh-image-version
 # Internal shared implementation. Publication entry points above must complete
 # their policy guard before invoking this target.
 _finalize-image: $(if $(strip $(BASE_VERSION)),check-refresh-image-version,check-release-image-version)
-	@echo "🔎 Ensuring dar-backup:dev exists and is fresh…"
+	@echo "🔎 Verifying dar-backup:dev provenance and component versions…"
 	@if ! $(DOCKER) image inspect dar-backup:dev >/dev/null 2>&1; then \
 	  echo "❌ dar-backup:dev not found — run 'make dev' first"; exit 1; \
 	fi
+	@$(MAKE) --no-print-directory verify-dev-image
 
 	@echo "🧩 Creating release image with corrected labels (no rebuild)…"
-	@set -e; \
+	@set -euo pipefail; \
+	CID=""; \
+	cleanup_container() { \
+	  if [ -n "$$CID" ]; then \
+	    $(DOCKER) rm -f "$$CID" >/dev/null 2>&1 \
+	      || echo "WARNING: unable to remove temporary container $$CID" >&2; \
+	  fi; \
+	}; \
+	trap cleanup_container EXIT; \
 	CID="$$( $(DOCKER) create dar-backup:dev )"; \
 	$(DOCKER) commit \
 	  --change 'LABEL org.opencontainers.image.version=$(FINAL_VERSION)' \
 	  --change 'LABEL org.opencontainers.image.ref.name=$(DOCKERHUB_REPO):$(FINAL_VERSION)' \
-	  $$CID dar-backup:$(FINAL_VERSION) >/dev/null; \
-	$(DOCKER) rm $$CID >/dev/null
+	  "$$CID" dar-backup:$(FINAL_VERSION) >/dev/null; \
+	$(DOCKER) rm "$$CID" >/dev/null; \
+	CID=""; \
+	trap - EXIT
 
 	@$(DOCKER) tag dar-backup:$(FINAL_VERSION) $(DOCKERHUB_REPO):$(FINAL_VERSION)
 
@@ -407,100 +430,45 @@ _finalize-image: $(if $(strip $(BASE_VERSION)),check-refresh-image-version,check
 	@echo "🔍 Verifying OCI image labels…"
 	@$(MAKE) verify-labels
 
-
-verify-labels:
-	@$(eval FINAL_VERSION := $(or $(FINAL_VERSION)))
-	@echo "🔍 Verifying OCI image labels on $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
-	@$(eval LABELS := org.opencontainers.image.authors \
-	                  org.opencontainers.image.base.name \
-	                  org.opencontainers.image.base.digest \
-	                  org.opencontainers.image.base.version \
-	                  org.opencontainers.image.created \
-	                  org.opencontainers.image.description \
-	                  org.opencontainers.image.documentation \
-	                  org.opencontainers.image.licenses \
-	                  org.opencontainers.image.ref.name \
-	                  org.opencontainers.image.revision \
-	                  org.opencontainers.image.source \
-	                  org.opencontainers.image.title \
-	                  org.opencontainers.image.url \
-	                  org.opencontainers.image.version \
-	                  org.dar-backup.documentation.command \
-	                  org.dar-backup.documentation.path \
-	                  org.dar-backup.install-source \
-	                  org.dar-backup.version \
-	                  org.dar-backup.wheel.sha256 \
-	                  org.dar.version)
-
-	@for label in $(LABELS); do \
-	  value=$$($(DOCKER) inspect -f "{{ index .Config.Labels \"$$label\" }}" $(FINAL_IMAGE_NAME):$(FINAL_VERSION) 2>/dev/null); \
-	  if [ -z "$$value" ]; then \
-	    echo "❌ Missing or empty label: $$label"; \
-	    exit 1; \
-	  else \
-	    echo "✅ $$label: $$value"; \
-	  fi; \
-	done
-
-	@echo "🔎 Checking exact matches for base digest, version, ref.name, license, and package source…"
-	@set -e; \
-	exp_version="$(UBUNTU_DIGEST)"; \
-	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
-	if [ "$$act_version" != "$$exp_version" ]; then \
-	  echo "❌ org.opencontainers.image.version mismatch"; \
-	  echo "   expected: '$$exp_version'"; \
-	  echo "   actual:   '$$act_version'"; \
-	  exit 1; \
+verify-dev-image:
+	@set -euo pipefail; \
+	if [ ! -s "$(UBUNTU_DIGEST_FILE)" ]; then \
+	  echo "ERROR: Ubuntu digest record is missing: $(UBUNTU_DIGEST_FILE); rebuild dar-backup:dev" >&2; \
+	  exit 2; \
 	fi; \
-	exp_version="$(FINAL_VERSION)"; \
-	act_version="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
-	if [ "$$act_version" != "$$exp_version" ]; then \
-	  echo "❌ org.opencontainers.image.version mismatch"; \
-	  echo "   expected: '$$exp_version'"; \
-	  echo "   actual:   '$$act_version'"; \
-	  exit 1; \
-	fi; \
-	exp_ref="$(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
-	act_ref="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.ref.name" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
-	if [ "$$act_ref" != "$$exp_ref" ]; then \
-	  echo "❌ org.opencontainers.image.ref.name mismatch"; \
-	  echo "   expected: '$$exp_ref'"; \
-	  echo "   actual:   '$$act_ref'"; \
-	  exit 1; \
-	fi; \
-	exp_license="GPL-3.0-or-later"; \
-	act_license="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.opencontainers.image.licenses" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
-	if [ "$$act_license" != "$$exp_license" ]; then \
-	  echo "❌ org.opencontainers.image.licenses mismatch"; \
-	  echo "   expected: '$$exp_license'"; \
-	  echo "   actual:   '$$act_license'"; \
-	  exit 1; \
-	fi; \
-	exp_install_source="$(DAR_BACKUP_INSTALL_SOURCE)"; \
-	act_install_source="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.dar-backup.install-source" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
-	if [ "$$act_install_source" != "$$exp_install_source" ]; then \
-	  echo "❌ org.dar-backup.install-source mismatch"; \
-	  echo "   expected: '$$exp_install_source'"; \
-	  echo "   actual:   '$$act_install_source'"; \
-	  exit 1; \
-	fi; \
+	ubuntu_digest="$$(cat "$(UBUNTU_DIGEST_FILE)")"; \
+	revision="$$(git rev-parse HEAD)"; \
+	wheel_sha="not-applicable"; \
 	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
-	  exp_wheel_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
+	  wheel_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
 	    --wheel "$(DAR_BACKUP_LOCAL_DIST)/$(DAR_BACKUP_LOCAL_WHEEL)" \
 	    --expected-version "$(DAR_BACKUP_VERSION)")"; \
-	else \
-	  exp_wheel_sha="not-applicable"; \
 	fi; \
-	act_wheel_sha="$$($(DOCKER) inspect -f '{{ index .Config.Labels "org.dar-backup.wheel.sha256" }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION))"; \
-	if [ "$$act_wheel_sha" != "$$exp_wheel_sha" ]; then \
-	  echo "❌ org.dar-backup.wheel.sha256 mismatch"; \
-	  echo "   expected: '$$exp_wheel_sha'"; \
-	  echo "   actual:   '$$act_wheel_sha'"; \
-	  exit 1; \
-	fi; \
-	echo "✅ Labels match expected values."
+	DOCKER="$(DOCKER)" scripts/verify_image_metadata.sh \
+	  dar-backup:dev "$$revision" dev "$(DAR_BACKUP_VERSION)" \
+	  "$(DAR_VERSION)" "$$ubuntu_digest" "$(DAR_BACKUP_INSTALL_SOURCE)" "$$wheel_sha"
 
-	@echo "🎉 All required OCI labels are present and correct."
+verify-labels:
+	@echo "🔍 Verifying exact OCI image metadata on $(FINAL_IMAGE_NAME):$(FINAL_VERSION)"
+	@set -euo pipefail; \
+	if [ ! -s "$(UBUNTU_DIGEST_FILE)" ]; then \
+	  echo "ERROR: Ubuntu digest record is missing: $(UBUNTU_DIGEST_FILE); rebuild dar-backup:dev" >&2; \
+	  exit 2; \
+	fi; \
+	ubuntu_digest="$$(cat "$(UBUNTU_DIGEST_FILE)")"; \
+	revision="$$(git rev-parse HEAD)"; \
+	wheel_sha="not-applicable"; \
+	if [ "$(DAR_BACKUP_INSTALL_SOURCE)" = "local" ]; then \
+	  wheel_sha="$$(python3 scripts/validate_dar_backup_wheel.py \
+	    --wheel "$(DAR_BACKUP_LOCAL_DIST)/$(DAR_BACKUP_LOCAL_WHEEL)" \
+	    --expected-version "$(DAR_BACKUP_VERSION)")"; \
+	fi; \
+	DOCKER="$(DOCKER)" scripts/verify_image_metadata.sh \
+	  "$(FINAL_IMAGE_NAME):$(FINAL_VERSION)" "$$revision" "$(FINAL_VERSION)" \
+	  "$(DAR_BACKUP_VERSION)" "$(DAR_VERSION)" "$$ubuntu_digest" \
+	  "$(DAR_BACKUP_INSTALL_SOURCE)" "$$wheel_sha"; \
+	DOCKER="$(DOCKER)" scripts/verify_image_license.sh \
+	  "$(FINAL_IMAGE_NAME):$(FINAL_VERSION)" "$(IMAGE_LICENSE_SHA256)"
 
 
 
@@ -567,63 +535,27 @@ scan-final: install-tools
 
 
 verify-cli-version:
-	@echo "🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION ($(DAR_BACKUP_VERSION) )"
-	@actual_version="$$($(DOCKER) run  --rm --entrypoint dar-backup $(FINAL_IMAGE_NAME):$(FINAL_VERSION) --version | head -n1 | awk '{print $$2}')" && \
+	@echo "🔎 Verifying 'dar-backup --version' matches DAR_BACKUP_VERSION ($(DAR_BACKUP_VERSION))"
+	@set -euo pipefail; \
+	if ! version_output="$$( $(DOCKER) run --rm --entrypoint dar-backup \
+	  "$(FINAL_IMAGE_NAME):$(FINAL_VERSION)" --version 2>&1 )"; then \
+	  echo "ERROR: unable to run dar-backup --version in $(FINAL_IMAGE_NAME):$(FINAL_VERSION): $$version_output" >&2; \
+	  exit 2; \
+	fi; \
+	actual_version="$$(printf '%s\n' "$$version_output" | awk 'NR == 1 { print $$2; exit }')"; \
 	if [ "$$actual_version" != "$(DAR_BACKUP_VERSION)" ]; then \
-	  echo "❌ Version mismatch: CLI reports '$$actual_version', expected '$(DAR_BACKUP_VERSION)'"; \
-	  exit 1; \
-	else \
-	  echo "✅ dar-backup --version is correct: $(DAR_BACKUP_VERSION)"; \
-	fi
+	  echo "ERROR: CLI version mismatch on $(FINAL_IMAGE_NAME):$(FINAL_VERSION)" >&2; \
+	  echo "       expected: '$(DAR_BACKUP_VERSION)'" >&2; \
+	  echo "       actual:   '$${actual_version:-missing}'" >&2; \
+	  echo "       output:   '$$version_output'" >&2; \
+	  exit 2; \
+	fi; \
+	echo "✅ dar-backup --version is correct: $(DAR_BACKUP_VERSION)"
 
 
-log-pushed-build-json: check_version
-	@mkdir -p $(BUILD_LOG_DIR)
-	@test -f $(BUILD_LOG_PATH) || echo "[]" > $(BUILD_LOG_PATH)
-	$(eval DATE     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ))
-	$(eval GIT_REV  := $(shell git rev-parse --short HEAD))
-	$(eval DIGEST   := $(shell docker inspect --format '{{index .RepoDigests 0}}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null || echo ""))
-	@if [ -z "$(DIGEST)" ]; then \
-	  echo "❌ Digest not found. Make sure the image has been pushed."; \
-	  exit 1; \
-	fi
-	$(eval IMAGE_ID    := $(shell docker inspect --format '{{ .Id }}' $(FINAL_IMAGE_NAME):$(FINAL_VERSION)))
-	$(eval DIGEST_ONLY := $(shell echo "$(DIGEST)" | cut -d'@' -f2))
-	$(eval BUILD_NUMBER := $(shell jq length $(BUILD_LOG_PATH) 2>/dev/null || echo 0))
-	@export PYTHONPATH="$$PYTHONPATH:scripts"; \
-	python3 scripts/update_build_log.py \
-	  --log              $(BUILD_LOG_PATH) \
-	  --build-number     $(BUILD_NUMBER) \
-	  --version          $(FINAL_VERSION) \
-	  --base             "ubuntu:$(UBUNTU_VERSION)" \
-	  --base-image-digest "$(UBUNTU_DIGEST)" \
-	  --git-rev          $(GIT_REV) \
-	  --created          "$(DATE)" \
-	  --url              "https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
-	  --digest           "$(DIGEST_ONLY)" \
-	  --image-id         "$(IMAGE_ID)" \
-	  --dar-backup-version "$(DAR_BACKUP_VERSION)"
-	@echo "✅ Log entry added. Total builds: $$(jq length $(BUILD_LOG_PATH))"
-	@jq '.[-1]' $(BUILD_LOG_PATH)
-	@echo "🔄 Checking if $(BUILD_LOG_PATH) changed"
-	@if ! git diff --quiet $(BUILD_LOG_PATH); then \
-	  git add $(BUILD_LOG_PATH); \
-	  git commit -m "build-history: add $(FINAL_VERSION) metadata"; \
-	  echo "✅ $(BUILD_LOG_PATH) updated and committed"; \
-	else \
-	  echo "ℹ️ No changes to commit — build history already up to date"; \
-	fi
-	@echo "📘 Regenerating README.md release table from build history..."
-	@python3 scripts/update_readme_releases.py
-	@python3 scripts/update_readme_releases.py --check
-	@sed -i -E "s/VERSION=[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?;/VERSION=$(FINAL_VERSION);/" README.md
-	@if ! git diff --quiet README.md; then \
-	  git add README.md; \
-	  git commit -m "Release: add tag $(FINAL_VERSION)"; \
-	  echo "✅ README.md updated and committed"; \
-	else \
-	  echo "ℹ️ No changes to commit — README.md already up to date"; \
-	fi
+log-pushed-build-json:
+	@echo "ERROR: release metadata is written only by the Manual Docker Release workflow" >&2
+	@exit 2
 
 
 
@@ -649,6 +581,7 @@ test-log-pushed-build-json:
 	@test -f ./logs/build-history.json || echo "[]" > ./logs/build-history.json
 	$(eval FINAL_VERSION     := test-tag)
 	$(eval DAR_BACKUP_VERSION := 0.99.0-test)
+	$(eval DAR_VERSION        := 2.7.21-test)
 	$(eval GIT_REV           := mockrev123)
 	$(eval DAR_BACKUP_DATE   := 2025-07-13T00:00:00Z)
 	$(eval DIGEST_ONLY       := sha256:deadbeef1234567890)
@@ -668,7 +601,8 @@ test-log-pushed-build-json:
 	  --url              "https://hub.docker.com/layers/per2jensen/dar-backup/$(FINAL_VERSION)/images/$(DIGEST_ONLY)" \
 	  --digest           "$(DIGEST_ONLY)" \
 	  --image-id         "$(IMAGE_ID)" \
-	  --dar-backup-version "$(DAR_BACKUP_VERSION)"
+	  --dar-backup-version "$(DAR_BACKUP_VERSION)" \
+	  --dar-version      "$(DAR_VERSION)"
 	@echo "✅ Test entry added:"
 	@jq '.[-1]' ./logs/build-history.json
 
@@ -696,10 +630,25 @@ test: all-dev
 
 test-nobuild:
 	@echo "Running pytest (full suite)..."
-	@FINAL_VERSION=$${FINAL_VERSION:-dev}; \
-	IMAGE=$${IMAGE:-dar-backup:$${FINAL_VERSION}}; \
-#	pytest -s -v $(PYTEST_ARGS) tests/
-	pytest --json-report --json-report-file=pytest-report.json
+	@if [ -z "$(IMAGE)" ]; then \
+	  echo "ERROR: IMAGE must be a non-empty image reference" >&2; \
+	  exit 2; \
+	fi
+	@echo "Testing image: $(IMAGE)"
+	@$(DOCKER) image inspect "$(IMAGE)" \
+	  --format 'Image ID: {{.Id}} | Repo digests: {{json .RepoDigests}} | Revision: {{index .Config.Labels "org.opencontainers.image.revision"}} | Version: {{index .Config.Labels "org.opencontainers.image.version"}}'
+	@set -euo pipefail; \
+	if ! pytest_help="$$(pytest --help 2>&1)"; then \
+	  echo "ERROR: pytest is unavailable or failed while loading its plugins: $$pytest_help" >&2; \
+	  exit 2; \
+	fi; \
+	report_args=(); \
+	if [[ "$$pytest_help" == *"--json-report"* ]]; then \
+	  report_args=(--json-report --json-report-file=pytest-report.json); \
+	else \
+	  echo "INFO: pytest-json-report is not installed; continuing without pytest-report.json"; \
+	fi; \
+	IMAGE="$(IMAGE)" pytest "$${report_args[@]}" $(PYTEST_ARGS) tests/
 
 # Test using a pulled image (skips local build)
 test-pulled:
@@ -763,23 +712,9 @@ check-publish-install-source:
 	fi
 
 
-push: check-release-image-version check-publish-install-source check-docker-creds
-	@if $(DOCKER) manifest inspect $(DOCKERHUB_REPO):$(FINAL_VERSION) >/dev/null 2>&1; then \
-	  echo "🛑 Tag $(FINAL_VERSION) already exists on Docker Hub — skipping push."; \
-	else \
-	  echo "🚀 Pushing image $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
-	  $(DOCKER) push $(DOCKERHUB_REPO):$(FINAL_VERSION); \
-	  echo "🔎 Resolving published digest…"; \
-	  DIGEST="$$( $(DOCKER) inspect --format '{{index .RepoDigests 0}}' $(DOCKERHUB_REPO):$(FINAL_VERSION) 2>/dev/null )"; \
-	  if [ -n "$$DIGEST" ]; then \
-	    echo "📦 Published digest: $$DIGEST"; \
-	    echo "$$DIGEST" > .last_digest; \
-	    echo "🔗 Docker Hub URL: https://hub.docker.com/layers/$(DOCKERHUB_REPO)/$(FINAL_VERSION)/images/$${DIGEST#*@}"; \
-	  else \
-	    echo "⚠️  Could not determine digest locally. You can query later with:"; \
-	    echo "    $(DOCKER) inspect --format '{{index .RepoDigests 0}}' $(DOCKERHUB_REPO):$(FINAL_VERSION)"; \
-	  fi; \
-	fi
+push:
+	@echo "ERROR: remote images are published only by the Manual Docker Release workflow" >&2
+	@exit 2
 
 
 
@@ -798,47 +733,6 @@ validate:
 	@command -v jq >/dev/null || { echo "❌ jq not found"; exit 1; }
 	@command -v docker >/dev/null || { echo "❌ docker not found"; exit 1; }
 
-
-
-# Always-run cleanup target for the dry-run worktree.
-# Called explicitly at the end of dry-run-release AND as an error recovery step,
-# since Make's per-line @-prefixed commands don't support shell trap directly.
-dry-run-cleanup:
-	@if [ -d .dryrun ]; then \
-		echo "🧹 Removing .dryrun worktree..."; \
-		git worktree remove --force .dryrun || true; \
-	fi
-
-
-dry-run-release: check-release-image-version install-tools
-	@echo "🔍 Creating temporary dry-run environment..."
-	@$(MAKE) dry-run-cleanup
-	@git worktree add -f .dryrun HEAD
-	@echo "🚧 Running release steps in .dryrun..."
-	@cd .dryrun && \
-		$(MAKE) dry-run-release-internal \
-			FINAL_VERSION=$(FINAL_VERSION) \
-			DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
-			DAR_VERSION=$(DAR_VERSION) \
-		|| { cd $(CURDIR) && $(MAKE) dry-run-cleanup && exit 1; }
-	@$(MAKE) dry-run-cleanup
-	@echo "✅ Dry-run build complete — no push performed."
-	@echo "▶ Running tests against the locally built image $(FINAL_IMAGE_NAME):$(FINAL_VERSION)..."
-	@IMAGE=$(FINAL_IMAGE_NAME):$(FINAL_VERSION) $(MAKE) test
-	@echo "✅ Dry-run complete — working directory unchanged."
-
-
-# Internal target: runs inside the .dryrun worktree.
-# DRY_RUN is intentionally not set here — nothing downstream checks it,
-# and 'final' already excludes push by design. If push-guarding via DRY_RUN
-# is added in future, set it here.
-dry-run-release-internal: check-release-image-version install-tools
-	@echo "🔧 Building image $(FINAL_IMAGE_NAME):$(FINAL_VERSION) (dry-run, no push to Docker Hub)"
-	@$(MAKE) FINAL_VERSION=$(FINAL_VERSION) \
-		DAR_BACKUP_VERSION=$(DAR_BACKUP_VERSION) \
-		DAR_VERSION=$(DAR_VERSION) \
-		final verify-labels verify-cli-version
-	
 
 
 size-report:
@@ -872,13 +766,8 @@ show-labels:
 # Docker Login
 # ================================
 login:
-	@echo "🔐 Logging in to Docker Hub (2FA enabled)..."
-	@if [ -z "$$DOCKER_USER" ] || [ -z "$$DOCKER_TOKEN" ]; then \
-		echo "❌ ERROR: You must export DOCKER_USER and DOCKER_TOKEN."; \
-		echo "   Example: export DOCKER_USER=per2jensen && export DOCKER_TOKEN=your_token"; \
-		exit 1; \
-	fi
-	echo "$$DOCKER_TOKEN" | $(DOCKER) login -u "$$DOCKER_USER" --password-stdin
+	@echo "ERROR: release registry login is managed only by the Manual Docker Release workflow" >&2
+	@exit 2
 
 
 # ================================

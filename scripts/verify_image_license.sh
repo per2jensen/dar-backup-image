@@ -36,7 +36,7 @@ verify_image_license() {
     local actual_output
     local actual_sha256
 
-    if ! actual_output="$(docker run --rm \
+    if ! actual_output="$("${DOCKER}" run --rm \
         --entrypoint sha256sum \
         "${image}" \
         /LICENSE)"; then
@@ -59,6 +59,12 @@ verify_image_license() {
 
 main() {
     validate_arguments "$@"
+
+    DOCKER="${DOCKER:-docker}"
+    if [[ -z "${DOCKER}" || "${DOCKER}" =~ [[:space:]] ]] \
+        || ! command -v "${DOCKER}" >/dev/null 2>&1; then
+        fail "DOCKER must name an available executable without arguments"
+    fi
     verify_image_license "$1" "$2"
 }
 

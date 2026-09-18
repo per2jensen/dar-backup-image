@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ if MODULE_SPEC is None or MODULE_SPEC.loader is None:
     raise RuntimeError(f"Unable to load Grype SARIF summary helper from {MODULE_PATH}")
 GRYPE_SUMMARY = importlib.util.module_from_spec(MODULE_SPEC)
 MODULE_SPEC.loader.exec_module(GRYPE_SUMMARY)
+SUMMARY_ENV = Path(__file__).parents[1] / "scripts" / "grype_summary_env.py"
 
 
 def _write_sarif(path: Path, results: list[dict[str, Any]]) -> None:
@@ -114,3 +116,33 @@ def test_summarize_missing_grype_severity_counts_unknown(
     assert summary["counts"]["unknown"] == 2
     assert summary["counts"]["warning"] == 0
     assert summary["counts"]["note"] == 0
+
+
+def test_summarize_missing_report_raises_value_error(tmp_path: Path) -> None:
+    """A missing requested report cannot become a zero-vulnerability result."""
+    missing = tmp_path / "missing.sarif"
+
+    try:
+        GRYPE_SUMMARY.summarize(str(missing))
+    except ValueError as error:
+        assert "not a file" in str(error)
+    else:
+        raise AssertionError("missing SARIF report was accepted")
+
+
+def test_summary_env_invalid_report_fails_without_counts(tmp_path: Path) -> None:
+    """Shell consumers receive a failure, not synthetic zero counts."""
+    invalid = tmp_path / "invalid.sarif"
+    invalid.write_text("not json", encoding="utf-8")
+
+    result = subprocess.run(
+        ["python3", str(SUMMARY_ENV), str(invalid)],
+        cwd=Path(__file__).parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "unable to summarize Grype SARIF" in result.stderr

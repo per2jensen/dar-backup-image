@@ -18,16 +18,30 @@ fail() {
 }
 
 validate_arguments() {
-    if [[ "$#" -ne 2 ]]; then
-        fail "usage: $0 <repository> <refresh-version>"
+    if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
+        fail "usage: $0 <repository> <version> [refresh|release]"
     fi
 
     if [[ ! "$1" =~ ^[^[:space:]@:]+$ ]]; then
         fail "repository must be a nonempty name without whitespace, a tag, or a digest"
     fi
-    if [[ ! "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*$ ]]; then
-        fail "refresh version must be x.y.z-N with a positive canonical N"
-    fi
+
+    local policy="${3:-refresh}"
+    case "${policy}" in
+        refresh)
+            if [[ ! "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*$ ]]; then
+                fail "refresh version must be x.y.z-N with a positive canonical N"
+            fi
+            ;;
+        release)
+            if [[ ! "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+                fail "release version is not supported"
+            fi
+            ;;
+        *)
+            fail "version policy must be 'refresh' or 'release'"
+            ;;
+    esac
 }
 
 verify_docker_tag_available() {

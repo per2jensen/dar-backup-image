@@ -125,6 +125,47 @@ def test_verify_docker_tag_available_existing_manifest_fails(tmp_path: Path) -> 
     assert "already exists and will not be overwritten" in result.stderr
 
 
+def test_verify_docker_tag_available_release_version_succeeds(
+    tmp_path: Path,
+) -> None:
+    """A missing canonical release tag passes the release policy."""
+    result = _run_with_fake_docker(
+        tmp_path,
+        TAG_VERIFIER,
+        ["per2jensen/dar-backup", "1.0.0-rc1", "release"],
+        expected_docker_arguments=(
+            "manifest inspect per2jensen/dar-backup:1.0.0-rc1"
+        ),
+        docker_output="manifest unknown",
+        docker_exit_code=1,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Docker tag is available" in result.stdout
+
+
+def test_verify_docker_tag_available_invalid_release_fails_before_docker(
+    tmp_path: Path,
+) -> None:
+    """An invalid release version is rejected without querying a registry."""
+    result = subprocess.run(
+        [
+            "bash",
+            str(TAG_VERIFIER),
+            "per2jensen/dar-backup",
+            "dev",
+            "release",
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "release version is not supported" in result.stderr
+
+
 @pytest.mark.parametrize(
     "diagnostic",
     ["TLS handshake timeout", "docker: command not found"],

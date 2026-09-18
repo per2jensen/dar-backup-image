@@ -74,51 +74,51 @@ def _result_severity(result: object) -> str:
     return match.group("severity").lower()
 
 
-def summarize(path: str) -> dict[str, Any] | None:
+def summarize(path: str) -> dict[str, Any]:
     """Summarize actual Grype severities from one SARIF report.
 
     Args:
         path: Filesystem path to a Grype SARIF report.
 
     Returns:
-        Scan filename, result total, and severity counts, or ``None`` when the
-        report is missing or cannot be decoded.
+        Scan filename, result total, and severity counts.
+
+    Raises:
+        ValueError: If the report is missing, unreadable, or structurally invalid.
     """
     if not isinstance(path, str) or not path:
         raise ValueError("SARIF path must be a non-empty string")
 
     sarif_path = pathlib.Path(path)
     if not sarif_path.is_file():
-        return None
+        raise ValueError(f"Grype SARIF report is not a file: {sarif_path}")
 
     try:
         data = json.loads(sarif_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        LOGGER.warning("Unable to read Grype SARIF report %s: %s", sarif_path, error)
-        return None
+        raise ValueError(
+            f"Unable to read Grype SARIF report {sarif_path}: {error}"
+        ) from error
 
     if not isinstance(data, dict):
-        LOGGER.warning("Grype SARIF report root is not an object: %s", sarif_path)
-        return None
+        raise ValueError(f"Grype SARIF report root is not an object: {sarif_path}")
 
     runs = data.get("runs")
     if not isinstance(runs, list):
-        LOGGER.warning("Grype SARIF report has no runs array: %s", sarif_path)
-        return None
+        raise ValueError(f"Grype SARIF report has no runs array: {sarif_path}")
 
     counts: collections.Counter[str] = collections.Counter()
 
     for run in runs:
         if not isinstance(run, dict):
-            LOGGER.warning("Grype SARIF report contains an invalid run: %s", sarif_path)
-            return None
+            raise ValueError(
+                f"Grype SARIF report contains an invalid run: {sarif_path}"
+            )
         results = run.get("results")
         if not isinstance(results, list):
-            LOGGER.warning(
-                "Grype SARIF run has no results array: %s",
-                sarif_path,
+            raise ValueError(
+                f"Grype SARIF run has no results array: {sarif_path}"
             )
-            return None
         for result in results:
             counts[_result_severity(result)] += 1
 
@@ -134,16 +134,23 @@ def summarize(path: str) -> dict[str, Any] | None:
     }
 
 
-def main() -> None:
-    """Write a compact JSON summary for a requested SARIF report."""
+def main() -> int:
+    """Write a compact JSON summary for a requested SARIF report.
+
+    Returns:
+        Zero on success and two when the report is unavailable or invalid.
+    """
     path = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
         summary = summarize(path)
     except ValueError as error:
         LOGGER.error("Invalid Grype SARIF input: %s", error)
-        summary = None
+        return 2
     json.dump(summary, sys.stdout, separators=(",", ":"))
+    sys.stdout.write("\n")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    raise SystemExit(main())

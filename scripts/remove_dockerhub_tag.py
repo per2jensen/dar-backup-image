@@ -34,7 +34,9 @@ import argparse
 import json
 import logging
 import os
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 DOCKERHUB_LOGIN_URL = "https://hub.docker.com/v2/users/login/"
 DOCKERHUB_TAG_URL_TEMPLATE = "https://hub.docker.com/v2/repositories/{repo}/tags/{tag}/"
+REQUEST_TIMEOUT_SECONDS = 30
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,12 +84,18 @@ def get_jwt(user: str, token: str) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
             body = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         logger.error("Docker Hub login failed: HTTP %s", exc.code)
         raise SystemExit(1) from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        logger.error("Docker Hub login failed: %s", exc)
+        raise SystemExit(1) from exc
 
+    if not isinstance(body, dict):
+        logger.error("Docker Hub login returned an invalid JSON response")
+        raise SystemExit(1)
     jwt = body.get("token")
     if not jwt:
         logger.error("Docker Hub login returned no token")
@@ -106,17 +115,30 @@ def remove_tag(repo: str, tag: str, jwt: str) -> None:
     Raises:
         SystemExit: If the deletion fails.
     """
-    url = DOCKERHUB_TAG_URL_TEMPLATE.format(repo=repo, tag=tag)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*", repo):
+        logger.error("Invalid Docker Hub repository: %s", repo)
+        raise SystemExit(1)
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag):
+        logger.error("Invalid Docker tag: %s", tag)
+        raise SystemExit(1)
+
+    url = DOCKERHUB_TAG_URL_TEMPLATE.format(
+        repo=urllib.parse.quote(repo, safe="/"),
+        tag=urllib.parse.quote(tag, safe=""),
+    )
     req = urllib.request.Request(
         url,
         headers={"Authorization": f"JWT {jwt}"},
         method="DELETE",
     )
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
             logger.info("✅ Removed tag %s from %s (HTTP %s)", tag, repo, resp.status)
     except urllib.error.HTTPError as exc:
         logger.error("❌ Failed to remove tag %s from %s: HTTP %s", tag, repo, exc.code)
+        raise SystemExit(1) from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        logger.error("❌ Failed to remove tag %s from %s: %s", tag, repo, exc)
         raise SystemExit(1) from exc
 
 

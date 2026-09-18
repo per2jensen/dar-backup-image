@@ -103,16 +103,10 @@ jobs:
             exit 1
           fi
 
-          if MANIFEST_OUTPUT=$(docker manifest inspect \
-            "${DOCKERHUB_REPO}:${FINAL_VERSION}" 2>&1); then
-            echo "❌ Docker Hub tag ${DOCKERHUB_REPO}:${FINAL_VERSION} already exists — aborting."
-            exit 1
-          elif ! grep -Eqi 'manifest unknown|no such manifest|not found' \
-            <<< "${MANIFEST_OUTPUT}"; then
-            echo "❌ Unable to determine whether the Docker Hub tag exists"
-            echo "${MANIFEST_OUTPUT}"
-            exit 1
-          fi
+          scripts/verify_docker_tag_available.sh \
+            "${DOCKERHUB_REPO}" \
+            "${FINAL_VERSION}" \
+            release
 
           echo "✅ Version ${FINAL_VERSION} is new — proceeding."
 
@@ -305,6 +299,10 @@ jobs:
         working-directory: source
         run: |
           scripts/validate_release_source.sh "${SOURCE_SHA}" "${DISPATCH_REF}"
+          scripts/verify_docker_tag_available.sh \
+            "${DOCKERHUB_REPO}" \
+            "${FINAL_VERSION}" \
+            release
 
       # The shared action owns the complete publication transaction: candidate
       # push, digest capture, signing, attestation, immutable pull/runtime
@@ -452,7 +450,11 @@ jobs:
         run: |
           SARIF=${{ env.SARIF_FILE }}
           SBOM_BASENAME=$(basename "${{ env.SBOM_FILE }}")
-          source <(python3 scripts/grype_summary_env.py "${SARIF}")
+          if ! GRYPE_COUNTS=$(python3 scripts/grype_summary_env.py "${SARIF}"); then
+            echo "❌ Unable to produce release summary from ${SARIF}"
+            exit 1
+          fi
+          source /dev/stdin <<< "${GRYPE_COUNTS}"
 
           echo "## ✅ dar-backup Release v${{ env.FINAL_VERSION }}"          >> $GITHUB_STEP_SUMMARY
           echo ""                                                               >> $GITHUB_STEP_SUMMARY

@@ -19,17 +19,16 @@ implementation and regression coverage.
 
 ## Image preservation bundle
 
-`scripts/save-dar-backup-image.sh` currently preserves image availability only.
-A future implementation should:
+`scripts/save-dar-backup-image.sh` preserves image availability, validates the
+newest build-history record, creates archives atomically, records a SHA-256
+checksum, and validates existing archives before reporting success. It is not
+yet a complete provenance bundle. A future implementation should:
 
-- validate build-history JSON and select exactly one well-formed newest record
 - pull by immutable recorded digest and prove the requested tag resolves to it
 - verify the expected Cosign workflow identity and CycloneDX attestation
 - preserve the matching history record, SBOM, verification bundle, and other
   recovery evidence beside the image
-- generate and subsequently verify a SHA-256 checksum for the compressed image
-- validate an existing archive rather than trusting its filename
-- record image architecture and add isolated positive and negative tests
+- record image architecture
 
 ## Slice-size and memory evidence
 

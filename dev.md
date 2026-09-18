@@ -144,11 +144,12 @@ to either target when testing a local artifact.
 ## Publishing boundary
 
 Images built from local wheels are development artifacts. The `push` target
-checks the image's `org.dar-backup.install-source` label and refuses to publish
-an image unless the value is `pypi`.
+does not publish local images; `make release`, `make push`, and `make login`
+always stop with guidance to use the guarded GitHub workflow.
 
-Release and dry-run-release workflows therefore continue to use the pinned
-PyPI package. Build and test a clean PyPI-sourced development image before
+The manual-release and weekly-refresh workflows use the pinned PyPI package and
+enforce the `org.dar-backup.install-source=pypi` provenance boundary before
+publication. Build and test a clean PyPI-sourced development image before
 starting a release workflow.
 
 ## Updating Syft and Grype

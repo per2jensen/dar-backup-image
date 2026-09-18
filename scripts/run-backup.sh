@@ -107,26 +107,37 @@
 #
 set -euo pipefail
 
-if ! command -v docker &>/dev/null; then
-    echo "❌ docker not found, exiting."
-    exit 1
-fi
+for required_command in docker jq; do
+  if ! command -v "$required_command" &>/dev/null; then
+    echo "ERROR: required command not found in PATH: $required_command" >&2
+    exit 127
+  fi
+done
 
 # === Config ===
 IMAGE="${IMAGE:-per2jensen/dar-backup:latest}"
 DOCKER_PULL="${DOCKER_PULL:-false}"
 
+if [[ -z "$IMAGE" || "$IMAGE" =~ [[:space:]] ]]; then
+  echo "ERROR: IMAGE must be a non-empty image reference without whitespace" >&2
+  exit 1
+fi
+
 case "$DOCKER_PULL" in
   true|false) ;;
   *)
-    echo "❌ DOCKER_PULL must be 'true' or 'false', got: $DOCKER_PULL"
+    echo "ERROR: DOCKER_PULL must be 'true' or 'false', got: $DOCKER_PULL" >&2
     exit 1
     ;;
 esac
 
 WORKDIR="${WORKDIR:-}"
 if [[ -z "$WORKDIR" ]]; then
-  echo "❌ WORKDIR is not set, exiting."
+  echo "ERROR: WORKDIR is not set, exiting." >&2
+  exit 1
+fi
+if [[ "$WORKDIR" != /* || "$WORKDIR" == "/" ]]; then
+  echo "ERROR: WORKDIR must be an absolute path other than /, got: '$WORKDIR'" >&2
   exit 1
 fi
 
@@ -134,8 +145,16 @@ fi
 RUN_AS_UID="${RUN_AS_UID:-$(id -u)}"
 RUN_AS_GID="${RUN_AS_GID:-$(id -g)}"
 
-if [[ "$RUN_AS_UID" -eq 0 ]]; then
-  echo "❌ running as root not allowed, exiting."
+if [[ ! "$RUN_AS_UID" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: RUN_AS_UID must be a positive canonical integer; root is not allowed, got: '$RUN_AS_UID'" >&2
+  exit 1
+fi
+if [[ ! "$RUN_AS_GID" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "ERROR: RUN_AS_GID must be a canonical non-negative integer, got: '$RUN_AS_GID'" >&2
+  exit 1
+fi
+if (( 10#$RUN_AS_UID > 4294967294 || 10#$RUN_AS_GID > 4294967294 )); then
+  echo "ERROR: RUN_AS_UID or RUN_AS_GID is outside the supported Linux ID range" >&2
   exit 1
 fi
 
@@ -147,8 +166,8 @@ DAR_BACKUP_DATA_DIR="${DAR_BACKUP_DATA_DIR:-$BASE_DIR/data}"
 DAR_BACKUP_RESTORE_DIR="${DAR_BACKUP_RESTORE_DIR:-$BASE_DIR/restore}"
 
 for d in "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR"; do
-  if [[ "$d" == "/" ]]; then
-    echo "❌ Refusing to use / as a directory"
+  if [[ "$d" != /* || "$d" == "/" ]]; then
+    echo "ERROR: backup paths must be absolute and must not be /: '$d'" >&2
     exit 1
   fi
 done
@@ -192,6 +211,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ $# -gt 0 ]]; then
+  echo "ERROR: unexpected argument after --: $1" >&2
+  usage
+fi
+
 
 if [[ -z "$BACKUP_TYPE" ]]; then
   echo "❌ Missing required option: -t FULL|DIFF|INCR"
@@ -210,16 +234,29 @@ esac
 # Pull before inspecting so DOCKER_PULL=true also supports a first run where
 # the selected image is not present in the local Docker image store.
 if [[ "$DOCKER_PULL" == "true" ]]; then
-  docker pull "$IMAGE"
+  if ! docker pull "$IMAGE"; then
+    echo "ERROR: unable to pull requested image: $IMAGE" >&2
+    exit 1
+  fi
 fi
 
 echo "Using image: $IMAGE"
-IMAGE_INFO=$(docker inspect "$IMAGE")
-REPO_DIGEST=$(echo "$IMAGE_INFO" | jq -r '.[0].RepoDigests[0] // empty | split("@")[1]')
+if ! IMAGE_INFO=$(docker inspect "$IMAGE"); then
+  echo "ERROR: unable to inspect requested image: $IMAGE" >&2
+  exit 1
+fi
+if ! REPO_DIGEST=$(jq -er '.[0].RepoDigests[0] // empty | split("@")[1]' \
+    <<< "$IMAGE_INFO" 2>/dev/null); then
+  REPO_DIGEST=""
+fi
 if [[ -n "$REPO_DIGEST" ]]; then
   echo "Image Digest: $REPO_DIGEST"
 else
-  IMAGE_ID=$(echo "$IMAGE_INFO" | jq -r '.[0].Id')
+  if ! IMAGE_ID=$(jq -er '.[0].Id | select(type == "string" and length > 0)' \
+      <<< "$IMAGE_INFO"); then
+    echo "ERROR: Docker inspect returned no image ID for: $IMAGE" >&2
+    exit 1
+  fi
   echo "Image Id:     $IMAGE_ID"
 fi
 echo "Base directory:                  ${BASE_DIR}/"
@@ -234,7 +271,14 @@ else
   echo "Backup definition file:        (default)"
 fi
 
-mkdir -p "$DAR_BACKUP_DIR" "$DAR_BACKUP_D_DIR" "$DAR_BACKUP_DATA_DIR" "$DAR_BACKUP_RESTORE_DIR"
+if ! mkdir -p \
+    "$DAR_BACKUP_DIR" \
+    "$DAR_BACKUP_D_DIR" \
+    "$DAR_BACKUP_DATA_DIR" \
+    "$DAR_BACKUP_RESTORE_DIR"; then
+  echo "ERROR: unable to create one or more backup directories under $BASE_DIR" >&2
+  exit 1
+fi
 
 if [[ ! -f "$DAR_BACKUP_D_DIR/default" ]]; then
   cat <<EOF > "$DAR_BACKUP_D_DIR/default"
@@ -257,13 +301,19 @@ if [[ -n "$BACKUP_DEF" ]]; then
     DOCKER_ARGS+=( "--backup-definition" "$BACKUP_DEF" )
 fi
 
-docker run --rm \
-  --user "$RUN_AS_UID:$RUN_AS_GID" \
-  -e RUN_AS_UID="$RUN_AS_UID" \
-  -e RUN_AS_GID="$RUN_AS_GID" \
-  -v "$DAR_BACKUP_DIR":/backups \
-  -v "$DAR_BACKUP_D_DIR":/backup.d \
-  -v "$DAR_BACKUP_DATA_DIR":/data:ro \
-  -v "$DAR_BACKUP_RESTORE_DIR":/restore \
-  "$IMAGE" \
-  "${DOCKER_ARGS[@]}"
+if docker run --rm \
+    --user "$RUN_AS_UID:$RUN_AS_GID" \
+    -e RUN_AS_UID="$RUN_AS_UID" \
+    -e RUN_AS_GID="$RUN_AS_GID" \
+    -v "$DAR_BACKUP_DIR":/backups \
+    -v "$DAR_BACKUP_D_DIR":/backup.d \
+    -v "$DAR_BACKUP_DATA_DIR":/data:ro \
+    -v "$DAR_BACKUP_RESTORE_DIR":/restore \
+    "$IMAGE" \
+    "${DOCKER_ARGS[@]}"; then
+  echo "✅ dar-backup ${BACKUP_TYPE_LC} operation completed successfully"
+else
+  operation_status=$?
+  echo "ERROR: dar-backup ${BACKUP_TYPE_LC} operation failed with exit status ${operation_status}" >&2
+  exit "$operation_status"
+fi

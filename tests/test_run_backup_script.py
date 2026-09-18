@@ -141,7 +141,7 @@ if [[ "${command_name}" == "inspect" ]]; then
   exit 0
 fi
 if [[ "${command_name}" == "run" ]]; then
-  exit 0
+  exit "${FAKE_DOCKER_RUN_EXIT_CODE:-0}"
 fi
 echo "unexpected docker command: ${command_name}" >&2
 exit 1
@@ -664,6 +664,26 @@ class TestDockerInvocationContract:
         combined = result.stdout.decode() + result.stderr.decode()
         assert "DOCKER_PULL must be 'true' or 'false'" in combined
         assert not command_log.exists()
+
+    def test_successful_operation_reports_final_result(self, tmp_path: Path) -> None:
+        """A completed Docker run prints an unambiguous success result."""
+        environment, _ = build_fake_docker_env(tmp_path)
+
+        result = run_script(environment, "-t", "FULL")
+
+        assert "operation completed successfully" in result.stdout.decode()
+
+    def test_failed_operation_preserves_status_and_reports_result(
+        self, tmp_path: Path
+    ) -> None:
+        """A failed Docker run retains its status and names the operation."""
+        environment, _ = build_fake_docker_env(tmp_path)
+        environment["FAKE_DOCKER_RUN_EXIT_CODE"] = "23"
+
+        result = run_script(environment, "-t", "FULL", expect_fail=True)
+
+        assert result.returncode == 23
+        assert "operation failed with exit status 23" in result.stderr.decode()
 
 
 # ===========================================================================

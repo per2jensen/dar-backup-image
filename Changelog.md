@@ -12,7 +12,7 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 # dar-backup-image Changelog
 
-## 1.0.0 - not released
+## 1.0.0-rc2 - 2026-09-18
 
 ### Added
 
@@ -26,6 +26,20 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 - remove unverified FUSE-friendly claims and document that Docker bind mounts
   are prepared before the container's selected UID and GID take effect
+- replace the obsolete local release simulation with an explicit clean-build
+  qualification; remote release transactions remain GitHub-workflow-only
+
+### Fixed
+
+- make release image creation verify the exact development-image provenance,
+  component versions, base digest, package source, and embedded license before
+  permitting a final image
+- keep all Docker Hub publication in the guarded GitHub workflows, recheck tag
+  availability immediately before publication, and make local publication
+  targets fail with actionable guidance
+- fail clearly on missing or invalid scan evidence, archive images atomically
+  with checksums, and report backup, ownership, registry, and network failures
+  with operation-specific context
 
 ## 1.0.0-rc1 - 2026-09-06
 

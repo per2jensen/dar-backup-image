@@ -134,9 +134,13 @@ def main() -> None:
 
     # ── grype scan ────────────────────────────────────────────────────────────
     if args.grype_sarif:
-        summary = summarize_grype(args.grype_sarif)
-        if summary:
-            entry["grype_scan"] = summary
+        try:
+            summary = summarize_grype(args.grype_sarif)
+        except ValueError as error:
+            raise SystemExit(
+                f"Invalid requested Grype SARIF report: {error}"
+            ) from error
+        entry["grype_scan"] = summary
 
     # ── SBOM ──────────────────────────────────────────────────────────────────
     sbom: Dict[str, Any] = {}

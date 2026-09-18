@@ -105,7 +105,7 @@ def main():
 
     # Fetch clone data from GitHub API
     API_URL = f"https://api.github.com/repos/{quote(args.user)}/{quote(args.repo)}/traffic/clones"
-    response = requests.get(API_URL, headers=HEADERS)
+    response = requests.get(API_URL, headers=HEADERS, timeout=30)
     response.raise_for_status()
     data = response.json()
     if not data.get("clones"):
@@ -150,7 +150,7 @@ def main():
                 "count": count,
                 "uniques": uniques
             }
-        except Exception as e:
+        except (KeyError, TypeError, ValueError) as e:
             print(f"⚠️ Skipping invalid entry: {day} ({e})")
             continue
 
@@ -273,4 +273,8 @@ def main():
 
 # Example use:
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, RuntimeError, json.JSONDecodeError, requests.RequestException) as error:
+        print(f"ERROR: unable to update GitHub clone statistics: {error}", file=sys.stderr)
+        raise SystemExit(1) from error

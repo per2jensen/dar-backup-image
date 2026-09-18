@@ -233,11 +233,15 @@ release or weekly refresh.
 
 The current helper is an availability tool, not a complete provenance archiver.
 It does not yet compare the pulled tag with the recorded digest, run Cosign,
-write a checksum for the compressed archive, or preserve the build-history
-record, SBOM, signature, and attestation beside it. Cosign material stored in the
-registry is not included by `docker save`. Until the helper implements those
-checks, verify the immutable digest and Cosign identity as described below, save
-the relevant evidence beside the archive, and generate a checksum yourself:
+or preserve the build-history record, SBOM, signature, and attestation beside
+the image. Cosign material stored in the registry is not included by
+`docker save`. The helper does create and subsequently validate a SHA-256 file
+for each compressed archive, and it validates an existing archive before
+reporting success. Verify the immutable digest and Cosign identity as described
+below and save the relevant evidence beside the archive.
+
+When creating an archive manually with the commands above, generate and verify
+its checksum yourself:
 
 ```bash
 sha256sum "dar-backup-image-${VERSION}.tar.gz" \
@@ -1150,17 +1154,34 @@ This:
 
 Releases are fully automated via the **Manual Docker Release** GitHub Actions workflow, no local `docker push` required.
 
-Dry-run the release locally first (build, test, verify labels, no push):
+Qualify the exact committed release candidate locally before pushing it to
+`main`:
 
 ```bash
-make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
+test -z "$(git status --porcelain)" || exit 1
+make dev-nuke
+make verify-dev-image
+make IMAGE=dar-backup:dev test-nobuild
+docker run --rm dar-backup:dev docs --verify
 ```
 
 This validates:
 
-- The image builds correctly
-- Labels and `dar-backup --version` match expected values
-- All tests pass
+- The image builds from scratch without cached layers
+- Provenance and component metadata match exactly
+- The complete test suite passes against that exact image
+- The embedded documentation bundle is intact
+
+For an optional additional local finalization, license, SBOM, and vulnerability
+scan check, run:
+
+```bash
+make FINAL_VERSION="$(cat IMAGE_VERSION)" final
+```
+
+This is not a simulation of the remote release transaction. Publication,
+signing, attestation, rollback, promotion, and housekeeping are exercised only
+by the GitHub workflow.
 
 When ready, trigger the release by dispatching the workflow from GitHub Actions
 (`workflow_dispatch`). The workflow will:
@@ -1183,11 +1204,12 @@ acceptance gate, and GitHub Release recovery procedure are in
 ### Recommended Release Workflow
 
 Follow [dev.md](dev.md) to build and test a PyPI-sourced development image.
-Before release, validate locally:
+Before release, qualify the clean committed candidate locally:
 
 ```bash
-make FINAL_VERSION="$(cat IMAGE_VERSION)" final
-make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
+make dev-nuke
+make verify-dev-image
+make IMAGE=dar-backup:dev test-nobuild
 ```
 
 `FINAL_VERSION` defaults to `dev` for ordinary development. Release-related
@@ -1214,7 +1236,8 @@ make IMAGE=per2jensen/dar-backup:x.y.z test-pulled
 
 ### Version 1.0
 
-1.0.0-rc1 is expected sometime Septemper 2026, with a 1.0.0 release following relative shortly thereafter.
+`1.0.0-rc2` is the final planned release candidate. Version `1.0.0` will follow
+after RC2 passes the complete release-candidate acceptance gate.
 
 ### Version 1.1
 

@@ -241,6 +241,27 @@ def test_refresh_workflow_rejects_remote_tag_reuse_before_checkout() -> None:
     assert '"${REBUILD_VERSION}"' in workflow[availability:checkout]
 
 
+def test_publication_workflows_recheck_tag_immediately_before_publish() -> None:
+    """A tag created during a build is caught before either remote push."""
+    for path in (RELEASE_WORKFLOW, REFRESH_WORKFLOW):
+        workflow = path.read_text(encoding="utf-8")
+        publication = workflow.index("- name: Publish, sign, and verify image")
+        preceding = workflow[:publication]
+        assert preceding.count("verify_docker_tag_available.sh") == 2
+        assert preceding.rfind("verify_docker_tag_available.sh") > preceding.rfind(
+            "- name: Revalidate"
+        )
+
+
+def test_publication_summaries_fail_closed_on_invalid_sarif() -> None:
+    """A failed SARIF summary command cannot be hidden by process substitution."""
+    for path in (RELEASE_WORKFLOW, REFRESH_WORKFLOW):
+        workflow = path.read_text(encoding="utf-8")
+        assert "source <(python3 scripts/grype_summary_env.py" not in workflow
+        assert "if ! GRYPE_COUNTS=$(python3 scripts/grype_summary_env.py" in workflow
+        assert 'source /dev/stdin <<< "${GRYPE_COUNTS}"' in workflow
+
+
 def test_refresh_workflow_verifies_exact_application_revision() -> None:
     """Refresh requires the finalized image to identify its source commit."""
     workflow = REFRESH_WORKFLOW.read_text(encoding="utf-8")
@@ -296,11 +317,13 @@ def test_refresh_housekeeping_uses_atomic_metadata_tag_transaction() -> None:
     assert 'git push origin "refs/tags/v${{ env.REBUILD_VERSION }}"' not in workflow
 
 
-def test_make_publication_targets_apply_explicit_version_policies() -> None:
-    """Release and refresh finalization cannot use the generic dev default."""
+def test_make_publication_targets_keep_remote_writes_in_workflows() -> None:
+    """Make can rehearse images but cannot publish or mutate remote releases."""
     makefile = MAKEFILE.read_text(encoding="utf-8")
 
     assert "final: check-release-image-version" in makefile
     assert "final-noscan: check-release-image-version" in makefile
-    assert "push: check-release-image-version" in makefile
     assert "refresh-final-noscan: check-refresh-image-version" in makefile
+    assert "release:\n\t@echo \"ERROR: remote releases" in makefile
+    assert "push:\n\t@echo \"ERROR: remote images" in makefile
+    assert "login:\n\t@echo \"ERROR: release registry login" in makefile

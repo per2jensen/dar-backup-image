@@ -16,37 +16,54 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 Update the files:
 
-- `IMAGE_VERSION` — set to the new release version (for example, `1.0.0-rc1`)
+- `IMAGE_VERSION` — set to the new release version (for example, `1.0.0-rc2`)
 - `DAR_BACKUP_VERSION` — if dar-backup version has changed
 - `DAR_VERSION` — if DAR version has changed
 - `Changelog.md` — document what changed
 
-Commit and push to main.
+Commit the release-candidate changes locally. The qualification below must run
+from that exact commit with a clean working tree. Push it to `main` only after
+the local checks pass.
 
-The Makefile keeps `FINAL_VERSION=dev` as its development default, but
-release-related targets require `FINAL_VERSION` to equal the committed
-`IMAGE_VERSION` exactly. For example:
+### Local release-candidate qualification
 
-```bash
-make FINAL_VERSION="$(cat IMAGE_VERSION)" dry-run-release
-```
-
-### Local sanity check (optional but recommended)
+This is the authoritative local qualification. It deliberately verifies the
+development image that will be finalized by the GitHub workflow; it does not
+attempt to simulate publication, signing, rollback, or GitHub housekeeping.
 
 ```bash
-# Start from scratch, no dev images to interfere
+# Refuse to qualify uncommitted source.
+test -z "$(git status --porcelain)" || {
+    echo "ERROR: commit or discard working-tree changes before qualification" >&2
+    exit 1
+}
+
+# Prune all Docker build caches and images, then build dar-backup:dev
+# from scratch with --no-cache.
 make dev-nuke
 
-# Build and test
-make  dev
-make  test
+# Verify exact source, component, package-source, wheel, and Ubuntu digest
+# metadata before running the suite.
+make verify-dev-image
+
+# Test that exact image without triggering another build.
+make IMAGE=dar-backup:dev test-nobuild
 
 # Confirm the saved image is self-documenting and its bundle is intact
 docker run --rm dar-backup:dev docs --list
 docker run --rm dar-backup:dev docs --verify
 docker run --rm dar-backup:dev info
-
 ```
+
+`make FINAL_VERSION="$(cat IMAGE_VERSION)" final` is an optional additional
+local check of final relabeling, license verification, SBOM generation, and the
+Grype gate. It is not a release simulation; only the GitHub workflow exercises
+the remote publication transaction.
+
+`make release`, `make push`, and `make login` intentionally fail. Remote
+publication is available only through the **Manual Docker Release** workflow,
+which owns the tag-availability checks, signing, verification, and promotion to
+`:latest`.
 
 ### Release
 
@@ -204,7 +221,7 @@ Docker and Git tag checks are expected to reject an already-used version.
 ### Release-candidate acceptance gate
 
 Before declaring the final 1.0 release ready, complete a real prerelease such as
-`1.0.0-rc1` and verify:
+`1.0.0-rc2` and verify:
 
 - the workflow built and tested the full source SHA selected from `main`
 - the versioned Docker tag and `:latest` resolve to the recorded signed digest
@@ -312,8 +329,9 @@ weekly refresh—and saves the image as a compressed tar to
 `$DOCKER_ARCHIVE_DIR` (default: `/mnt/dar/docker-archives`) if a file with that
 name is not already present.
 
-The current helper does not verify the recorded digest or Cosign identity,
-checksum the saved archive, or preserve registry-hosted signatures,
-attestations, SBOMs, and history beside it. Treat it as an availability helper,
-not a complete provenance bundle, and follow the preservation checks in the
-main README.
+The helper creates and validates a SHA-256 checksum for the compressed archive,
+including archives found on later runs. It does not verify the recorded
+registry digest or Cosign identity, or preserve registry-hosted signatures,
+attestations, SBOMs, and history beside the image. Treat it as an availability
+and local-corruption-detection helper, not a complete provenance bundle, and
+follow the preservation checks in the main README.

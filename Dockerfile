@@ -93,7 +93,7 @@ COPY doc/denis-corbin.gpg /tmp/
 RUN set -e; \
     gpg --batch --import /tmp/denis-corbin.gpg \
   && gpg --batch --verify /tmp/dar-${DAR_VERSION}.tar.gz.sig /tmp/dar-${DAR_VERSION}.tar.gz \
-  || (echo "❌ GPG signature verification failed for DAR ${DAR_VERSION}" && exit 1)  \
+  || (echo "ERROR: GPG signature verification failed for DAR ${DAR_VERSION}" >&2 && exit 1)  \
   && tar xzf /tmp/dar-${DAR_VERSION}.tar.gz -C /tmp \
   && rm -f /tmp/denis-corbin.gpg /tmp/dar-${DAR_VERSION}.tar.gz.sig /tmp/dar-${DAR_VERSION}.tar.gz
 
@@ -105,42 +105,60 @@ RUN set -e; \
   && make -j$(nproc) \
   && make install-strip \
   && echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf \
-  && ldconfig \
-  && ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
-       || (echo "❌ DAR ${DAR_VERSION} build failed version check" && exit 1) ) \
-  && rm -f /tmp/dar-${DAR_VERSION}.tar.gz
+  && ldconfig; \
+    if ! dar_version_output="$(/usr/local/bin/dar --version 2>&1)"; then \
+      echo "ERROR: unable to execute newly built DAR ${DAR_VERSION}: ${dar_version_output}" >&2; \
+      exit 1; \
+    fi; \
+    printf '%s\n' "${dar_version_output}" > /tmp/dar-version.txt; \
+    if ! grep -Fq "dar version ${DAR_VERSION}" /tmp/dar-version.txt; then \
+      echo "ERROR: DAR ${DAR_VERSION} build failed version check: ${dar_version_output}" >&2; \
+      exit 1; \
+    fi; \
+    rm -f /tmp/dar-version.txt /tmp/dar-${DAR_VERSION}.tar.gz
 
 
 
 # Verify DAR build capabilities (fail if ANY check is missing)
 RUN set -e; \
     echo "🔍 Verifying DAR feature set..."; \
-    /usr/local/bin/dar -Q --version | tee /tmp/dar_features.txt; \
-    grep -q "gzip compression (libz)      : YES" /tmp/dar_features.txt; \
-    grep -q "bzip2 compression (libbzip2) : YES" /tmp/dar_features.txt; \
-    grep -q "lzo compression (liblzo2)    : YES" /tmp/dar_features.txt; \
-    grep -q "xz compression (liblzma)     : YES" /tmp/dar_features.txt; \
-    grep -q "zstd compression (libzstd)   : YES" /tmp/dar_features.txt; \
-    grep -q "lz4 compression (liblz4)     : YES" /tmp/dar_features.txt; \
-    grep -q "Strong encryption (libgcrypt): YES" /tmp/dar_features.txt; \
-    grep -q "Public key ciphers (gpgme)   : YES" /tmp/dar_features.txt; \
-    grep -q "Extended Attributes support  : YES" /tmp/dar_features.txt; \
-    grep -q "Large files support (> 2GB)  : YES" /tmp/dar_features.txt; \
-    grep -q "ext2fs NODUMP flag support   : YES" /tmp/dar_features.txt; \
-    grep -q "Integer size used            : 64 bits" /tmp/dar_features.txt; \
-    grep -q "Thread safe support          : YES" /tmp/dar_features.txt; \
-    grep -q "Furtive read mode support    : YES" /tmp/dar_features.txt; \
-    grep -q "Linux ext2/3/4 FSA support   : YES" /tmp/dar_features.txt; \
-    grep -q "Linux statx() support        : YES" /tmp/dar_features.txt; \
-    grep -q "Posix fadvise support        : YES" /tmp/dar_features.txt; \
-    grep -q "Large dir. speed optimi.     : YES" /tmp/dar_features.txt; \
-    grep -q "Timestamp read accuracy      : 1 nanosecond" /tmp/dar_features.txt; \
-    grep -q "Timestamp write accuracy     : 1 nanosecond" /tmp/dar_features.txt; \
-    grep -q "Restores dates of symlinks   : YES" /tmp/dar_features.txt; \
-    grep -q "Multiple threads (libthreads): YES" /tmp/dar_features.txt; \
-    grep -q "Delta compression (librsync) : YES" /tmp/dar_features.txt; \
-    grep -q "Remote repository (libcurl)  : YES" /tmp/dar_features.txt; \
-    grep -q "argon2 hashing (libargon2)   : YES" /tmp/dar_features.txt; \
+    if ! /usr/local/bin/dar -Q --version > /tmp/dar_features.txt 2>&1; then \
+      echo "ERROR: unable to read the newly built DAR feature set" >&2; \
+      cat /tmp/dar_features.txt >&2; \
+      exit 2; \
+    fi; \
+    cat /tmp/dar_features.txt; \
+    require_feature() { \
+      if ! grep -Fq "$1" /tmp/dar_features.txt; then \
+        echo "ERROR: DAR build lacks required capability: $2" >&2; \
+        exit 2; \
+      fi; \
+    }; \
+    require_feature "gzip compression (libz)      : YES" "gzip compression"; \
+    require_feature "bzip2 compression (libbzip2) : YES" "bzip2 compression"; \
+    require_feature "lzo compression (liblzo2)    : YES" "lzo compression"; \
+    require_feature "xz compression (liblzma)     : YES" "xz compression"; \
+    require_feature "zstd compression (libzstd)   : YES" "zstd compression"; \
+    require_feature "lz4 compression (liblz4)     : YES" "lz4 compression"; \
+    require_feature "Strong encryption (libgcrypt): YES" "strong encryption"; \
+    require_feature "Public key ciphers (gpgme)   : YES" "public-key ciphers"; \
+    require_feature "Extended Attributes support  : YES" "extended attributes"; \
+    require_feature "Large files support (> 2GB)  : YES" "large-file support"; \
+    require_feature "ext2fs NODUMP flag support   : YES" "ext2fs NODUMP flags"; \
+    require_feature "Integer size used            : 64 bits" "64-bit integers"; \
+    require_feature "Thread safe support          : YES" "thread safety"; \
+    require_feature "Furtive read mode support    : YES" "furtive reads"; \
+    require_feature "Linux ext2/3/4 FSA support   : YES" "Linux ext filesystem attributes"; \
+    require_feature "Linux statx() support        : YES" "Linux statx"; \
+    require_feature "Posix fadvise support        : YES" "POSIX fadvise"; \
+    require_feature "Large dir. speed optimi.     : YES" "large-directory optimization"; \
+    require_feature "Timestamp read accuracy      : 1 nanosecond" "nanosecond timestamp reads"; \
+    require_feature "Timestamp write accuracy     : 1 nanosecond" "nanosecond timestamp writes"; \
+    require_feature "Restores dates of symlinks   : YES" "symlink date restoration"; \
+    require_feature "Multiple threads (libthreads): YES" "multiple threads"; \
+    require_feature "Delta compression (librsync) : YES" "delta compression"; \
+    require_feature "Remote repository (libcurl)  : YES" "remote repositories"; \
+    require_feature "argon2 hashing (libargon2)   : YES" "argon2 hashing"; \
     echo "✅ DAR feature verification passed"
 
 
@@ -273,9 +291,17 @@ RUN set -e; \
 # Refresh linker cache so libdar64 is found
 RUN set -e; \
     ldconfig \
-  && echo "Checking DAR version...\"${DAR_VERSION}\"  " \
-  && ( /usr/local/bin/dar --version | grep -q "dar version ${DAR_VERSION}" \
-       || (echo "❌ DAR ${DAR_VERSION} build failed version check" && exit 1) )
+  && echo "Checking DAR version '${DAR_VERSION}'"; \
+    if ! dar_version_output="$(/usr/local/bin/dar --version 2>&1)"; then \
+      echo "ERROR: unable to execute runtime DAR ${DAR_VERSION}: ${dar_version_output}" >&2; \
+      exit 1; \
+    fi; \
+    printf '%s\n' "${dar_version_output}" > /tmp/dar-version.txt; \
+    if ! grep -Fq "dar version ${DAR_VERSION}" /tmp/dar-version.txt; then \
+      echo "ERROR: runtime DAR ${DAR_VERSION} failed version check: ${dar_version_output}" >&2; \
+      exit 1; \
+    fi; \
+    rm -f /tmp/dar-version.txt
 
 
 # Final cleanup of venv (tests, pip, setuptools, wheel)

@@ -299,6 +299,9 @@ jobs:
             echo "❌ main advanced after refresh orchestration was selected"
             exit 1
           fi
+          orchestration/scripts/verify_docker_tag_available.sh \
+            "${DOCKERHUB_REPO}" \
+            "${REBUILD_VERSION}"
 
       - name: Publish, sign, and verify image
         id: publish_image
@@ -381,7 +384,11 @@ jobs:
         working-directory: housekeeping
         run: |
           SARIF="${{ env.SARIF_FILE }}"
-          source <(python3 scripts/grype_summary_env.py "${SARIF}")
+          if ! GRYPE_COUNTS=$(python3 scripts/grype_summary_env.py "${SARIF}"); then
+            echo "❌ Unable to produce refresh summary from ${SARIF}"
+            exit 1
+          fi
+          source /dev/stdin <<< "${GRYPE_COUNTS}"
 
           echo "## ✅ dar-backup Weekly Refresh v${{ env.REBUILD_VERSION }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "" >> "${GITHUB_STEP_SUMMARY}"

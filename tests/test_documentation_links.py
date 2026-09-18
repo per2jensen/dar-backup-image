@@ -82,3 +82,36 @@ def test_repository_markdown_local_targets_exist() -> None:
     ]
 
     assert missing == []
+
+
+def test_release_documentation_uses_current_rc2_qualification() -> None:
+    """Release instructions require the clean RC2 qualification procedure."""
+    readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+    release_guide = (REPOSITORY_ROOT / "doc" / "Release.md").read_text(
+        encoding="utf-8"
+    )
+    makefile = (REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    for document in (readme, release_guide):
+        assert "make dev-nuke" in document
+        assert "make verify-dev-image" in document
+        assert "make IMAGE=dar-backup:dev test-nobuild" in document
+        assert "dry-run-release" not in document
+    assert "`1.0.0-rc2` and verify:" in release_guide
+    assert "dry-run-release:" not in makefile
+
+
+def test_archive_documentation_describes_checksum_behavior() -> None:
+    """Archive documentation reflects automatic checksum creation and checks."""
+    readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+    release_guide = (REPOSITORY_ROOT / "doc" / "Release.md").read_text(
+        encoding="utf-8"
+    )
+    follow_ups = (
+        REPOSITORY_ROOT / "doc" / "documentation-follow-ups.md"
+    ).read_text(encoding="utf-8")
+
+    assert "does create and subsequently validate a SHA-256 file" in readme
+    assert "creates and validates a SHA-256 checksum" in release_guide
+    assert "records a SHA-256\nchecksum" in follow_ups
+    assert "checksum the saved archive" not in release_guide
