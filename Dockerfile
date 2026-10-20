@@ -37,7 +37,7 @@ RUN --mount=type=bind,from=dar_backup_dist,target=/tmp/dar-backup-dist,ro \
       python3 python3-venv python3-pip gettext-base ca-certificates tzdata file gnupg \
       build-essential autoconf automake libtool pkg-config binutils \
       libkrb5-dev libgcrypt-dev libgpgme-dev libext2fs-dev libthreadar-dev \
-      librsync-dev libcurl4-gnutls-dev libargon2-dev \
+      librsync-dev libcurl4-gnutls-dev libargon2-dev libssh-dev \
       bzip2 zlib1g-dev libbz2-dev liblzo2-dev liblzma-dev libzstd-dev liblz4-dev \
       groff doxygen graphviz upx \
   && /usr/bin/python3 -m venv /opt/venv \
