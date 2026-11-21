@@ -90,6 +90,35 @@ for directory_variable in \
     || { echo "ERROR: failed to create required directory from $directory_variable: $dir" >&2; exit 1; }
 done
 
+# dar-backup 1.1.12 resolves its non-root default below the account's registered
+# home. The image deliberately gives daruser no home, and arbitrary --user UIDs
+# may not have a passwd entry at all, so provide an explicit container-safe
+# default. Keeping it below the backup volume also lets separate containers that
+# share that volume participate in the same advisory lock.
+if [[ ! -v DAR_BACKUP_LOCK_DIR ]]; then
+  DAR_BACKUP_LOCK_DIR="${DAR_BACKUP_DIR}/.dar-backup-locks"
+  if [[ -e "$DAR_BACKUP_LOCK_DIR" || -L "$DAR_BACKUP_LOCK_DIR" ]]; then
+    if [[ ! -d "$DAR_BACKUP_LOCK_DIR" || -L "$DAR_BACKUP_LOCK_DIR" ]]; then
+      echo "ERROR: default lock path is not a real directory: $DAR_BACKUP_LOCK_DIR" >&2
+      exit 1
+    fi
+  elif ! mkdir "$DAR_BACKUP_LOCK_DIR"; then
+    echo "ERROR: unable to create default lock directory: $DAR_BACKUP_LOCK_DIR" >&2
+    exit 1
+  fi
+
+  if ! chmod 700 "$DAR_BACKUP_LOCK_DIR"; then
+    echo "ERROR: unable to secure default lock directory: $DAR_BACKUP_LOCK_DIR" >&2
+    exit 1
+  fi
+  if [[ "$CURRENT_UID" -eq 0 ]] \
+      && ! chown "$RUN_AS_UID:$RUN_AS_GID" "$DAR_BACKUP_LOCK_DIR"; then
+    echo "ERROR: unable to assign default lock directory to UID $RUN_AS_UID / GID $RUN_AS_GID: $DAR_BACKUP_LOCK_DIR" >&2
+    exit 1
+  fi
+  export DAR_BACKUP_LOCK_DIR
+fi
+
 # Only fix ownership if explicitly requested and running as root
 if [ "$CURRENT_UID" -eq 0 ] && [ "$DAR_BACKUP_FIX_PERMS" -eq 1 ]; then
   echo "🔧 Fixing directory permissions for UID $RUN_AS_UID / GID $RUN_AS_GID"

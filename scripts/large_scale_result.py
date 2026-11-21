@@ -503,8 +503,70 @@ def _choice(
     return value
 
 
+def _restoretest_summary(
+    environment: Mapping[str, str], backup_kind: str
+) -> dict[str, Any]:
+    """Build and validate one backup's restore-test evidence.
+
+    Args:
+        environment: Environment values supplied by the test harness.
+        backup_kind: Lowercase FULL, DIFF, or INCR kind.
+
+    Returns:
+        Restore-test status and evidence counts.
+
+    Raises:
+        ValueError: If passed evidence is absent or inconsistent.
+    """
+    prefix = f"LST_{backup_kind.upper()}_RESTORETEST"
+    status = _status(environment, f"{prefix}_STATUS")
+    fields = {
+        "eligible_files": _optional_int(environment, f"{prefix}_ELIGIBLE"),
+        "calculated_files": _optional_int(environment, f"{prefix}_CALCULATED"),
+        "percentage_selected_files": _optional_int(environment, f"{prefix}_SELECTED"),
+        "verified_files": _optional_int(environment, f"{prefix}_FILES"),
+        "data_slices": _optional_int(environment, f"{prefix}_DATA_SLICES"),
+        "covered_slices": _optional_int(environment, f"{prefix}_COVERED"),
+        "predicted_slices": _optional_int(environment, f"{prefix}_PREDICTED"),
+        "extracted_slices": _optional_int(environment, f"{prefix}_EXTRACTED"),
+        "verified_slices": _optional_int(environment, f"{prefix}_VERIFIED"),
+    }
+    if any(value is not None and value < 0 for value in fields.values()):
+        raise ValueError(f"{prefix} counts must not be negative")
+    if status == "passed":
+        missing = [name for name, value in fields.items() if value is None]
+        if missing:
+            raise ValueError(f"Passed {backup_kind} restore test lacks: {', '.join(missing)}")
+        if any(value == 0 for value in fields.values()):
+            raise ValueError(f"Passed {backup_kind} restore test contains a zero count")
+        slice_counts = [
+            fields[name]
+            for name in (
+                "data_slices",
+                "covered_slices",
+                "predicted_slices",
+                "extracted_slices",
+                "verified_slices",
+            )
+        ]
+        if len(set(slice_counts)) != 1:
+            raise ValueError(
+                f"Passed {backup_kind} restore test has incomplete slice coverage: "
+                f"{slice_counts!r}"
+            )
+        selected_files = fields["percentage_selected_files"]
+        verified_files = fields["verified_files"]
+        if selected_files is None or verified_files is None:
+            raise ValueError(f"Passed {backup_kind} restore test lacks file counts")
+        if selected_files > verified_files:
+            raise ValueError(
+                f"Passed {backup_kind} restore test verified fewer files than selected"
+            )
+    return {"status": status, **fields}
+
+
 def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
-    """Build one schema-v10 result record with legacy history compatibility.
+    """Build one schema-v11 result record with legacy history compatibility.
 
     Args:
         environment: Environment values exported by ``large_scale_test.sh``.
@@ -722,6 +784,11 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     min_free_multiplier = _required_int(environment, "LST_MIN_FREE_MULTIPLIER")
     bitrot_enabled = _required_bool(environment, "LST_BITROT_ENABLED")
     bitrot_percent = _required_int(environment, "LST_BITROT_PERCENT")
+    restoretest_percent = _required_int(environment, "LST_RESTORETEST_PERCENT")
+    restoretest_max_files = _required_int(environment, "LST_RESTORETEST_MAX_FILES")
+    restoretest_cover_slices = _required_bool(
+        environment, "LST_RESTORETEST_COVER_SLICES"
+    )
     if slice_size_bytes <= 0:
         raise ValueError("LST_SLICE_SIZE_BYTES must be positive")
     if not 1 <= par2_ratio <= 100:
@@ -730,6 +797,10 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         raise ValueError("Timeout and free-space multiplier must be positive")
     if not 1 <= bitrot_percent <= 100:
         raise ValueError("LST_BITROT_PERCENT must be between 1 and 100")
+    if not 1 <= restoretest_percent <= 100 or restoretest_max_files < 1:
+        raise ValueError("Restore-test percentage and maximum files must be positive")
+    if not restoretest_cover_slices:
+        raise ValueError("Large-scale tests must enable restore-test slice coverage")
 
     backup_statuses = {
         kind: _status(environment, f"LST_{kind.upper()}_BACKUP_STATUS")
@@ -751,6 +822,13 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         kind: _status(environment, f"LST_{kind.upper()}_BITROT_STATUS")
         for kind in BACKUP_KINDS
     }
+    restoretest_summaries = {
+        kind: _restoretest_summary(environment, kind) for kind in BACKUP_KINDS
+    }
+    passed = passed and all(
+        summary["status"] == "passed" for summary in restoretest_summaries.values()
+    )
+    advertise = advertise and passed
     checks = {
         "manager_database": _status(environment, "LST_MANAGER_DB_STATUS"),
         "backup": backup_statuses,
@@ -758,6 +836,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
         "par2_files": par2_file_statuses,
         "par2_verify": par2_verify_statuses,
         "bitrot_repair": bitrot_statuses,
+        "restore_test": restoretest_summaries,
         "delta_contents": {
             "diff": _status(environment, "LST_DIFF_CONTENTS_STATUS"),
             "incr": _status(environment, "LST_INCR_CONTENTS_STATUS"),
@@ -918,6 +997,11 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
             ),
             "corruption_percent": bitrot_percent,
         },
+        "restore_test": {
+            "percentage": restoretest_percent,
+            "maximum_percentage_files": restoretest_max_files,
+            "cover_data_slices": restoretest_cover_slices,
+        },
         "command_timeout_s": command_timeout_s,
         "minimum_free_space_multiplier": min_free_multiplier,
         "full_restore_mode": full_restore_mode,
@@ -990,6 +1074,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
                 par2_file_statuses[kind],
                 par2_verify_statuses[kind],
                 bitrot_statuses[kind],
+                restoretest_summaries[kind]["status"],
             )
         )
         for kind in BACKUP_KINDS
@@ -1072,7 +1157,7 @@ def build_record(environment: Mapping[str, str]) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": 10,
+        "schema_version": 11,
         "datestamp": _required(environment, "LST_DATESTAMP"),
         "date": _required(environment, "LST_DATE"),
         # Stable publication envelope; all other engineering fields may evolve.

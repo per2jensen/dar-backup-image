@@ -47,6 +47,9 @@ ADVERTISE_CLASS=""                                  # --advertise-class: tested 
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
+RESTORETEST_PERCENT=3                               # Percentage of eligible files restored and compared after every backup
+RESTORETEST_MAX_FILES=1000                          # Cap applied only to the percentage sample; slice coverage may add files
+RESTORETEST_COVER_SLICES=true                       # Require verified restore evidence for every data-bearing DAR slice
 FULL_RESTORE_MODE="auto"                            # --full-restore-mode: auto below threshold, forced at any size, or disabled
 FULL_RESTORE_THRESHOLD_GIB=25                       # --full-restore-threshold-gib: inclusive source-size limit used only by auto mode
 FULL_RESTORE_THRESHOLD_BYTES=$((25 * 1024 * 1024 * 1024)) # Derived again after option validation and stored as exact result evidence
@@ -67,7 +70,7 @@ RESTORE_FILESYSTEM_TYPE=""                          # Host filesystem type conta
 SOURCE_FILESYSTEM_DEVICE=""                         # Host st_dev number for MOUNT_ROOT
 RESTORE_FILESYSTEM_DEVICE=""                        # Host st_dev number for FULL_RESTORE_DIR
 OWNERSHIP_FIXTURE_GID=""                            # Supplemental GID used when available, otherwise the invoking user's primary GID
-SCRIPT_VERSION="24"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
+SCRIPT_VERSION="25"                                 # Bumped whenever this script's behavior changes in a way worth tracking alongside JSONL history
 MIN_FREE_MULTIPLIER=2                               # --min-free-multiplier: required free space under BASE_DIR, as a multiple of the estimated source data size
 METRICS_SAMPLE_INTERVAL_SECONDS=5                   # Deliberately coarse resource sample interval; this harness is not a profiler
 DIFF_PRIMER_DIR=""                                  # Set below to "${BASE_DIR}/diff-primer"; synthetic data mutated at each phase to exercise DIFF/INCR/restore logic
@@ -108,6 +111,12 @@ DIFF_MODIFIED_FILE_COUNT=""; DIFF_MODIFIED_APPARENT_BYTES=""
 DIFF_CREATED_FILE_COUNT=""; DIFF_CREATED_BYTES=""; DIFF_DELETED_FILE_COUNT=""
 INCR_MODIFIED_FILE_COUNT=""; INCR_MODIFIED_APPARENT_BYTES=""
 INCR_CREATED_FILE_COUNT=""; INCR_CREATED_BYTES=""; INCR_DELETED_FILE_COUNT=""
+FULL_RESTORETEST_ELIGIBLE=""; FULL_RESTORETEST_CALCULATED=""; FULL_RESTORETEST_SELECTED=""; FULL_RESTORETEST_FILES=""
+FULL_RESTORETEST_DATA_SLICES=""; FULL_RESTORETEST_COVERED=""; FULL_RESTORETEST_PREDICTED=""; FULL_RESTORETEST_EXTRACTED=""; FULL_RESTORETEST_VERIFIED=""
+DIFF_RESTORETEST_ELIGIBLE=""; DIFF_RESTORETEST_CALCULATED=""; DIFF_RESTORETEST_SELECTED=""; DIFF_RESTORETEST_FILES=""
+DIFF_RESTORETEST_DATA_SLICES=""; DIFF_RESTORETEST_COVERED=""; DIFF_RESTORETEST_PREDICTED=""; DIFF_RESTORETEST_EXTRACTED=""; DIFF_RESTORETEST_VERIFIED=""
+INCR_RESTORETEST_ELIGIBLE=""; INCR_RESTORETEST_CALCULATED=""; INCR_RESTORETEST_SELECTED=""; INCR_RESTORETEST_FILES=""
+INCR_RESTORETEST_DATA_SLICES=""; INCR_RESTORETEST_COVERED=""; INCR_RESTORETEST_PREDICTED=""; INCR_RESTORETEST_EXTRACTED=""; INCR_RESTORETEST_VERIFIED=""
 
 # Explicit lifecycle state is serialized by the EXIT trap. Values use the
 # schema-v4 status vocabulary: passed, failed, skipped, or not_run.
@@ -117,6 +126,7 @@ RUN_COMPLETED=0
 RESULT_WRITTEN=0
 MANAGER_DB_STATUS="not_run"
 FULL_BACKUP_STATUS="not_run"; DIFF_BACKUP_STATUS="not_run"; INCR_BACKUP_STATUS="not_run"
+FULL_RESTORETEST_STATUS="not_run"; DIFF_RESTORETEST_STATUS="not_run"; INCR_RESTORETEST_STATUS="not_run"
 FULL_ARCHIVE_STATUS="not_run"; DIFF_ARCHIVE_STATUS="not_run"; INCR_ARCHIVE_STATUS="not_run"
 FULL_PAR2_FILES_STATUS="not_run"; DIFF_PAR2_FILES_STATUS="not_run"; INCR_PAR2_FILES_STATUS="not_run"
 FULL_PAR2_VERIFY_STATUS="not_run"; DIFF_PAR2_VERIFY_STATUS="not_run"; INCR_PAR2_VERIFY_STATUS="not_run"
@@ -522,6 +532,7 @@ RUN_VARIABLES=(
     DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES
     ADVERTISE_REQUESTED TEST_NAME DATASET_ID ADVERTISE_CLASS
     KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER METRICS_SAMPLE_INTERVAL_SECONDS
+    RESTORETEST_PERCENT RESTORETEST_MAX_FILES RESTORETEST_COVER_SLICES
     FULL_RESTORE_MODE FULL_RESTORE_THRESHOLD_GIB FULL_RESTORE_THRESHOLD_BYTES
     RESTORE_METADATA_PROFILE SOURCE_FILESYSTEM_TYPE RESTORE_FILESYSTEM_TYPE
     SOURCE_FILESYSTEM_DEVICE RESTORE_FILESYSTEM_DEVICE OWNERSHIP_FIXTURE_GID
@@ -766,6 +777,9 @@ LOGFILE_LOCATION = ${LOGFILE}
 MAX_SIZE_VERIFICATION_MB = 200
 MIN_SIZE_VERIFICATION_MB = 1
 NO_FILES_VERIFICATION = 5
+RESTORETEST_PERCENT = ${RESTORETEST_PERCENT}
+RESTORETEST_MAX_FILES = ${RESTORETEST_MAX_FILES}
+RESTORETEST_COVER_SLICES = ${RESTORETEST_COVER_SLICES}
 COMMAND_TIMEOUT_SECS = ${TIMEOUT}
 COMMAND_CAPTURE_MAX_BYTES = 102400
 METRICS_DB_PATH = ${METRICS_DB}
@@ -1264,6 +1278,42 @@ count_slices() {
     shopt -u nullglob
     echo "${#slice_files[@]}"
 }
+
+validate_restoretest_evidence() {
+    local backup_type="$1"
+    local archive_name="$2"
+    local variable_prefix="$3"
+    local evidence
+    if ! evidence=$(python3 "${REPO_DIR}/scripts/large_scale_restoretest.py" \
+            --log-file "$LOGFILE" \
+            --metrics-db "$METRICS_DB" \
+            --definition "$DEFINITION_NAME" \
+            --backup-type "$backup_type" \
+            --archive-name "$archive_name" \
+            --percentage "$RESTORETEST_PERCENT"); then
+        return 1
+    fi
+
+    local eligible calculated selected files data_slices covered predicted extracted verified
+    IFS=$'\t' read -r eligible calculated selected files data_slices covered \
+        predicted extracted verified <<< "$evidence"
+    local value
+    for value in "$eligible" "$calculated" "$selected" "$files" "$data_slices" \
+        "$covered" "$predicted" "$extracted" "$verified"; do
+        [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+    done
+
+    printf -v "${variable_prefix}_RESTORETEST_ELIGIBLE" '%s' "$eligible"
+    printf -v "${variable_prefix}_RESTORETEST_CALCULATED" '%s' "$calculated"
+    printf -v "${variable_prefix}_RESTORETEST_SELECTED" '%s' "$selected"
+    printf -v "${variable_prefix}_RESTORETEST_FILES" '%s' "$files"
+    printf -v "${variable_prefix}_RESTORETEST_DATA_SLICES" '%s' "$data_slices"
+    printf -v "${variable_prefix}_RESTORETEST_COVERED" '%s' "$covered"
+    printf -v "${variable_prefix}_RESTORETEST_PREDICTED" '%s' "$predicted"
+    printf -v "${variable_prefix}_RESTORETEST_EXTRACTED" '%s' "$extracted"
+    printf -v "${variable_prefix}_RESTORETEST_VERIFIED" '%s' "$verified"
+    pass "${backup_type} percentage restore verified ${files} file(s); all ${verified} data-bearing slice(s) restored and verified"
+}
 init_manager_db() {
     if docker_run_tool /opt/venv/bin/manager --create-db --config-file "$CONFIG_FILE" --log-stdout >> "$LOGFILE" 2>&1; then
         pass "manager --create-db succeeded"
@@ -1412,6 +1462,9 @@ write_json_record() {
     LST_PAR2_RATIO="$PAR2_RATIO" \
     LST_COMMAND_TIMEOUT_SECONDS="$TIMEOUT" \
     LST_MIN_FREE_MULTIPLIER="$MIN_FREE_MULTIPLIER" \
+    LST_RESTORETEST_PERCENT="$RESTORETEST_PERCENT" \
+    LST_RESTORETEST_MAX_FILES="$RESTORETEST_MAX_FILES" \
+    LST_RESTORETEST_COVER_SLICES="1" \
     LST_BITROT_ENABLED="$DO_BITROT" \
     LST_BITROT_MODE="$BITROT_MODE" \
     LST_BITROT_PERCENT="$BITROT_PERCENT" \
@@ -1453,6 +1506,36 @@ write_json_record() {
     LST_FULL_BACKUP_STATUS="$FULL_BACKUP_STATUS" \
     LST_DIFF_BACKUP_STATUS="$DIFF_BACKUP_STATUS" \
     LST_INCR_BACKUP_STATUS="$INCR_BACKUP_STATUS" \
+    LST_FULL_RESTORETEST_STATUS="$FULL_RESTORETEST_STATUS" \
+    LST_FULL_RESTORETEST_ELIGIBLE="${FULL_RESTORETEST_ELIGIBLE:-}" \
+    LST_FULL_RESTORETEST_CALCULATED="${FULL_RESTORETEST_CALCULATED:-}" \
+    LST_FULL_RESTORETEST_SELECTED="${FULL_RESTORETEST_SELECTED:-}" \
+    LST_FULL_RESTORETEST_FILES="${FULL_RESTORETEST_FILES:-}" \
+    LST_FULL_RESTORETEST_DATA_SLICES="${FULL_RESTORETEST_DATA_SLICES:-}" \
+    LST_FULL_RESTORETEST_COVERED="${FULL_RESTORETEST_COVERED:-}" \
+    LST_FULL_RESTORETEST_PREDICTED="${FULL_RESTORETEST_PREDICTED:-}" \
+    LST_FULL_RESTORETEST_EXTRACTED="${FULL_RESTORETEST_EXTRACTED:-}" \
+    LST_FULL_RESTORETEST_VERIFIED="${FULL_RESTORETEST_VERIFIED:-}" \
+    LST_DIFF_RESTORETEST_STATUS="$DIFF_RESTORETEST_STATUS" \
+    LST_DIFF_RESTORETEST_ELIGIBLE="${DIFF_RESTORETEST_ELIGIBLE:-}" \
+    LST_DIFF_RESTORETEST_CALCULATED="${DIFF_RESTORETEST_CALCULATED:-}" \
+    LST_DIFF_RESTORETEST_SELECTED="${DIFF_RESTORETEST_SELECTED:-}" \
+    LST_DIFF_RESTORETEST_FILES="${DIFF_RESTORETEST_FILES:-}" \
+    LST_DIFF_RESTORETEST_DATA_SLICES="${DIFF_RESTORETEST_DATA_SLICES:-}" \
+    LST_DIFF_RESTORETEST_COVERED="${DIFF_RESTORETEST_COVERED:-}" \
+    LST_DIFF_RESTORETEST_PREDICTED="${DIFF_RESTORETEST_PREDICTED:-}" \
+    LST_DIFF_RESTORETEST_EXTRACTED="${DIFF_RESTORETEST_EXTRACTED:-}" \
+    LST_DIFF_RESTORETEST_VERIFIED="${DIFF_RESTORETEST_VERIFIED:-}" \
+    LST_INCR_RESTORETEST_STATUS="$INCR_RESTORETEST_STATUS" \
+    LST_INCR_RESTORETEST_ELIGIBLE="${INCR_RESTORETEST_ELIGIBLE:-}" \
+    LST_INCR_RESTORETEST_CALCULATED="${INCR_RESTORETEST_CALCULATED:-}" \
+    LST_INCR_RESTORETEST_SELECTED="${INCR_RESTORETEST_SELECTED:-}" \
+    LST_INCR_RESTORETEST_FILES="${INCR_RESTORETEST_FILES:-}" \
+    LST_INCR_RESTORETEST_DATA_SLICES="${INCR_RESTORETEST_DATA_SLICES:-}" \
+    LST_INCR_RESTORETEST_COVERED="${INCR_RESTORETEST_COVERED:-}" \
+    LST_INCR_RESTORETEST_PREDICTED="${INCR_RESTORETEST_PREDICTED:-}" \
+    LST_INCR_RESTORETEST_EXTRACTED="${INCR_RESTORETEST_EXTRACTED:-}" \
+    LST_INCR_RESTORETEST_VERIFIED="${INCR_RESTORETEST_VERIFIED:-}" \
     LST_FULL_ARCHIVE_STATUS="$FULL_ARCHIVE_STATUS" \
     LST_DIFF_ARCHIVE_STATUS="$DIFF_ARCHIVE_STATUS" \
     LST_INCR_ARCHIVE_STATUS="$INCR_ARCHIVE_STATUS" \
@@ -1623,6 +1706,13 @@ if ! FULL_BASE=$(find_archive_base "FULL"); then
     fail "No unique FULL base found"
     exit 1
 fi
+if validate_restoretest_evidence "FULL" "$FULL_BASE" "FULL"; then
+    FULL_RESTORETEST_STATUS="passed"
+else
+    FULL_RESTORETEST_STATUS="failed"
+    fail "FULL percentage/slice restore-test evidence is missing or incomplete"
+    exit 1
+fi
 FULL_SLICES=$(count_slices "$FULL_BASE")
 
 set_current_phase "full_verification"
@@ -1651,6 +1741,13 @@ fi
 
 if ! DIFF_BASE=$(find_archive_base "DIFF"); then
     fail "No unique DIFF base found"
+    exit 1
+fi
+if validate_restoretest_evidence "DIFF" "$DIFF_BASE" "DIFF"; then
+    DIFF_RESTORETEST_STATUS="passed"
+else
+    DIFF_RESTORETEST_STATUS="failed"
+    fail "DIFF percentage/slice restore-test evidence is missing or incomplete"
     exit 1
 fi
 DIFF_SLICES=$(count_slices "$DIFF_BASE")
@@ -1683,6 +1780,13 @@ fi
 
 if ! INCR_BASE=$(find_archive_base "INCR"); then
     fail "No unique INCR base found"
+    exit 1
+fi
+if validate_restoretest_evidence "INCR" "$INCR_BASE" "INCR"; then
+    INCR_RESTORETEST_STATUS="passed"
+else
+    INCR_RESTORETEST_STATUS="failed"
+    fail "INCR percentage/slice restore-test evidence is missing or incomplete"
     exit 1
 fi
 INCR_SLICES=$(count_slices "$INCR_BASE")

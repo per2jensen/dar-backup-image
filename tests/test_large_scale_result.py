@@ -8,7 +8,7 @@
 # License terms and warranty disclaimer:
 # https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
-"""Tests for schema-v10 large-scale test result records."""
+"""Tests for schema-v11 large-scale test result records."""
 
 from __future__ import annotations
 
@@ -75,6 +75,9 @@ def _base_environment() -> dict[str, str]:
         "LST_PAR2_RATIO": "5",
         "LST_COMMAND_TIMEOUT_SECONDS": "86400",
         "LST_MIN_FREE_MULTIPLIER": "2",
+        "LST_RESTORETEST_PERCENT": "3",
+        "LST_RESTORETEST_MAX_FILES": "1000",
+        "LST_RESTORETEST_COVER_SLICES": "1",
         "LST_BITROT_ENABLED": "1",
         "LST_BITROT_MODE": "contiguous",
         "LST_BITROT_PERCENT": "2",
@@ -116,6 +119,9 @@ def _base_environment() -> dict[str, str]:
         "LST_FULL_BACKUP_STATUS": "passed",
         "LST_DIFF_BACKUP_STATUS": "passed",
         "LST_INCR_BACKUP_STATUS": "passed",
+        "LST_FULL_RESTORETEST_STATUS": "passed",
+        "LST_DIFF_RESTORETEST_STATUS": "passed",
+        "LST_INCR_RESTORETEST_STATUS": "passed",
         "LST_FULL_ARCHIVE_STATUS": "passed",
         "LST_DIFF_ARCHIVE_STATUS": "passed",
         "LST_INCR_ARCHIVE_STATUS": "passed",
@@ -166,10 +172,25 @@ def _base_environment() -> dict[str, str]:
         "LST_RESOURCE_LOG_FILE": "",
         "LST_METRICS_SAMPLE_INTERVAL_SECONDS": "5",
     }
+    for backup_kind, data_slices in (("FULL", "12"), ("DIFF", "1"), ("INCR", "1")):
+        prefix = f"LST_{backup_kind}_RESTORETEST"
+        environment.update(
+            {
+                f"{prefix}_ELIGIBLE": "200",
+                f"{prefix}_CALCULATED": "6",
+                f"{prefix}_SELECTED": "6",
+                f"{prefix}_FILES": "8",
+                f"{prefix}_DATA_SLICES": data_slices,
+                f"{prefix}_COVERED": data_slices,
+                f"{prefix}_PREDICTED": data_slices,
+                f"{prefix}_EXTRACTED": data_slices,
+                f"{prefix}_VERIFIED": data_slices,
+            }
+        )
     return environment
 
 
-def test_write_result_completed_run_appends_schema_v10_to_both_histories(
+def test_write_result_completed_run_appends_schema_v11_to_both_histories(
     tmp_path: Path,
 ) -> None:
     """A completed lifecycle writes compatible local and repository evidence.
@@ -194,7 +215,7 @@ def test_write_result_completed_run_appends_schema_v10_to_both_histories(
     )
     assert warnings == []
     assert local_record == mirrored_record
-    assert local_record["schema_version"] == 10
+    assert local_record["schema_version"] == 11
     assert local_record["advertise"] is True
     assert local_record["test_name"] == "Large scale torture test"
     assert local_record["advertise_class"] == "v0.8.0-rc1"
@@ -207,6 +228,13 @@ def test_write_result_completed_run_appends_schema_v10_to_both_histories(
     assert local_record["full_size_bytes"] == 124801234567
     assert local_record["checks"]["pitr_restore"]["overall"] == "passed"
     assert local_record["checks"]["pitr_restore"]["permission_modes"] == "passed"
+    assert local_record["configuration"]["restore_test"] == {
+        "percentage": 3,
+        "maximum_percentage_files": 1000,
+        "cover_data_slices": True,
+    }
+    assert local_record["checks"]["restore_test"]["full"]["verified_slices"] == 12
+    assert local_record["checks"]["restore_test"]["diff"]["verified_files"] == 8
     assert local_record["checks"]["full_restore"] == {
         "mode": "forced",
         "threshold_bytes": 25 * 1024**3,
@@ -521,7 +549,7 @@ def test_write_result_existing_schema_v2_history_remains_readable(
     records = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 2
     assert records[0] == schema_v2_record
-    assert records[1]["schema_version"] == 10
+    assert records[1]["schema_version"] == 11
 
 
 def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> None:
@@ -551,7 +579,7 @@ def test_build_record_includes_incremental_bitrot_evidence(tmp_path: Path) -> No
 
     record = build_record(environment)
 
-    assert record["schema_version"] == 10
+    assert record["schema_version"] == 11
     assert record["bitrot_evidence"] == evidence
 
 

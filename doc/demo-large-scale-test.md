@@ -27,6 +27,11 @@ Key features demonstrated:
 - FULL → DIFF → INCR backup chain, driven through the image's default
   entrypoint exactly as a real user would invoke it
 - `dar -t` integrity checks and `par2 verify` after every backup
+- percentage restore tests after every backup: restore and compare 3% of
+  eligible files, capped at 1,000 percentage-selected files
+- slice restore tests after every backup: add files as needed so every
+  data-bearing DAR slice is extracted and content-verified; missing or
+  inconsistent percentage, metrics, extraction, or slice evidence fails the run
 - Reproducible bitrot simulation with contiguous, fragmented, and archive-edge
   modes: confirm `dar -t` detects the damage, repair every affected slice once
   with its own PAR2 set, and confirm `dar -t` passes again

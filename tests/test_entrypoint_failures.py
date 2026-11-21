@@ -66,6 +66,7 @@ def _entrypoint_environment(
     config = tmp_path / "dar-backup.conf"
     config.write_text("# test config\n", encoding="utf-8")
     environment = os.environ.copy()
+    environment.pop("DAR_BACKUP_LOCK_DIR", None)
     environment.update(
         {
             "PATH": f"{bin_dir}:{environment['PATH']}",
@@ -80,6 +81,107 @@ def _entrypoint_environment(
         }
     )
     return environment
+
+
+def test_entrypoint_default_lock_directory_is_private_and_exported(
+    tmp_path: Path,
+) -> None:
+    """Create and export a private directory when no override is set.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    environment = _entrypoint_environment(tmp_path, chown_exit_code=0)
+    capture_path = tmp_path / "captured-lock-directory"
+    setpriv_path = tmp_path / "bin" / "setpriv"
+    _write_command(
+        setpriv_path,
+        "#!/bin/bash\n"
+        f"printf '%s' \"$DAR_BACKUP_LOCK_DIR\" > {capture_path!s}\n"
+        "exit 0\n",
+    )
+
+    result = subprocess.run(
+        ["bash", str(ENTRYPOINT), "--full-backup"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    expected_lock_directory = Path(environment["DAR_BACKUP_DIR"]) / ".dar-backup-locks"
+    assert result.returncode == 0, result.stderr
+    assert expected_lock_directory.is_dir()
+    assert expected_lock_directory.stat().st_mode & 0o777 == 0o700
+    assert capture_path.read_text(encoding="utf-8") == str(expected_lock_directory)
+
+
+def test_entrypoint_default_lock_path_regular_file_is_fatal(tmp_path: Path) -> None:
+    """Stop with context when the default lock path is not a directory.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    environment = _entrypoint_environment(tmp_path, chown_exit_code=0)
+    backup_directory = Path(environment["DAR_BACKUP_DIR"])
+    backup_directory.mkdir()
+    invalid_lock_path = backup_directory / ".dar-backup-locks"
+    invalid_lock_path.write_text("not a directory\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(ENTRYPOINT), "--full-backup"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "default lock path is not a real directory" in result.stderr
+    assert str(invalid_lock_path) in result.stderr
+
+
+def test_entrypoint_explicit_lock_directory_is_preserved(tmp_path: Path) -> None:
+    """Preserve an operator-provided lock directory unchanged.
+
+    Args:
+        tmp_path: Isolated pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    environment = _entrypoint_environment(tmp_path, chown_exit_code=0)
+    explicit_lock_directory = tmp_path / "operator-locks"
+    explicit_lock_directory.mkdir()
+    environment["DAR_BACKUP_LOCK_DIR"] = str(explicit_lock_directory)
+    capture_path = tmp_path / "captured-lock-directory"
+    setpriv_path = tmp_path / "bin" / "setpriv"
+    _write_command(
+        setpriv_path,
+        "#!/bin/bash\n"
+        f"printf '%s' \"$DAR_BACKUP_LOCK_DIR\" > {capture_path!s}\n"
+        "exit 0\n",
+    )
+
+    result = subprocess.run(
+        ["bash", str(ENTRYPOINT), "--full-backup"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert capture_path.read_text(encoding="utf-8") == str(explicit_lock_directory)
 
 
 def test_entrypoint_requested_ownership_change_succeeds(tmp_path: Path) -> None:
@@ -102,6 +204,9 @@ def test_entrypoint_requested_ownership_change_failure_is_fatal(
 ) -> None:
     """A requested chown failure names the path and cannot be ignored."""
     environment = _entrypoint_environment(tmp_path, chown_exit_code=19)
+    explicit_lock_directory = tmp_path / "operator-locks"
+    explicit_lock_directory.mkdir()
+    environment["DAR_BACKUP_LOCK_DIR"] = str(explicit_lock_directory)
     result = subprocess.run(
         ["bash", str(ENTRYPOINT), "--full-backup"],
         cwd=REPOSITORY_ROOT,
