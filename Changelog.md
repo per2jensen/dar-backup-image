@@ -12,6 +12,20 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 # dar-backup-image Changelog
 
+## Unreleased
+
+### Added
+
+- require every large-scale FULL, DIFF, and INCR backup to restore and compare
+  a three-percent file sample and verified files spanning every data-bearing
+  DAR slice, with explicit structured result evidence
+
+### Fixed
+
+- provision a private default instance-lock directory for container backups so
+  `dar-backup` 1.1.12 works with the image's intentionally nonexistent account
+  home while preserving operator-supplied shared lock directories
+
 ## 1.0.0 - 2026-09-19
 
 ### Changed
