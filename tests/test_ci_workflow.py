@@ -42,6 +42,16 @@ def test_ci_workflow_avoids_network_installation_for_runner_jq() -> None:
     assert workflow.count("- name: Verify jq is available") == 2
 
 
+def test_ci_workflow_installs_extended_attribute_tools() -> None:
+    """The test job installs attr/acl so harness preflight finds setfattr."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    test_job = workflow.split("  test:\n", maxsplit=1)[1].split(
+        "  backup-restore-compare:\n", maxsplit=1
+    )[0]
+
+    assert "sudo apt install -y python3 attr acl" in test_job
+
+
 def test_sbom_summary_requires_checked_out_helper() -> None:
     """The always-run summary is skipped when checkout did not provide its script."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")

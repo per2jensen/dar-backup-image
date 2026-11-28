@@ -154,7 +154,7 @@ jobs:
           echo "TIMESTAMP=${TIMESTAMP}" >> "${GITHUB_ENV}"
 
       - name: Install dependencies
-        run: sudo apt-get install -y python3-pytest
+        run: sudo apt-get install -y python3-pytest attr acl
 
       - name: Install pinned Syft and Grype
         working-directory: orchestration

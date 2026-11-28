@@ -80,7 +80,7 @@ jobs:
       - name: Install required system packages
         run: |
           sudo apt update
-          sudo apt install -y python3
+          sudo apt install -y python3 attr acl
 
       - name: Create and prepare Python virtual environment
         run: |

@@ -124,7 +124,7 @@ jobs:
       - name: dependencies
         working-directory: source
         run: |
-          sudo apt-get install -y python3-pytest
+          sudo apt-get install -y python3-pytest attr acl
 
 
 
