@@ -27,6 +27,9 @@ from typing import Any, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
+# REUSE-IgnoreStart
+# The generated Markdown embeds the repository license header verbatim. These
+# literal tag strings are template data, not this file's own declarations.
 GENERATED_FILE_LICENSE_HEADER = (
     "<!--\n"
     "SPDX-FileCopyrightText: 2025-2026 Per Jensen\n"
@@ -40,6 +43,7 @@ GENERATED_FILE_LICENSE_HEADER = (
     "https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE\n"
     "-->"
 )
+# REUSE-IgnoreEnd
 
 STATUS_LABELS = {
     "pass": "Pass",

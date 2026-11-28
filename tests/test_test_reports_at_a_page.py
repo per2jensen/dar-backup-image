@@ -144,6 +144,9 @@ def test_build_report_emits_license_header(tmp_path: Path) -> None:
     )
 
     markdown = output_path.read_text(encoding="utf-8")
+    # REUSE-IgnoreStart
+    # The assertions below name the required header tags; they are test data,
+    # not this file's own licensing declarations.
     assert "SPDX-FileCopyrightText:" in markdown
     assert "SPDX-License-Identifier: GPL-3.0-or-later" in markdown
     assert "https://github.com/per2jensen/dar-backup-image" in markdown
@@ -151,6 +154,7 @@ def test_build_report_emits_license_header(tmp_path: Path) -> None:
         "https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE"
         in markdown
     )
+    # REUSE-IgnoreEnd
 
 
 def test_build_report_renders_bitrot_method_and_extent_columns(
