@@ -12,13 +12,17 @@ https://github.com/per2jensen/dar-backup-image/blob/main/LICENSE
 
 # dar-backup-image Changelog
 
-## Unreleased
+## 1.0.1 2026-11-28
 
 ### Added
 
 - require every large-scale FULL, DIFF, and INCR backup to restore and compare
   a three-percent file sample and verified files spanning every data-bearing
   DAR slice, with explicit structured result evidence
+
+## Changed
+
+- dar-backup version 1.1.12 now used
 
 ### Fixed
 
