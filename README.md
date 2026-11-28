@@ -628,6 +628,9 @@ For details on behavior, UID/GID handling, and usage examples, see the comments 
 
 See [dev.md](dev.md) for development-image build and test instructions.
 
+The one-page large-scale test report — [Test reports at a page](doc/test-report/test-reports-at-a-page.md) —
+summarises every tracked run with its outcome, sizes, durations, and memory charts.
+
 ## Image Tags
 
 All images are published to [Docker Hub](https://hub.docker.com/r/per2jensen/dar-backup/tags).

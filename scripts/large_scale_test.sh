@@ -47,6 +47,7 @@ ADVERTISE_CLASS=""                                  # --advertise-class: tested 
 KEEP=0                                              # --keep: when 1, RUN_DIR is left on disk after the run instead of being deleted by cleanup()
 SMOKETEST=0                                         # --smoketest: when 1, skips mirroring this run's JSONL record into the tracked repo history file
 TIMEOUT=86400                                       # --timeout: COMMAND_TIMEOUT_SECS written into the generated config (dar/par2/manager command timeout, seconds)
+INCR_MUTATION_DELAY_SECONDS=150                     # --incr-mutation-delay: pause before mutating primer data for INCR, keeping primer mtimes clearly separated in the logs
 RESTORETEST_PERCENT=3                               # Percentage of eligible files restored and compared after every backup
 RESTORETEST_MAX_FILES=1000                          # Cap applied only to the percentage sample; slice coverage may add files
 RESTORETEST_COVER_SLICES=true                       # Require verified restore evidence for every data-bearing DAR slice
@@ -124,6 +125,7 @@ CURRENT_PHASE="preflight"
 RUN_RESULT_READY=0
 RUN_COMPLETED=0
 RESULT_WRITTEN=0
+METRICS_PREPARED=0
 MANAGER_DB_STATUS="not_run"
 FULL_BACKUP_STATUS="not_run"; DIFF_BACKUP_STATUS="not_run"; INCR_BACKUP_STATUS="not_run"
 FULL_RESTORETEST_STATUS="not_run"; DIFF_RESTORETEST_STATUS="not_run"; INCR_RESTORETEST_STATUS="not_run"
@@ -152,8 +154,34 @@ banner() { echo -e "\n${BOLD}${CYAN}══════════════�
 FAILURES=0
 
 usage() {
-    grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,2\}//'
-    exit 0
+    cat <<'EOF'
+Usage: large_scale_test.sh --definition <body> [options]
+
+Required:
+  --definition <body>          Backup definition body with -R/-g/-P lines.
+
+Options:
+  --base <path>                Root directory for runs/, results/, and diff-primer
+                               (default: /data/tmp/image-large-scale-test).
+  --image <image>              Docker image under test (default: dar-backup:dev).
+  --slice <size>               DAR slice size when the definition omits one (default: 10G).
+  --par2-ratio <1-100>         PAR2 error-correction percentage (default: 5).
+  --bitrot                     Enable corruption + PAR2 repair testing.
+  --bitrot-seed <u64>          Unsigned 64-bit bitrot seed (requires --bitrot).
+  --bitrot-mode <mode>         contiguous, fragmented, or edges (default: contiguous).
+  --advertise                  Request publication of a passing, eligible result.
+  --test-name <name>           Human-readable badge label for the run.
+  --dataset-id <id>            Optional opaque corpus identity.
+  --advertise-class <class>    Tested version/class for the badge.
+  --keep                       Keep the run directory after completion.
+  --smoketest                  Do not mirror the result into the tracked history file.
+  --timeout <seconds>          Command timeout written into the generated config.
+  --min-free-multiplier <n>    Required free space as a multiple of source size.
+  --incr-mutation-delay <secs> Pause before INCR primer mutation (default: 150).
+  --full-restore-mode <mode>   auto, forced, or disabled (default: auto).
+  --full-restore-threshold-gib <n>  Auto-restore threshold in GiB (default: 25).
+  --help, -h                   Show this help text.
+EOF
 }
 
 while [[ $# -gt 0 ]]; do
@@ -173,11 +201,12 @@ while [[ $# -gt 0 ]]; do
         --keep)       KEEP=1;                  shift   ;;
         --smoketest)  SMOKETEST=1;             shift   ;;
         --timeout)    TIMEOUT="$2";            shift 2 ;;
+        --incr-mutation-delay) INCR_MUTATION_DELAY_SECONDS="$2"; shift 2 ;;
         --min-free-multiplier) MIN_FREE_MULTIPLIER="$2"; shift 2 ;;
         --full-restore-mode) FULL_RESTORE_MODE="$2"; shift 2 ;;
         --full-restore-threshold-gib) FULL_RESTORE_THRESHOLD_GIB="$2"; shift 2 ;;
-        --help|-h)    usage ;;
-        *) echo "Unknown option: $1"; usage ;;
+        --help|-h)    usage; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
 
@@ -185,6 +214,7 @@ done
 [[ -z "$TEST_NAME" ]] && { echo "ERROR: --test-name must not be empty" >&2; exit 1; }
 [[ "$PAR2_RATIO" =~ ^([1-9]|[1-9][0-9]|100)$ ]] || { echo "ERROR: --par2-ratio must be an integer from 1 through 100" >&2; exit 1; }
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --timeout must be a positive integer" >&2; exit 1; }
+[[ "$INCR_MUTATION_DELAY_SECONDS" =~ ^[0-9]+$ ]] || { echo "ERROR: --incr-mutation-delay must be a non-negative integer" >&2; exit 1; }
 [[ "$MIN_FREE_MULTIPLIER" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --min-free-multiplier must be a positive integer" >&2; exit 1; }
 if [[ -n "$DATASET_ID" && ! "$DATASET_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
     echo "ERROR: --dataset-id must be 1-128 characters using letters, digits, '.', '_', or '-'" >&2
@@ -222,6 +252,11 @@ if ! SLICE_SIZE_BYTES=$(python3 "$(dirname "${BASH_SOURCE[0]}")/large_scale_defi
     exit 1
 fi
 [[ "$SLICE_SIZE_BYTES" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: unable to convert the effective slice size to bytes" >&2; exit 1; }
+
+# Normalize the user-supplied base path once so trailing or repeated slashes do
+# not later produce mismatched primer-relative paths (e.g. "/data/tmp/foo/"
+# would otherwise yield "/data/tmp/foo//diff-primer" when prefix-stripped).
+BASE_DIR="$(printf '%s' "$BASE_DIR" | sed -e 's#//\+#/#g' -e 's#/$##')"
 
 if [[ $DO_BITROT -eq 0 ]]; then
     FULL_BITROT_STATUS="skipped"
@@ -531,7 +566,7 @@ RUN_VARIABLES=(
     BASE_DIR DEFINITION_NAME DEFINITION_CONTENT SLICE_SIZE SLICE_SIZE_BYTES SLICE_SIZE_SOURCE PAR2_RATIO
     DO_BITROT BITROT_SEED BITROT_MODE BITROT_PERCENT BITROT_BUFFER_BYTES
     ADVERTISE_REQUESTED TEST_NAME DATASET_ID ADVERTISE_CLASS
-    KEEP SMOKETEST TIMEOUT MIN_FREE_MULTIPLIER METRICS_SAMPLE_INTERVAL_SECONDS
+    KEEP SMOKETEST TIMEOUT INCR_MUTATION_DELAY_SECONDS MIN_FREE_MULTIPLIER METRICS_SAMPLE_INTERVAL_SECONDS
     RESTORETEST_PERCENT RESTORETEST_MAX_FILES RESTORETEST_COVER_SLICES
     FULL_RESTORE_MODE FULL_RESTORE_THRESHOLD_GIB FULL_RESTORE_THRESHOLD_BYTES
     RESTORE_METADATA_PROFILE SOURCE_FILESYSTEM_TYPE RESTORE_FILESYSTEM_TYPE
@@ -594,6 +629,7 @@ set_current_phase() {
 # system-wide scan can't tell "this test's dar" from "an unrelated concurrent
 # dar-backup cron run" apart.
 docker_run_backup() {
+    local rc=0
     rm -f "$CID_FILE"
     docker run --rm \
         --cidfile "$CID_FILE" \
@@ -601,16 +637,26 @@ docker_run_backup() {
         -e RUN_AS_GID="$(id -g)" \
         -v "${MOUNT_ROOT}":"${MOUNT_ROOT}":ro \
         -v "${BASE_DIR}":"${BASE_DIR}" \
-        "$IMAGE" "$@"
-    local rc=$?
+        "$IMAGE" "$@" || rc=$?
     rm -f "$CID_FILE"
-    return $rc
+    return "$rc"
 }
 
 # docker_run_tool: runs a single binary (manager/dar/par2) directly inside the
 # image, bypassing entrypoint.sh — same pattern scripts/backup-restore-compare.sh
 # uses for these tools. Only needs BASE_DIR; none of these operate on MOUNT_ROOT.
+# docker_run_tool_ro is the read-only variant for verification-only commands
+# (dar -t, dar -l, par2 verify) so those never receive write access to BASE_DIR.
 docker_run_tool() {
+    _docker_run_tool "rw" "$@"
+}
+
+docker_run_tool_ro() {
+    _docker_run_tool "ro" "$@"
+}
+
+_docker_run_tool() {
+    local mount_mode="$1"; shift
     local tool_entrypoint="$1"; shift
     local primary_gid
     local supplemental_gid
@@ -620,6 +666,7 @@ docker_run_tool() {
         [[ -z "$supplemental_gid" || "$supplemental_gid" == "$primary_gid" ]] && continue
         supplemental_group_args+=(--group-add "$supplemental_gid")
     done < <(id -G | tr ' ' '\n')
+    local rc=0
     rm -f "$CID_FILE"
     docker run --rm \
         --cidfile "$CID_FILE" \
@@ -627,11 +674,10 @@ docker_run_tool() {
         "${supplemental_group_args[@]}" \
         -e HOME=/tmp \
         --entrypoint "$tool_entrypoint" \
-        -v "${BASE_DIR}":"${BASE_DIR}" \
-        "$IMAGE" "$@"
-    local rc=$?
+        -v "${BASE_DIR}":"${BASE_DIR}":"${mount_mode}" \
+        "$IMAGE" "$@" || rc=$?
     rm -f "$CID_FILE"
-    return $rc
+    return "$rc"
 }
 
 # Ownership-preserving extraction is the only large-scale-test operation that
@@ -887,7 +933,7 @@ verify_diff_contents() {
     local diff_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     local ok=1
     banner "Phase 2b — DIFF contents verification"
-    local diff_saved; diff_saved=$(docker_run_tool /usr/local/bin/dar -l "${BACKUP_DIR}/${diff_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
+    local diff_saved; diff_saved=$(docker_run_tool_ro /usr/local/bin/dar -l "${BACKUP_DIR}/${diff_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
     # grep -c already prints "0" (with exit 1) on no match; the `|| true` below only
     # guards against set -e aborting the script, it must not print a second fallback
     # value the way `|| echo 0` used to (which silently corrupted the count to "0\n0").
@@ -934,7 +980,7 @@ verify_incr_contents() {
     local diff_base="$1" incr_base="$2" primer_rel="${DIFF_PRIMER_DIR#"$MOUNT_ROOT"/}"
     local ok=1
     banner "Phase 2c — INCR contents verification"
-    local incr_saved; incr_saved=$(docker_run_tool /usr/local/bin/dar -l "${BACKUP_DIR}/${incr_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
+    local incr_saved; incr_saved=$(docker_run_tool_ro /usr/local/bin/dar -l "${BACKUP_DIR}/${incr_base}" --noconf -am -as -Q 2>/dev/null | grep "\[Saved\]" | grep "${primer_rel}" || true)
     local modified_count; modified_count=$(echo "$incr_saved" | grep -v "incr_new_" | { grep -c "${primer_rel}" || true; } 2>/dev/null)
     local new_count; new_count=$(echo "$incr_saved" | { grep -c "incr_new_" || true; } 2>/dev/null)
     if [[ "${modified_count}" -ge "${PRIMER_NON_LINK_COUNT}" ]]; then
@@ -1048,7 +1094,7 @@ check_par2_per_slice() {
 
 check_dar_integrity() {
     info "Running dar -t on $2..."
-    if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${1}" -N -Q >> "$LOGFILE" 2>&1; then
+    if docker_run_tool_ro /usr/local/bin/dar -t "${BACKUP_DIR}/${1}" -N -Q >> "$LOGFILE" 2>&1; then
         pass "dar -t passed: $2"
         return 0
     fi
@@ -1070,7 +1116,7 @@ check_par2_verify() {
     fi
 
     for par2_file in "${par2_files[@]}"; do
-        docker_run_tool /usr/bin/par2 verify -B "$BACKUP_DIR" -q "$par2_file" >> "$LOGFILE" 2>&1 || { fail "par2 verify FAILED: $(basename "$par2_file")"; all_ok=0; }
+        docker_run_tool_ro /usr/bin/par2 verify -B "$BACKUP_DIR" -q "$par2_file" >> "$LOGFILE" 2>&1 || { fail "par2 verify FAILED: $(basename "$par2_file")"; all_ok=0; }
     done
     [[ $all_ok -eq 1 ]] && pass "par2 verify passed all slices: ${label}"
     return $((1 - all_ok))
@@ -1155,7 +1201,7 @@ do_bitrot_test() {
         fi
         info "Corrupting $(basename "$slice_path"): region=${region_index}, offset=${offset_bytes}, bytes=${length_bytes}, slice_bytes=${slice_bytes}"
         if ! dd if=/dev/urandom of="$slice_path" \
-            bs=1M iflag=fullblock,count_bytes oflag=seek_bytes \
+            bs="$BITROT_BUFFER_BYTES" iflag=fullblock,count_bytes oflag=seek_bytes \
             seek="$offset_bytes" count="$length_bytes" \
             conv=notrunc status=none >> "$LOGFILE" 2>&1; then
             fail "Unable to inject bitrot into $(basename "$slice_path")"
@@ -1176,7 +1222,7 @@ do_bitrot_test() {
         return 1
     fi
 
-    if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
+    if docker_run_tool_ro /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
         fail "dar -t missed corruption"
         if ! update_bitrot_phase_evidence "$phase" \
             --dar-detected-corruption failed --status failed; then
@@ -1252,7 +1298,7 @@ do_bitrot_test() {
     fi
     pass "par2 repair succeeded for ${#segment_paths[@]} affected slice(s)"
 
-    if docker_run_tool /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
+    if docker_run_tool_ro /usr/local/bin/dar -t "${BACKUP_DIR}/${archive_base}" -N -Q >> "$LOGFILE" 2>&1; then
         if ! update_bitrot_phase_evidence "$phase" \
             --dar-verify-after-repair passed --status passed; then
             fail "Unable to record post-repair DAR verification"
@@ -1390,6 +1436,8 @@ bytes_to_gib() {
 }
 
 prepare_result_metrics() {
+    [[ "${METRICS_PREPARED:-0}" -eq 1 ]] && return 0
+    METRICS_PREPARED=1
     MAX_DAR_BACKUP=$(calc_max_rss "dar-backup")
     MAX_DAR=$(calc_max_rss "dar")
     MAX_PAR2=$(calc_max_rss "par2")
@@ -1412,11 +1460,17 @@ write_json_record() {
     local exit_status="$1"
     local effective_repo_dir="${REPO_DIR:-}"
     local db_mib dar_mib_value par2_mib manager_mib
+    local restoretest_cover_slices_value
 
     db_mib=$(awk '{print $1}' <<< "${MAX_DAR_BACKUP:-N/A}")
     dar_mib_value=$(awk '{print $1}' <<< "${MAX_DAR:-N/A}")
     par2_mib=$(awk '{print $1}' <<< "${MAX_PAR2:-N/A}")
     manager_mib=$(awk '{print $1}' <<< "${MAX_MANAGER:-N/A}")
+    if [[ "${RESTORETEST_COVER_SLICES:-true}" == "true" ]]; then
+        restoretest_cover_slices_value=1
+    else
+        restoretest_cover_slices_value=0
+    fi
 
     if [[ $SMOKETEST -eq 1 ]]; then
         effective_repo_dir=""
@@ -1464,7 +1518,7 @@ write_json_record() {
     LST_MIN_FREE_MULTIPLIER="$MIN_FREE_MULTIPLIER" \
     LST_RESTORETEST_PERCENT="$RESTORETEST_PERCENT" \
     LST_RESTORETEST_MAX_FILES="$RESTORETEST_MAX_FILES" \
-    LST_RESTORETEST_COVER_SLICES="1" \
+    LST_RESTORETEST_COVER_SLICES="$restoretest_cover_slices_value" \
     LST_BITROT_ENABLED="$DO_BITROT" \
     LST_BITROT_MODE="$BITROT_MODE" \
     LST_BITROT_PERCENT="$BITROT_PERCENT" \
@@ -1763,8 +1817,8 @@ if verify_diff_contents "$FULL_BASE" "$DIFF_BASE"; then DIFF_CONTENTS_STATUS="pa
 # ── PHASE 2c ──
 set_current_phase "incr_backup"
 banner "Phase 2c — INCR backup"
-info "Waiting ~2-3 minutes before mutating data for INCR (keeps primer mtimes cleanly separated in the log)..."
-sleep 150
+info "Waiting ${INCR_MUTATION_DELAY_SECONDS}s before mutating data for INCR (keeps primer mtimes cleanly separated in the log)..."
+sleep "$INCR_MUTATION_DELAY_SECONDS"
 update_incr_primer
 t0=$(date +%s)
 if docker_run_backup -I -d "$DEFINITION_NAME" --config-file "$CONFIG_FILE" --darrc "$DARRC" --log-level debug; then

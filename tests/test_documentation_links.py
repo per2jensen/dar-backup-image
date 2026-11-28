@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlsplit
 REPOSITORY_ROOT = Path(__file__).parents[1]
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)")
 HTML_LINK_RE = re.compile(r"href=[\"']([^\"']+)[\"']")
+IMG_SRC_RE = re.compile(r"(?<![\w-])src=[\"']([^\"']+)[\"']")
 
 
 def _missing_local_targets(markdown_path: Path) -> list[str]:
@@ -38,7 +39,11 @@ def _missing_local_targets(markdown_path: Path) -> list[str]:
         raise ValueError(f"documentation path must be Markdown: {markdown_path}")
 
     content = markdown_path.read_text(encoding="utf-8")
-    targets = MARKDOWN_LINK_RE.findall(content) + HTML_LINK_RE.findall(content)
+    targets = (
+        MARKDOWN_LINK_RE.findall(content)
+        + HTML_LINK_RE.findall(content)
+        + IMG_SRC_RE.findall(content)
+    )
     missing: list[str] = []
     for raw_target in targets:
         target = raw_target.strip("<>")
@@ -70,6 +75,28 @@ def test_local_link_checker_reports_missing_target(tmp_path: Path) -> None:
     source.write_text("[Missing](missing.md)\n", encoding="utf-8")
 
     assert _missing_local_targets(source) == [f"{source}: missing.md"]
+
+
+def test_local_link_checker_accepts_existing_image_target(tmp_path: Path) -> None:
+    """An existing relative image source produces no missing-link result."""
+    target = tmp_path / "chart.png"
+    target.write_bytes(b"\x89PNG\r\n")
+    source = tmp_path / "source.md"
+    source.write_text(
+        '<img src="chart.png" alt="Chart" width="100%">\n', encoding="utf-8"
+    )
+
+    assert _missing_local_targets(source) == []
+
+
+def test_local_link_checker_reports_missing_image_target(tmp_path: Path) -> None:
+    """A missing relative image source is reported with source context."""
+    source = tmp_path / "source.md"
+    source.write_text(
+        '<img src="missing.png" alt="Chart" width="100%">\n', encoding="utf-8"
+    )
+
+    assert _missing_local_targets(source) == [f"{source}: missing.png"]
 
 
 def test_repository_markdown_local_targets_exist() -> None:
